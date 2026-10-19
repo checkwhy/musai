@@ -1,0 +1,113 @@
+[
+  {
+    "name": "released",
+    "verdict": "verified",
+    "entitlement": "covered",
+    "what": "every root released by closure and each attestation on its own, to maintainers, cut for known",
+    "codes": [
+      "ref.pin-absent"
+    ]
+  },
+  {
+    "name": "sealed",
+    "verdict": "verified",
+    "entitlement": "covered",
+    "what": "as released, with the ruling sealed from peer: a seal hides a record from a station and leaves what an export carries unchanged",
+    "codes": [
+      "ref.pin-absent"
+    ]
+  },
+  {
+    "name": "sealed-closure",
+    "verdict": "verified",
+    "entitlement": "covered",
+    "what": "as sealed, the seal naming the ruling's closure: a seal of any extent leaves what an export carries unchanged",
+    "codes": [
+      "ref.pin-absent"
+    ]
+  },
+  {
+    "name": "sealed-explicit-record",
+    "verdict": "failed",
+    "entitlement": "covered",
+    "what": "as sealed, the seal naming extent record by hand, which the kernel never holds: a seal of the record alone names no extent, and the release of the seal then cites a record not held",
+    "codes": [
+      "record.unreadable",
+      "ref.dangling",
+      "ref.pin-absent"
+    ]
+  },
+  {
+    "name": "revoked",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as released, with a revocation superseding each release",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "unauthorised",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "released by a signer the roles file grants nothing",
+    "codes": [
+      "ref.pin-absent",
+      "release.unauthorised",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "relayed",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as released, every release relayed through a model, which stands for no audience",
+    "codes": [
+      "ref.pin-absent",
+      "release.relayed",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "outside-audience",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "released to peer, cut for known, which peer does not cover",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "outside-window",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "released until before the bundle was cut",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered",
+      "release.window"
+    ]
+  },
+  {
+    "name": "unknown-form",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "released at a later schema version to an audience form this grammar lacks, written by hand: read, not checked, covering nothing",
+    "codes": [
+      "ref.pin-absent",
+      "release.audience-unknown",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "no-manifest",
+    "verdict": "verified",
+    "entitlement": "unchecked",
+    "what": "released as the first case, with no bundle.json to name an audience",
+    "codes": [
+      "ref.pin-absent"
+    ]
+  }
+]

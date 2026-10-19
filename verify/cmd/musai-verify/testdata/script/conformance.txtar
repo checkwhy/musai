@@ -1,0 +1,11 @@
+# The corpus the kernel writes passes against this verifier, case by case.
+exec musai-verify conformance $CONFORMANCE
+stdout '^pass  canonical  empty-object$'
+stdout '^pass  differential  3000 values$'
+stdout '^pass  references  the table this verifier embeds$'
+stdout '^pass  bundles  salted$'
+stdout '^pass  bundles  wrong-kind-directory$'
+stdout '^pass  exports  released$'
+stdout '^pass  frozen  attestation-by-key$'
+stdout '^passed: 50 of 50 cases$'
+! stdout '^fail'

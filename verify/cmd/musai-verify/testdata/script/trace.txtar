@@ -1,0 +1,16 @@
+# trace walks from a claim, named by a prefix of its id, to the ruling over
+# it, the brief that ruling saw and the signature behind it.
+exec musai-verify trace --source $CONFORMANCE/bundles/passing 921e892d
+stdout '^claim sha256:921e892da524cdff8699d6025fc8fd4c3b735fec451ab5c2b0c7e90fee7d3f68 '
+stdout '← \$\.claim of ruling 4c006fc58e70…  holds'
+stdout '\$\.brief → run 946cb831732c…  brief · performer not recorded · determinism not recorded'
+stdout '← \$\.subject of attestation 42eb14cc4376…  made by florin via tty · signature verified'
+! stdout 'does not verify'
+
+exec musai-verify trace --json --source $CONFORMANCE/bundles/passing 921e892d
+stdout '^\{"edges":\['
+
+# Walking a bundle that does not verify says so.
+exec musai-verify trace --source $CONFORMANCE/bundles/dangling-reference 4c006fc5
+stdout '\$\.brief → sha256:946cb831732cdcf0a2fe465c7acb49e48fdb4015c92d7efc86ea930b4385e679  not in the source'
+stdout 'the source does not verify'

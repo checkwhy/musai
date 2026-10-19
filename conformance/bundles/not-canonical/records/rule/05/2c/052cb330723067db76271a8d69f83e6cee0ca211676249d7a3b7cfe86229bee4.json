@@ -1,0 +1,9 @@
+{
+ "kind": "rule",
+ "name": "hygiene-on-linux",
+ "schemaVersion": 1,
+ "scope": {
+  "platform": "linux"
+ },
+ "weight": "1"
+}

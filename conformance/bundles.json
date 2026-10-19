@@ -1,0 +1,189 @@
+[
+  {
+    "name": "passing",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "what": "the fixture as it is"
+  },
+  {
+    "name": "unsigned",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "what": "the attestation's sidecar removed"
+  },
+  {
+    "name": "salted",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "what": "the fixture's claim, argument, ruling, case and artifact, each read at its kind's current version and salted under a workspace key, beside the fixture"
+  },
+  {
+    "name": "flipped-byte",
+    "verdict": "failed",
+    "codes": [
+      "record.id-mismatch",
+      "ref.dangling",
+      "ref.pin-absent"
+    ],
+    "what": "one byte of the ruling changed, so the ruling the attestation names is no longer held"
+  },
+  {
+    "name": "sidecar-over-other-bytes",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.bad"
+    ],
+    "what": "an attestation one second later carrying the original attestation's signature"
+  },
+  {
+    "name": "principal-absent",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.principal-unknown"
+    ],
+    "what": "allowed-signers names the key under another principal"
+  },
+  {
+    "name": "dangling-reference",
+    "verdict": "failed",
+    "codes": [
+      "ref.dangling",
+      "ref.pin-absent"
+    ],
+    "what": "the brief run removed: the ruling's brief and the artifact's receipt anchor name nothing held"
+  },
+  {
+    "name": "wrong-id-path",
+    "verdict": "failed",
+    "codes": [
+      "record.id-mismatch",
+      "ref.dangling",
+      "ref.pin-absent"
+    ],
+    "what": "the claim stored under another id's path"
+  },
+  {
+    "name": "wrong-kind-directory",
+    "verdict": "failed",
+    "codes": [
+      "record.path-mismatch",
+      "ref.pin-absent"
+    ],
+    "what": "the claim stored under the case directory"
+  },
+  {
+    "name": "not-canonical",
+    "verdict": "failed",
+    "codes": [
+      "record.not-canonical",
+      "ref.pin-absent"
+    ],
+    "what": "the rule stored indented at its canonical id's path"
+  },
+  {
+    "name": "not-nfc",
+    "verdict": "failed",
+    "codes": [
+      "record.not-nfc",
+      "ref.pin-absent"
+    ],
+    "what": "a rule whose scope names a dimension in decomposed form, which a statement never takes"
+  },
+  {
+    "name": "unlisted-id",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "ref.unlisted"
+    ],
+    "what": "a rule whose name is a record id, a path the reference table does not name"
+  },
+  {
+    "name": "orphan-sidecar",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.orphan"
+    ],
+    "what": "a signature beside no attestation"
+  },
+  {
+    "name": "bare-principal",
+    "verdict": "failed",
+    "codes": [
+      "record.unreadable",
+      "ref.pin-absent"
+    ],
+    "what": "the fixture's attestation written by hand at the current version, where its principal's bare name is never held"
+  },
+  {
+    "name": "other-namespace",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.namespace"
+    ],
+    "what": "signed under the namespace file rather than musai"
+  },
+  {
+    "name": "namespace-not-permitted",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.namespace-not-permitted"
+    ],
+    "what": "the signer's line permits only the namespace git"
+  },
+  {
+    "name": "not-yet-valid",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.not-yet-valid"
+    ],
+    "what": "the signer's key is valid only after the attestation's own time"
+  },
+  {
+    "name": "expired",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.expired"
+    ],
+    "what": "the signer's key expired before the attestation's own time"
+  },
+  {
+    "name": "window-held",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "what": "the signer's key is valid over a window holding the attestation's own time, for two namespaces"
+  },
+  {
+    "name": "key-principal",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "what": "an attestation at the current version naming its signer by key, the key's line listing that form beside a name"
+  },
+  {
+    "name": "key-mismatch",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "sig.principal-unknown",
+      "trust.key-mismatch"
+    ],
+    "what": "an attestation naming one key signed by another, whose line lists the first key's form: one key never speaks as another"
+  }
+]

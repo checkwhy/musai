@@ -1,0 +1,19 @@
+# A bundle that verifies says so, with what it covered, and exits 0.
+exec musai-verify verify $CONFORMANCE/bundles/passing
+stdout '^warning +ref\.pin-absent '
+stdout '^info +sig\.verified '
+stdout '^verified: 9 records, 1 signature verified, 0 errors, 1 warning$'
+stdout '^signatures checked against the bundle''s own allowed-signers: whoever sent it chose them; pass --trust for keys you chose$'
+! stderr .
+
+# A tampered bundle names what failed and exits 3.
+! exec musai-verify verify $CONFORMANCE/bundles/flipped-byte
+stdout '^error +record\.id-mismatch '
+stdout '^error +ref\.dangling '
+stdout '^FAILED: 9 records, 1 signature verified, 2 errors, 1 warning$'
+
+! exec musai-verify verify $CONFORMANCE/bundles/sidecar-over-other-bytes
+stdout '^error +sig\.bad '
+
+! exec musai-verify verify $CONFORMANCE/bundles/expired
+stdout '^error +sig\.expired '

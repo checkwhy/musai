@@ -1,0 +1,12 @@
+# A musai workspace is read at its default scope, its trust from main.
+[!exec:git] skip 'the workspace is built with git'
+exec musai-verify verify $WORKSPACE
+stdout '^info +sig\.absent '
+stdout '^verified: 5 records, 0 signatures verified, 0 errors, 1 warning$'
+stdout '^signatures checked against the allowed-signers on the workspace''s trust branch main$'
+
+exec musai-verify verify $WORKSPACE/.musai
+stdout '^verified: 5 records'
+
+exec musai-verify trace --source $WORKSPACE 921e892d
+stdout 'made by florin via tty · unsigned'

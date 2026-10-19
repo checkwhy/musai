@@ -1,0 +1,386 @@
+{
+  "idPattern": "^sha256:[0-9a-f]{64}$",
+  "kinds": {
+    "claim": {
+      "references": [
+        {
+          "path": "$.evidence[*].run",
+          "kinds": [
+            "run"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "claim"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [
+        {
+          "path": "$.slot",
+          "why": "the digest that makes two records one claim, never a record"
+        },
+        {
+          "path": "$.evidence[*].item",
+          "why": "the content id of what a parser selected from a run's observation"
+        }
+      ],
+      "opaque": [
+        {
+          "path": "$.about",
+          "why": "what the claim concerns, in the pack's own naming"
+        },
+        {
+          "path": "$.canonical",
+          "why": "the pack's own canonical form of the claim"
+        },
+        {
+          "path": "$.conditions",
+          "why": "the pack's own dimensions and scopes"
+        },
+        {
+          "path": "$.rendering",
+          "why": "text a person or a model wrote"
+        },
+        {
+          "path": "$.evidence[*].selector",
+          "why": "a parser's own name and key"
+        }
+      ],
+      "blobs": [],
+      "statements": [
+        {
+          "path": "$.about",
+          "why": "what the claim concerns, which joins it to a case"
+        },
+        {
+          "path": "$.canonical",
+          "why": "the claim's canonical form, which a second claim must spell alike"
+        },
+        {
+          "path": "$.conditions",
+          "why": "dimension names and values, which decide the slot"
+        },
+        {
+          "path": "$.rendering",
+          "why": "the sentence the claim states"
+        }
+      ]
+    },
+    "argument": {
+      "references": [
+        {
+          "path": "$.target",
+          "kinds": [
+            "claim",
+            "run",
+            "argument"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.evidence[*].run",
+          "kinds": [
+            "run"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.premises[*]",
+          "kinds": [
+            "claim"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "argument"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [
+        {
+          "path": "$.evidence[*].item",
+          "why": "the content id of what a parser selected from a run's observation"
+        }
+      ],
+      "opaque": [
+        {
+          "path": "$.reason",
+          "why": "text a person or a model wrote"
+        },
+        {
+          "path": "$.evidence[*].selector",
+          "why": "a parser's own name and key"
+        }
+      ],
+      "blobs": [],
+      "statements": []
+    },
+    "run": {
+      "references": [
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "run"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.observation.reads[*].consumed.sha256",
+          "kinds": [],
+          "role": "pin",
+          "grammar": "digest"
+        },
+        {
+          "path": "$.observation.reads[*].digest.sha256",
+          "kinds": [],
+          "role": "pin",
+          "grammar": "digest"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.recipe",
+          "why": "what the performer ran, in its own arguments, environment and substrates; a substrate's digest may name a record, a file or an image, and is printed by a recipe rather than resolved"
+        },
+        {
+          "path": "$.observation",
+          "why": "what the performer saw: its output, binaries and bindings"
+        },
+        {
+          "path": "$.performer",
+          "why": "who performed the run, in their own naming"
+        }
+      ],
+      "blobs": [
+        {
+          "path": "$.observation.output",
+          "when": {
+            "path": "$.observation.resolved[*].annotations.storage",
+            "equals": "blob"
+          }
+        }
+      ],
+      "statements": [
+        {
+          "path": "$.performer.principal",
+          "why": "who performed a foreign run"
+        }
+      ]
+    },
+    "ruling": {
+      "references": [
+        {
+          "path": "$.claim",
+          "kinds": [
+            "claim"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.over.claim",
+          "kinds": [
+            "claim"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.brief",
+          "kinds": [
+            "run"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "ruling"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.reason",
+          "why": "text a person or a model wrote"
+        },
+        {
+          "path": "$.over.scope",
+          "why": "the dimensions a policy ruling covers"
+        }
+      ],
+      "blobs": [],
+      "statements": [
+        {
+          "path": "$.over.scope",
+          "why": "dimension names and values a policy covers"
+        }
+      ]
+    },
+    "rule": {
+      "references": [
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "rule"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.scope",
+          "why": "the dimensions the rule applies under"
+        }
+      ],
+      "blobs": [],
+      "statements": [
+        {
+          "path": "$.scope",
+          "why": "dimension names and values the rule applies under"
+        }
+      ]
+    },
+    "case": {
+      "references": [
+        {
+          "path": "$.claims[*]",
+          "kinds": [
+            "claim"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.preset.moduleRecord",
+          "kinds": [
+            "module"
+          ],
+          "role": "pin"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "case"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.overrides",
+          "why": "slot assignments carried verbatim"
+        }
+      ],
+      "blobs": [],
+      "statements": [
+        {
+          "path": "$.slug",
+          "why": "the name a case is booked and found under"
+        }
+      ]
+    },
+    "artifact": {
+      "references": [
+        {
+          "path": "$.case",
+          "kinds": [
+            "case"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.content",
+          "kinds": [],
+          "role": "citation",
+          "grammar": "receipts"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "artifact"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.content",
+          "why": "text a person or a model wrote"
+        }
+      ],
+      "blobs": [],
+      "statements": []
+    },
+    "attestation": {
+      "references": [
+        {
+          "path": "$.subject",
+          "kinds": [],
+          "role": "citation"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "attestation"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [],
+      "blobs": [],
+      "statements": [
+        {
+          "path": "$.principal",
+          "why": "who speaks for the subject"
+        },
+        {
+          "path": "$.audience",
+          "why": "who a release or a seal names"
+        }
+      ]
+    },
+    "module": {
+      "references": [
+        {
+          "path": "$.build",
+          "kinds": [
+            "run"
+          ],
+          "role": "citation"
+        },
+        {
+          "path": "$.supersedes[*]",
+          "kinds": [
+            "module"
+          ],
+          "role": "citation"
+        }
+      ],
+      "nonReferences": [],
+      "opaque": [
+        {
+          "path": "$.manifest",
+          "why": "the module's own contributions and schemas"
+        }
+      ],
+      "blobs": [
+        {
+          "path": "$.bundle"
+        }
+      ],
+      "statements": []
+    }
+  }
+}

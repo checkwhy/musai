@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>musai-verify</title>
+<meta name="description" content="Check a musai bundle in your browser: every record id, reference and signature, with nothing sent anywhere.">
+<style>
+:root {
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --ink: #1c1d1f;
+  --muted: #5d6068;
+  --line: #dcdde0;
+  --accent: #2f5bd3;
+  --good: #1d7a45;
+  --good-bg: #e7f4ec;
+  --bad: #b3261e;
+  --bad-bg: #fbe9e7;
+  --warn: #8a5a00;
+  --quiet-bg: #f1f1f3;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131417;
+    --surface: #1b1c20;
+    --ink: #e8e9eb;
+    --muted: #a0a3ab;
+    --line: #33353b;
+    --accent: #8aa8ff;
+    --good: #6fd39a;
+    --good-bg: #16301f;
+    --bad: #ff8a80;
+    --bad-bg: #3a1a18;
+    --warn: #e0b45a;
+    --quiet-bg: #24262b;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+h1 { font-size: 1.6rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+header p { margin: 0 0 1.75rem; color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+.drop {
+  display: grid;
+  gap: .25rem;
+  justify-items: center;
+  padding: 2rem 1rem;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: center;
+}
+.drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop strong { font-size: 1.05rem; }
+.drop small { color: var(--muted); }
+details { margin: 1rem 0 0; padding: .75rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+summary { cursor: pointer; font-weight: 600; }
+details label { display: block; margin: .9rem 0 .3rem; font-size: .9rem; color: var(--muted); }
+textarea {
+  width: 100%;
+  padding: .5rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: .85rem/1.4 var(--mono);
+  resize: vertical;
+}
+.hint { margin: .6rem 0 0; font-size: .85rem; color: var(--muted); }
+#result { margin-top: 1.75rem; }
+#verdict {
+  display: flex;
+  gap: .6rem;
+  align-items: baseline;
+  padding: .9rem 1rem;
+  border-radius: 12px;
+  background: var(--quiet-bg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+#verdict::before { font-size: 1.15rem; }
+#verdict[data-state="verified"] { background: var(--good-bg); color: var(--good); }
+#verdict[data-state="verified"]::before { content: "✓"; }
+#verdict[data-state="failed"], #verdict[data-state="refused"], #verdict[data-state="broken"] { background: var(--bad-bg); color: var(--bad); }
+#verdict[data-state="failed"]::before, #verdict[data-state="refused"]::before, #verdict[data-state="broken"]::before { content: "✗"; }
+#trust { margin: .75rem 0 0; }
+#caution { margin: .4rem 0 0; color: var(--warn); font-size: .9rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 1rem 0; font-size: .9rem; }
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+th, td { text-align: left; vertical-align: top; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+td { overflow-wrap: anywhere; }
+td.code { font-family: var(--mono); white-space: nowrap; }
+tr[data-severity="error"] td.severity { color: var(--bad); font-weight: 600; }
+tr[data-severity="warning"] td.severity { color: var(--warn); font-weight: 600; }
+tr[data-severity="info"] td.severity { color: var(--muted); }
+#download {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: .5rem .9rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+#download:hover { background: var(--quiet-bg); }
+footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+a { color: var(--accent); }
+[hidden] { display: none !important; }
+</style>
+<script src="wasm_exec.js"></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>musai-verify</h1>
+    <p>Checks a musai bundle on this page: every record's id, every reference, every signature. The bundle never leaves your browser.</p>
+  </header>
+
+  <label class="drop" id="zone" for="archive">
+    <input id="archive" type="file" accept=".zip,.tar,.gz,.tgz">
+    <strong>Drop a bundle here, or choose one</strong>
+    <small>a <code>.tar.gz</code> as <code>musai export</code> writes it, or a <code>.zip</code> of a bundle</small>
+  </label>
+
+  <details id="keys">
+    <summary>Check signatures against keys you choose</summary>
+    <label for="allowed-signers">Allowed signers, as <code>ssh-keygen</code> reads them</label>
+    <textarea id="allowed-signers" rows="4" spellcheck="false" placeholder="florin ssh-ed25519 AAAAC3Nza…"></textarea>
+    <label for="pins">Pinned keys, one <code>principal=SHA256:fingerprint</code> per line</label>
+    <textarea id="pins" rows="2" spellcheck="false" placeholder="florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY"></textarea>
+    <p class="hint">Either replaces the allowed signers the bundle carries. Changing them checks the last bundle again.</p>
+  </details>
+
+  <section id="result" aria-live="polite">
+    <div id="verdict" data-state="loading"><span id="summary">Loading the verifier…</span></div>
+    <p id="trust"></p>
+    <p id="caution" hidden>This shows the bundle is intact and signed by the keys it names itself. It does not show who sent it: give keys you trust above.</p>
+    <dl id="facts" hidden>
+      <dt>Bundle</dt><dd><code id="digest"></code></dd>
+      <dt>Verifier</dt><dd id="version"></dd>
+    </dl>
+    <div class="table-wrap">
+      <table id="findings" hidden>
+        <thead><tr><th>Severity</th><th>Code</th><th>Where</th><th>What</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <a id="download" download="musai-verify-report.json" hidden>Download the report</a>
+  </section>
+
+  <footer>
+    The report is a run record in the kernel's own shape, which <code>musai</code> admits as a citation.
+    Finding codes are listed in the verifier's <a href="https://github.com/checkwhy/musai/blob/main/verify/README.md#what-it-checks">README</a>.
+  </footer>
+</main>
+</body>
+</html>

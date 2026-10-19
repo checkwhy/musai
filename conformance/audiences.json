@@ -1,0 +1,505 @@
+{
+  "text": "peer\nknown includes peer\nvendor-ecosystem includes known\nmaintainers includes vendor-ecosystem\nknown member key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\nci member identity:https://token.actions.githubusercontent.com#repo:example/project\n",
+  "pairs": [
+    {
+      "granted": "public",
+      "target": "public",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "ci",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "known",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "maintainers",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "peer",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "vendor-ecosystem",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": true
+    },
+    {
+      "granted": "public",
+      "target": "identity:https://issuer.example#someone",
+      "covers": true
+    },
+    {
+      "granted": "ci",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "ci",
+      "covers": true
+    },
+    {
+      "granted": "ci",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "peer",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "ci",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": true
+    },
+    {
+      "granted": "ci",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "known",
+      "covers": true
+    },
+    {
+      "granted": "known",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "peer",
+      "covers": true
+    },
+    {
+      "granted": "known",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": true
+    },
+    {
+      "granted": "known",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "known",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "maintainers",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "maintainers",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "maintainers",
+      "target": "known",
+      "covers": true
+    },
+    {
+      "granted": "maintainers",
+      "target": "maintainers",
+      "covers": true
+    },
+    {
+      "granted": "maintainers",
+      "target": "peer",
+      "covers": true
+    },
+    {
+      "granted": "maintainers",
+      "target": "vendor-ecosystem",
+      "covers": true
+    },
+    {
+      "granted": "maintainers",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": true
+    },
+    {
+      "granted": "maintainers",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "maintainers",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "maintainers",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "peer",
+      "covers": true
+    },
+    {
+      "granted": "peer",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "peer",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "known",
+      "covers": true
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "peer",
+      "covers": true
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "vendor-ecosystem",
+      "covers": true
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": true
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "vendor-ecosystem",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "peer",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": true
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "peer",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": true
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "peer",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": true
+    },
+    {
+      "granted": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "target": "identity:https://issuer.example#someone",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "public",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "ci",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "known",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "maintainers",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "peer",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "vendor-ecosystem",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "identity:https://token.actions.githubusercontent.com#repo:example/project",
+      "covers": false
+    },
+    {
+      "granted": "identity:https://issuer.example#someone",
+      "target": "identity:https://issuer.example#someone",
+      "covers": true
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "roles": {
+    "arbiter": [
+      "rule",
+      "set-aside",
+      "override-person"
+    ],
+    "delegate": [
+      "rule"
+    ],
+    "maintainer": [
+      "rule",
+      "set-aside",
+      "publish"
+    ],
+    "owner": [
+      "rule",
+      "set-aside",
+      "publish",
+      "override-person",
+      "configure-floor"
+    ]
+  },
+  "emptyDefault": [
+    "rule",
+    "set-aside",
+    "publish",
+    "override-person",
+    "configure-floor"
+  ]
+}

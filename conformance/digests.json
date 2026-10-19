@@ -1,0 +1,23 @@
+{
+  "passing": "1dbe32af447f0c74ef95322a4c6327ba807286d8a39f27e05b3da87736e1a2f0",
+  "unsigned": "614c546559785d8f5297f1c015478d15cd466b6ff28700f326a23733368dac38",
+  "salted": "670ae140d7e017d1fde8aa6799e365a26661519711b0a2faffd6551d9821d907",
+  "flipped-byte": "b716bbce80a2a6d02ba31c10c7a20925cd3c46f45d12c495bfb7059184e57a2b",
+  "sidecar-over-other-bytes": "50d7ceafc5ce33acd67622e5ce449b47f1b04858d517f71f5863e0ea07fe9c9a",
+  "principal-absent": "e2aed1e9aed0f213babcac56a257d442175cb3bd4d1ebe8e73dddafa87e2f16f",
+  "dangling-reference": "3c34d74feda9f66a8f9779b9ae7a3be4a91279444a4ce93288ec38faa3b11e86",
+  "wrong-id-path": "51ab88febe84307a0e7c442ac7cb6c6bcff27e42716f79a16e2a5db46717a09b",
+  "wrong-kind-directory": "d52956ce0cd38aa6b72d6f668c1cf96b0495674886375b94053ee4cbaab39d30",
+  "not-canonical": "bf137dd834b6038700923218bb4e6e6348a78ac7af95aaa966d44bc8a072d411",
+  "not-nfc": "2862c35b8444377cbebbd2e801723a175262a0ff87762e05a2cd1890670331b3",
+  "unlisted-id": "6e6a28f7eeed9d07cbe50e87a311c56d9254663f6a221f2e387b138b50df5f5b",
+  "orphan-sidecar": "858e14c49705261f9b8bfd3d5963df0ba64d517dcc65be5356cf2ab59275e3c5",
+  "bare-principal": "b6c704d40ae2e37b80ef0cbfd81428aaeae3cfa20107627fb6729eef161bed05",
+  "other-namespace": "5d19727ddb71ec41bd1a0c997cca5cc42985738ab8451548ae5bbb495f603f4f",
+  "namespace-not-permitted": "c1ffb0dd49f5bdc5cd117dfdf8e75b2e465257349951d488bcadbfa842b40903",
+  "not-yet-valid": "fbfc0b2e57be29b307208d8e3588d1720e912b0cc70b4edfdcaf0fb37bb5166e",
+  "expired": "21f3bf123a8059ee2445dc72a6a977b06b73244eff7302962c0e367914b58eb1",
+  "window-held": "774f67c23fdd612229220a6e45aabeb99afd2dc0dcb2d775a475d3abc8a55c93",
+  "key-principal": "ef6bea65801a3748a8d3f5b2f27d94188dedc90b20e2abd6322fe4f22d495a65",
+  "key-mismatch": "1ec715f9e7ada60e5530360db35504a62246b2e3d00f51a1535701a4fabcae21"
+}

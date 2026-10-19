@@ -1,0 +1,19 @@
+# The kernel's own export, a gzipped tar, verifies as its tree does: every
+# record, every release signature, nothing dangling; the case its brief read
+# is pinned rather than carried. Its one closure release covers every record.
+exec musai-verify verify $CONFORMANCE/exports/released.tar.gz
+stdout '^info +sig\.verified +records/attestation/.*: signed by conformance@example\.test '
+stdout '^warning +ref\.pin-absent +records/run/'
+stdout '^verified: 6 records, 3 signatures verified, 0 errors, 1 warning$'
+stdout '^released: public — 4 of 4 records covered$'
+! stderr .
+
+# Its report names the bundle by digest; the conformance suite holds that
+# digest to the one the kernel's export printed.
+exec musai-verify verify --json $CONFORMANCE/exports/released.tar.gz
+stdout '"digest":\{"sha256":"[0-9a-f]{64}"\},"name":"bundle"'
+
+# Trace walks from the claim it carries to the ruling over it, through the archive.
+exec musai-verify trace --source $CONFORMANCE/exports/released.tar.gz bedf2e67
+stdout '^claim sha256:bedf2e67d64a'
+stdout 'of ruling '

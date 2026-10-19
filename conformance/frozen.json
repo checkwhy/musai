@@ -1,0 +1,190 @@
+{
+  "claimType": {
+    "type": "conformance.frozen/claim@1",
+    "identityDimensions": [
+      "subject"
+    ]
+  },
+  "cases": [
+    {
+      "name": "claim",
+      "kind": "claim",
+      "record": {
+        "kind": "claim",
+        "schemaVersion": 4,
+        "type": "conformance.frozen/claim@1",
+        "about": [
+          "urn:example:parser"
+        ],
+        "slot": "sha256:3c156fa46ce75042c4642019e63971c5dfa2f96f8173692c02f37b1868d8cde6",
+        "conditions": {
+          "subject": "the parser",
+          "platform": "linux"
+        },
+        "canonical": {
+          "statement": "the parser accepts every café it is given"
+        },
+        "rendering": "The parser accepts every café it is given.",
+        "evidence": [],
+        "exclusiveGroup": null,
+        "supersedes": []
+      },
+      "canonical": "{\"about\":[\"urn:example:parser\"],\"canonical\":{\"statement\":\"the parser accepts every café it is given\"},\"conditions\":{\"platform\":\"linux\",\"subject\":\"the parser\"},\"evidence\":[],\"exclusiveGroup\":null,\"kind\":\"claim\",\"rendering\":\"The parser accepts every café it is given.\",\"schemaVersion\":4,\"slot\":\"sha256:3c156fa46ce75042c4642019e63971c5dfa2f96f8173692c02f37b1868d8cde6\",\"supersedes\":[],\"type\":\"conformance.frozen/claim@1\"}",
+      "id": "sha256:4fcd309ee56f949340e2a1d859ec8ffa1dc20e009edccbb7e87bfd3468ea6915"
+    },
+    {
+      "name": "claim-salted",
+      "kind": "claim",
+      "record": {
+        "kind": "claim",
+        "schemaVersion": 4,
+        "type": "conformance.frozen/claim@1",
+        "about": [
+          "urn:example:parser"
+        ],
+        "slot": "sha256:3c156fa46ce75042c4642019e63971c5dfa2f96f8173692c02f37b1868d8cde6",
+        "conditions": {
+          "subject": "the parser",
+          "platform": "linux"
+        },
+        "canonical": {
+          "statement": "the parser accepts every café it is given"
+        },
+        "rendering": "The parser accepts every café it is given.",
+        "evidence": [],
+        "exclusiveGroup": null,
+        "supersedes": [],
+        "salt": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+      },
+      "canonical": "{\"about\":[\"urn:example:parser\"],\"canonical\":{\"statement\":\"the parser accepts every café it is given\"},\"conditions\":{\"platform\":\"linux\",\"subject\":\"the parser\"},\"evidence\":[],\"exclusiveGroup\":null,\"kind\":\"claim\",\"rendering\":\"The parser accepts every café it is given.\",\"salt\":\"5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"schemaVersion\":4,\"slot\":\"sha256:3c156fa46ce75042c4642019e63971c5dfa2f96f8173692c02f37b1868d8cde6\",\"supersedes\":[],\"type\":\"conformance.frozen/claim@1\"}",
+      "id": "sha256:7953fc22685ae960d8a2c5a4e6a00ca91e4ce85a417b09743826950a63a7eabd"
+    },
+    {
+      "name": "run",
+      "kind": "run",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "determinism": "nondeterministic",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "recipe": {
+          "command": [
+            "node",
+            "--test"
+          ],
+          "workingDirectory": "/work",
+          "environment": {},
+          "declared": [],
+          "substrates": [],
+          "isolation": "hygiene"
+        },
+        "observation": {
+          "resolved": [],
+          "isolationHeld": "hygiene",
+          "binaries": [],
+          "bindings": [],
+          "output": "ok\n",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "canonical": "{\"determinism\":\"nondeterministic\",\"kind\":\"run\",\"observation\":{\"binaries\":[],\"bindings\":[],\"cost\":{},\"exitCode\":0,\"finishedAt\":\"2026-01-01T00:00:00.000Z\",\"isolationHeld\":\"hygiene\",\"output\":\"ok\\n\",\"outputLossy\":false,\"reads\":[],\"resolved\":[],\"scrubbed\":[],\"startedAt\":\"2026-01-01T00:00:00.000Z\"},\"performer\":{\"kind\":\"runner\",\"version\":\"1\"},\"recipe\":{\"command\":[\"node\",\"--test\"],\"declared\":[],\"environment\":{},\"isolation\":\"hygiene\",\"substrates\":[],\"workingDirectory\":\"/work\"},\"runKind\":\"run\",\"schemaVersion\":4,\"supersedes\":[]}",
+      "id": "sha256:e73d6fd40d457df7024052f674ad8418902d73c2163b146e1a66f1cf89b16e6d"
+    },
+    {
+      "name": "run-measured",
+      "kind": "run",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "determinism": "nondeterministic",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "recipe": {
+          "command": [
+            "node",
+            "--test"
+          ],
+          "workingDirectory": "/work",
+          "environment": {},
+          "declared": [],
+          "substrates": [],
+          "isolation": "hygiene"
+        },
+        "observation": {
+          "resolved": [],
+          "isolationHeld": "hygiene",
+          "binaries": [],
+          "bindings": [],
+          "output": "ok\n",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {
+            "cpuMs": "1200",
+            "tokens": "3",
+            "money": {
+              "amount": "0.25",
+              "currency": "EUR"
+            }
+          }
+        },
+        "supersedes": []
+      },
+      "canonical": "{\"determinism\":\"nondeterministic\",\"kind\":\"run\",\"observation\":{\"binaries\":[],\"bindings\":[],\"cost\":{\"cpuMs\":\"1200\",\"money\":{\"amount\":\"0.25\",\"currency\":\"EUR\"},\"tokens\":\"3\"},\"exitCode\":0,\"finishedAt\":\"2026-01-01T00:00:00.000Z\",\"isolationHeld\":\"hygiene\",\"output\":\"ok\\n\",\"outputLossy\":false,\"reads\":[],\"resolved\":[],\"scrubbed\":[],\"startedAt\":\"2026-01-01T00:00:00.000Z\"},\"performer\":{\"kind\":\"runner\",\"version\":\"1\"},\"recipe\":{\"command\":[\"node\",\"--test\"],\"declared\":[],\"environment\":{},\"isolation\":\"hygiene\",\"substrates\":[],\"workingDirectory\":\"/work\"},\"runKind\":\"run\",\"schemaVersion\":4,\"supersedes\":[]}",
+      "id": "sha256:c331c3cbda91a942cba0c192061288acd146a87753f0e6e1ff5d4dcfcd679635"
+    },
+    {
+      "name": "attestation-by-key",
+      "kind": "attestation",
+      "record": {
+        "kind": "attestation",
+        "schemaVersion": 6,
+        "subject": "sha256:4fcd309ee56f949340e2a1d859ec8ffa1dc20e009edccbb7e87bfd3468ea6915",
+        "principal": "key:SHA256:Wvg1P7BiLh3uNN2N0Ujsg8lHAAxsPBdB0kxKgQlTuuE",
+        "principalClass": "person",
+        "via": "tty",
+        "purpose": "made",
+        "at": "2026-01-01T00:00:00.000Z",
+        "supersedes": []
+      },
+      "canonical": "{\"at\":\"2026-01-01T00:00:00.000Z\",\"kind\":\"attestation\",\"principal\":\"key:SHA256:Wvg1P7BiLh3uNN2N0Ujsg8lHAAxsPBdB0kxKgQlTuuE\",\"principalClass\":\"person\",\"purpose\":\"made\",\"schemaVersion\":6,\"subject\":\"sha256:4fcd309ee56f949340e2a1d859ec8ffa1dc20e009edccbb7e87bfd3468ea6915\",\"supersedes\":[],\"via\":\"tty\"}",
+      "id": "sha256:e89da358341302c3dac9b8f80d867cbd54640c89f5b895b889f40a949099b5d0"
+    },
+    {
+      "name": "attestation-by-pseudonym",
+      "kind": "attestation",
+      "record": {
+        "kind": "attestation",
+        "schemaVersion": 6,
+        "subject": "sha256:4fcd309ee56f949340e2a1d859ec8ffa1dc20e009edccbb7e87bfd3468ea6915",
+        "principal": "pseudonym:workspace-key:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+        "principalClass": "person",
+        "via": "tty",
+        "purpose": "made",
+        "at": "2026-01-01T00:00:00.000Z",
+        "supersedes": [
+          "sha256:e89da358341302c3dac9b8f80d867cbd54640c89f5b895b889f40a949099b5d0"
+        ]
+      },
+      "canonical": "{\"at\":\"2026-01-01T00:00:00.000Z\",\"kind\":\"attestation\",\"principal\":\"pseudonym:workspace-key:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f\",\"principalClass\":\"person\",\"purpose\":\"made\",\"schemaVersion\":6,\"subject\":\"sha256:4fcd309ee56f949340e2a1d859ec8ffa1dc20e009edccbb7e87bfd3468ea6915\",\"supersedes\":[\"sha256:e89da358341302c3dac9b8f80d867cbd54640c89f5b895b889f40a949099b5d0\"],\"via\":\"tty\"}",
+      "id": "sha256:0e80eaeeb9273d7bb147c27534d345d63326dc459491f7f1ea0be10bf39ff167"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+# recipe prints what a receiver needs to re-run a run: for a brief, its command and substrates.
+exec musai-verify recipe --source $CONFORMANCE/bundles/passing 946cb831
+! stdout '^isolation'
+stdout '^  scope-head +gitCommit 6ea7e9a29f850873086f2eaebd3bed913bf75a27$'
+stdout '^  brief sha256:921e892da524cdff8699d6025fc8fd4c3b735fec451ab5c2b0c7e90fee7d3f68$'
+
+exec musai-verify recipe --json --source $CONFORMANCE/bundles/passing 946cb831
+stdout '"shell":"brief sha256:921e892da524cdff8699d6025fc8fd4c3b735fec451ab5c2b0c7e90fee7d3f68"'

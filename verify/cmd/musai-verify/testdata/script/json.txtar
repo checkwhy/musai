@@ -1,0 +1,12 @@
+# Under --json the report is a run draft in canonical JSON: one line, the
+# kernel's field names, a foreign performer, the verdict as its exit code.
+exec musai-verify verify --json --principal receiver $CONFORMANCE/bundles/passing
+stdout '^\{"determinism":"deterministic","kind":"run","observation":\{'
+stdout '"performer":\{"kind":"foreign","principal":"receiver","tool":"musai-verify","version":"'
+stdout '"exitCode":0'
+stdout '"substrates":\[\{"digest":\{"sha256":"[0-9a-f]{64}"\},"name":"bundle"\}'
+! stdout '"schemaVersion"'
+
+! exec musai-verify verify --json $CONFORMANCE/bundles/dangling-reference
+stdout '"exitCode":3'
+stdout 'ref.dangling'

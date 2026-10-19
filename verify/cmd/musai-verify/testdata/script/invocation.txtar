@@ -1,0 +1,13 @@
+# What is not a bundle, a zip or tar of one, or a workspace is an invocation to fix.
+! exec musai-verify verify $WORK/nothing-here
+stderr 'not a bundle, a zip or gzipped tar of one, or a musai workspace'
+! stdout .
+
+! exec musai-verify trace --source $CONFORMANCE/bundles/passing ffffffff
+stderr 'no record in the source has that id'
+
+! exec musai-verify trace --source $CONFORMANCE/bundles/passing 92
+stderr 'at least eight hex characters'
+
+[exec:git] ! exec musai-verify verify --scope nowhere $WORKSPACE
+[exec:git] stderr 'scope "nowhere" is not in this workspace'

@@ -1,0 +1,12 @@
+[
+  {
+    "name": "released",
+    "archive": "exports/released.tar.gz",
+    "verdict": "verified",
+    "codes": [
+      "ref.pin-absent"
+    ],
+    "digest": "32daa7a35920a4e3054029c27458a85c6c8a3591952116dee6885a09f6d9bcc7",
+    "what": "a ruling exported to the public, which releases it with what it cites and who made it, signed, as the kernel's export writes it; the case its brief read is pinned, not carried"
+  }
+]

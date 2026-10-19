@@ -1,0 +1,33 @@
+# A pinned fingerprint is a key the receiver chose: what the bundle lists
+# does not matter, and the verdict says whose key it was.
+exec musai-verify verify --trust florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY $CONFORMANCE/bundles/principal-absent
+stdout '^info +sig\.verified '
+stdout '^signatures checked against florin''s key SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY, pinned$'
+
+! exec musai-verify verify --trust florin=SHA256:AAAAbtFxkELD0ccc0cxDBE87gG2aE/Yyt+W01EOwKpI $CONFORMANCE/bundles/passing
+stdout '^error +sig\.principal-unknown '
+
+# A pin travels in the report's recipe as written.
+exec musai-verify verify --json --trust florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY $CONFORMANCE/bundles/passing
+stdout '"--trust","florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY"'
+stdout '"annotations":\{"fingerprint":"SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY","principal":"florin"\}'
+
+# Another directory's allowed-signers replaces the bundle's own.
+! exec musai-verify verify --trust $CONFORMANCE/bundles/principal-absent $CONFORMANCE/bundles/passing
+stdout '^error +sig\.principal-unknown '
+stdout '^signatures checked against the allowed-signers in .*principal-absent$'
+
+exec musai-verify verify --json --trust $CONFORMANCE/bundles/passing $CONFORMANCE/bundles/principal-absent
+stdout '"exitCode":0'
+stdout '"--trust","trust"'
+stdout '\{"digest":\{"sha256":"[0-9a-f]{64}"\},"name":"trust"\}'
+
+# Several trust sources add up, each named.
+exec musai-verify verify --trust $CONFORMANCE/bundles/principal-absent --trust florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY $CONFORMANCE/bundles/passing
+stdout '^verified: '
+stdout '^signatures checked against the allowed-signers in .*principal-absent; florin''s key SHA256:.*, pinned$'
+
+# A trust source that is none is an invocation to fix.
+! exec musai-verify verify --trust github:florinutz $CONFORMANCE/bundles/passing
+stderr 'names no principal'
+! stdout .

@@ -1,0 +1,25 @@
+# A bundle cut for an audience its releases cover verifies, says so on its
+# own line, and answers whether a receiver is in that audience.
+exec musai-verify verify --as key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr $CONFORMANCE/releases/released
+stdout '^info +release\.covered +records/attestation/.*: released by key:SHA256:[A-Za-z0-9+/]+ to maintainers, its closure'
+stdout '^info +release\.member +bundle\.json: key:SHA256:r+ is in known$'
+stdout '^verified: '
+stdout '^released: known — 9 of 9 records covered$'
+! stderr .
+
+# Released to an audience narrower than the one it was cut for: integrity
+# still verifies, and entitlement says what is not covered.
+exec musai-verify verify --as key:SHA256:ooooooooooooooooooooooooooooooooooooooooooo $CONFORMANCE/releases/outside-audience
+stdout '^warning +release\.uncovered +records/'
+stdout '^warning +release\.not-member +bundle\.json: '
+stdout '^verified: '
+stdout '^released: known — 0 of 9 records covered$'
+
+# An audience of a form the verifier does not know is reported, never failed.
+exec musai-verify verify $CONFORMANCE/releases/unknown-form
+stdout '^warning +release\.audience-unknown +records/attestation/'
+stdout '^verified: '
+
+# No manifest: what the bundle may be used for is not checked.
+exec musai-verify verify $CONFORMANCE/releases/no-manifest
+stdout '^released: not checked \(no manifest\)$'

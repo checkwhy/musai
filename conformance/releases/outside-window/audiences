@@ -1,0 +1,6 @@
+peer
+known includes peer
+vendor-ecosystem includes known
+maintainers includes vendor-ecosystem
+known member key:SHA256:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr
+ci member identity:https://token.actions.githubusercontent.com#repo:example/project

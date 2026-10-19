@@ -1,0 +1,1 @@
+{"at":"2026-09-01T00:00:00.000Z","kind":"attestation","principal":"key:SHA256:WlJyYddTZ9ElbJdQD5N1ym/p983RGYaHLFPrHhPacYs","principalClass":"person","purpose":"revoked","schemaVersion":6,"subject":"sha256:c6e93901a1eabcf9746cb4953f59ccdadca0b4df58f2004cc76cf12a5c229310","supersedes":["sha256:4979669a88ac67e028ea5f5e3e245e09d92a867bc5b290c1856aff446464a157"],"via":"signature"}

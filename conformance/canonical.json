@@ -1,0 +1,183 @@
+[
+  {
+    "name": "empty-object",
+    "input": {},
+    "canonical": "{}",
+    "id": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "name": "empty-string",
+    "input": "",
+    "canonical": "\"\"",
+    "id": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+  },
+  {
+    "name": "empty-array",
+    "input": [],
+    "canonical": "[]",
+    "id": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "name": "record-with-every-optional-field-absent",
+    "input": {
+      "kind": "claim",
+      "type": "musai.demo@1",
+      "about": [
+        "urn:example:one"
+      ],
+      "slot": "only-required",
+      "conditions": {},
+      "canonical": {
+        "statement": "minimal"
+      },
+      "rendering": "Minimal.",
+      "evidence": []
+    },
+    "canonical": "{\"about\":[\"urn:example:one\"],\"canonical\":{\"statement\":\"minimal\"},\"conditions\":{},\"evidence\":[],\"kind\":\"claim\",\"rendering\":\"Minimal.\",\"slot\":\"only-required\",\"type\":\"musai.demo@1\"}",
+    "id": "sha256:29e13a7a6b59e900cfc22067432c24eec6cf254d957575284ad0fa76583c74c5"
+  },
+  {
+    "name": "safe-integer-boundary-minus-one",
+    "input": {
+      "v": 9007199254740990
+    },
+    "canonical": "{\"v\":9007199254740990}",
+    "id": "sha256:7c8602e74df617fa28332e4814482a65700942310c15de4308b3f8b9b89d7125"
+  },
+  {
+    "name": "safe-integer-boundary",
+    "input": {
+      "v": 9007199254740991
+    },
+    "canonical": "{\"v\":9007199254740991}",
+    "id": "sha256:210e9afd5b97d46616c53c7bc51eb7349d44183691bb0866ae2ef6a2b798823f"
+  },
+  {
+    "name": "safe-integer-boundary-plus-one",
+    "input": {
+      "v": 9007199254740992
+    },
+    "canonical": "{\"v\":9007199254740992}",
+    "id": "sha256:e7b4b245a4ee0feb03c7c89a9f9a4fff2ef33d95b8fc40b016cd2620d49842bd"
+  },
+  {
+    "name": "denormal-smallest",
+    "input": {
+      "v": 5e-324
+    },
+    "canonical": "{\"v\":5e-324}",
+    "id": "sha256:8a00b7e065be3a20529e22853424bb565596997d86ddd6c27f9aff1b5c2222f8"
+  },
+  {
+    "name": "denormal-near-smallest-normal",
+    "input": {
+      "v": 2.2250738585072014e-308
+    },
+    "canonical": "{\"v\":2.2250738585072014e-308}",
+    "id": "sha256:7cb066ef8ccc17d1ce46c2d201d8a97be54ad90a491aa9b8c805bbe2d3f1338d"
+  },
+  {
+    "name": "negative-zero",
+    "input": {
+      "v": 0
+    },
+    "canonical": "{\"v\":0}",
+    "id": "sha256:ec4f95abcb4e2e3dbe856c3eb2f81995eacb3823d40aa2e78ed4c5e1798f664d"
+  },
+  {
+    "name": "positive-zero",
+    "input": {
+      "v": 0
+    },
+    "canonical": "{\"v\":0}",
+    "id": "sha256:ec4f95abcb4e2e3dbe856c3eb2f81995eacb3823d40aa2e78ed4c5e1798f664d"
+  },
+  {
+    "name": "exponent-boundary-below-large",
+    "input": {
+      "v": 100000000000000000000
+    },
+    "canonical": "{\"v\":100000000000000000000}",
+    "id": "sha256:8e85c1241e1aebc42bf95fcc16c0fef8b6d1de48d57f31096b9a7be664c2cebb"
+  },
+  {
+    "name": "exponent-boundary-at-large",
+    "input": {
+      "v": 1e+21
+    },
+    "canonical": "{\"v\":1e+21}",
+    "id": "sha256:9e24d139b060bd89f98e510a1e34d48fade6aeb668a016e6fb2e296762a3aefa"
+  },
+  {
+    "name": "exponent-boundary-above-small",
+    "input": {
+      "v": 0.000001
+    },
+    "canonical": "{\"v\":0.000001}",
+    "id": "sha256:3aa9586a53796d5603f503d4de60992e055fc4e3fb594c0de84bdc7616df2dd9"
+  },
+  {
+    "name": "exponent-boundary-at-small",
+    "input": {
+      "v": 1e-7
+    },
+    "canonical": "{\"v\":1e-7}",
+    "id": "sha256:3a28f15de586a90e5f896f27e39cd7d7e4022dcccc3a795c373d64a52661987f"
+  },
+  {
+    "name": "non-ascii-string",
+    "input": {
+      "v": "café ☕ 日本語"
+    },
+    "canonical": "{\"v\":\"café ☕ 日本語\"}",
+    "id": "sha256:38e07b5e69a029ff38a38893722875e0ab49017353118732a91081370ef9c47f"
+  },
+  {
+    "name": "string-requiring-escape-handling",
+    "input": {
+      "v": "line one\nline two\t\"quoted\"\\backslash"
+    },
+    "canonical": "{\"v\":\"line one\\nline two\\t\\\"quoted\\\"\\\\backslash\"}",
+    "id": "sha256:123deef9eb44d05f0e304c72f4f439ccaf43fdc1daf666545284f95c6b460726"
+  },
+  {
+    "name": "deeply-nested-object",
+    "input": {
+      "a": {
+        "b": {
+          "c": {
+            "d": {
+              "e": {
+                "f": "leaf"
+              }
+            }
+          }
+        }
+      }
+    },
+    "canonical": "{\"a\":{\"b\":{\"c\":{\"d\":{\"e\":{\"f\":\"leaf\"}}}}}}",
+    "id": "sha256:c7acdab227590938132c9dc5b389dc96ef35ba86a0a27e80882999785f2c0574"
+  },
+  {
+    "name": "permuted-keys-original-order",
+    "input": {
+      "alpha": 1,
+      "beta": 2,
+      "gamma": 3,
+      "delta": 4
+    },
+    "canonical": "{\"alpha\":1,\"beta\":2,\"delta\":4,\"gamma\":3}",
+    "id": "sha256:95619799f9cc0427bb9b27dffb79e341d24d1d99c6ae7553766130fd8bdd7694"
+  },
+  {
+    "name": "permuted-keys-reordered",
+    "input": {
+      "delta": 4,
+      "gamma": 3,
+      "beta": 2,
+      "alpha": 1
+    },
+    "canonical": "{\"alpha\":1,\"beta\":2,\"delta\":4,\"gamma\":3}",
+    "id": "sha256:95619799f9cc0427bb9b27dffb79e341d24d1d99c6ae7553766130fd8bdd7694"
+  }
+]
