@@ -1,0 +1,16 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Status' step two (evidence kind is fixed in the kernel and decided first, before specificity or weight)",
+  "description": "three arguments named so their alphabetical id order disagrees with their evidence-kind rank, to prove the winner is found by evidence kind and not by id or insertion position",
+  "reasoning": "the receipt-backed argument outranks the citation and the agent judgment regardless of which id sorts first or which position it occupies in the input array — evidence kind is compared directly, never inferred from an incidental ordering",
+  "claims": [{ "id": "claim-z", "supportingArgumentIds": ["a-agent-judgment", "m-citation", "z-receipt"] }],
+  "arguments": [
+    { "id": "a-agent-judgment", "evidenceKind": "agent-judgment", "scope": { "kind": "any" }, "weight": "9" },
+    { "id": "m-citation", "evidenceKind": "citation", "scope": { "kind": "any" }, "weight": "9" },
+    { "id": "z-receipt", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [],
+  "expected": {
+    "claim-z": { "label": "holds" }
+  }
+}

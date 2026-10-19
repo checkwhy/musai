@@ -1,0 +1,26 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Authority' (a ruling is pinned to the evidence it saw; when that evidence moves the ruling stands for its snapshot and the dependent gate is flagged decided on stale evidence)",
+  "description": "a claim decided by a ruling whose pinned evidence has since moved",
+  "reasoning": "the ruling's own verdict is untouched by the move — it still stands for the snapshot it saw — but the dependent claim is flagged decided on stale evidence rather than presented as a clean decision",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }],
+  "claims": [
+    {
+      "id": "claim-pinned",
+      "supportingArgumentIds": ["arg-receipt"],
+      "ruling": {
+        "id": "sha256:ruling-pinned",
+        "principal": "alice@example.com",
+        "authority": "person",
+        "decidedAt": "2026-01-01T00:00:00.000Z",
+        "verdict": "holds",
+        "evidenceSnapshot": ["arg-receipt-old"]
+      }
+    }
+  ],
+  "arguments": [{ "id": "arg-receipt", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }],
+  "attacks": [],
+  "expected": {
+    "claim-pinned": { "label": "holds", "decidedOnStaleEvidence": true }
+  }
+}

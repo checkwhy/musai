@@ -1,0 +1,15 @@
+{
+  "kind": "weakest-link",
+  "source": "Musai design, 'Status' (the weakest-link rule) and research/PITFALLS.md Pitfall 17 (deep, mixed evidence chains failing silently under an off-by-one traversal)",
+  "description": "a four-hop chain of receipt, citation, agent judgment, receipt: the leaf looks like a receipt, but the chain is capped by the agent judgment three hops back",
+  "chain": [
+    { "id": "hop-0-receipt", "kind": "receipt" },
+    { "id": "hop-1-citation", "kind": "citation" },
+    { "id": "hop-2-agent-judgment", "kind": "agent-judgment" },
+    { "id": "hop-3-receipt", "kind": "receipt" }
+  ],
+  "expected": {
+    "cappedKind": "agent-judgment",
+    "cappedHopIndex": 2
+  }
+}

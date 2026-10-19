@@ -1,0 +1,27 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Authority' (a ruling stands for the snapshot it saw; a claim whose own check went stale has nothing current to stand on)",
+  "description": "a claim decided by a fresh ruling whose own check's tree has since moved",
+  "reasoning": "the ruling's evidence did not move, so it carries no flag, but the claim's own receipt no longer describes the tree, so the claim reads open as stale until it is checked again",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }],
+  "claims": [
+    {
+      "id": "claim-moved",
+      "supportingArgumentIds": ["arg-receipt"],
+      "stale": true,
+      "ruling": {
+        "id": "sha256:ruling-fresh",
+        "principal": "alice@example.com",
+        "authority": "person",
+        "decidedAt": "2026-01-01T00:00:00.000Z",
+        "verdict": "holds",
+        "evidenceSnapshot": ["arg-receipt"]
+      }
+    }
+  ],
+  "arguments": [{ "id": "arg-receipt", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }],
+  "attacks": [],
+  "expected": {
+    "claim-moved": { "label": "open", "reason": "stale" }
+  }
+}

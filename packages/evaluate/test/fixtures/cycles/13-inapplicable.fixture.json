@@ -1,0 +1,12 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Status' step one (applicability is binary, decided first, before evidence kind or specificity are ever consulted)",
+  "description": "a claim whose rule is out of scope for the condition it was evaluated under, despite carrying a strong receipt",
+  "reasoning": "applicability is decided before anything else, so a receipt that would otherwise win outright never gets the chance — the claim is open with reason inapplicable regardless of how strong its evidence looks",
+  "claims": [{ "id": "claim-out-of-scope", "supportingArgumentIds": ["arg-receipt"], "applicable": false }],
+  "arguments": [{ "id": "arg-receipt", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }],
+  "attacks": [],
+  "expected": {
+    "claim-out-of-scope": { "label": "open", "reason": "inapplicable" }
+  }
+}

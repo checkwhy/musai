@@ -1,0 +1,12 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (person, then policy, then delegate)",
+  "description": "a person's ruling and a conflicting standing policy on the same claim: the person outranks the policy regardless of which was decided first",
+  "reasoning": "authority is the primary sort key; a policy is a standing ruling, not a superior one, so a person's one-off decision still outranks it",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }],
+  "rulings": [
+    { "id": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "principal": "alice@example.com", "authority": "policy", "decidedAt": "2026-01-05T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "principal": "alice@example.com", "authority": "person", "decidedAt": "2026-01-01T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "decidedBy": "authority" }
+}

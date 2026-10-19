@@ -1,0 +1,12 @@
+{
+  "kind": "cycle",
+  "source": "Dung (1995); research/PITFALLS.md Pitfall 8 (a cycle's open status must name itself as a cycle rather than a bare shrug)",
+  "description": "a single claim attacks itself and nothing else is in the graph",
+  "reasoning": "a self-loop is the degenerate one-node cycle: the claim's own node has one live attacker (itself) and can never reach zero, so it stays undec exactly as a longer cycle's members do",
+  "claims": [{ "id": "claim-a", "supportingArgumentIds": ["claim-a"] }],
+  "arguments": [{ "id": "claim-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }],
+  "attacks": [{ "attacker": "claim-a", "target": "claim-a" }],
+  "expected": {
+    "claim-a": { "label": "open", "reason": "cycle" }
+  }
+}

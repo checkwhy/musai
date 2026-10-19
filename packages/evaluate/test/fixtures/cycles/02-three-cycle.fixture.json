@@ -1,0 +1,26 @@
+{
+  "kind": "cycle",
+  "source": "Dung (1995) grounded extension",
+  "description": "three claims attack in a ring: a attacks b, b attacks c, c attacks a",
+  "reasoning": "an odd cycle behaves exactly like an even one under grounded semantics — every member has exactly one live attacker forever, so none ever reaches the initial queue and all three stay undec",
+  "claims": [
+    { "id": "claim-a", "supportingArgumentIds": ["claim-a"] },
+    { "id": "claim-b", "supportingArgumentIds": ["claim-b"] },
+    { "id": "claim-c", "supportingArgumentIds": ["claim-c"] }
+  ],
+  "arguments": [
+    { "id": "claim-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-b", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-c", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "claim-a", "target": "claim-b" },
+    { "attacker": "claim-b", "target": "claim-c" },
+    { "attacker": "claim-c", "target": "claim-a" }
+  ],
+  "expected": {
+    "claim-a": { "label": "open", "reason": "cycle" },
+    "claim-b": { "label": "open", "reason": "cycle" },
+    "claim-c": { "label": "open", "reason": "cycle" }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Garcia & Simari (2004) 'Defeasible Logic Programming: An Argumentative Approach' — the specificity criterion used as DeLP's default argument comparison",
+  "description": "an argument built from a strictly narrower interval defeats one built from a wider interval that contains it, both receipts of equal weight",
+  "arguments": [
+    {
+      "id": "wide-window",
+      "evidenceChain": [{ "id": "wide-window#hop0", "kind": "receipt" }],
+      "scope": { "kind": "range", "from": 0, "to": 100 },
+      "weight": "1"
+    },
+    {
+      "id": "narrow-window",
+      "evidenceChain": [{ "id": "narrow-window#hop0", "kind": "receipt" }],
+      "scope": { "kind": "range", "from": 40, "to": 60 },
+      "weight": "1"
+    }
+  ],
+  "expected": {
+    "winner": "narrow-window",
+    "decidedBy": "specificity"
+  }
+}

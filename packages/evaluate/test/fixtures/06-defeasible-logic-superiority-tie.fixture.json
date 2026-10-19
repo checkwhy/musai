@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Governatori, Maher, Antoniou & Billington (2004) 'Argumentation semantics for defeasible logic' — a superiority relation that does not settle a pair leaves it undecided rather than picking a winner",
+  "description": "two universally-scoped receipts of equal declared weight: every step falls through and the pair is open, never resolved by a pick",
+  "arguments": [
+    {
+      "id": "first-equal",
+      "evidenceChain": [{ "id": "first-equal#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "1"
+    },
+    {
+      "id": "second-equal",
+      "evidenceChain": [{ "id": "second-equal#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "1"
+    }
+  ],
+  "expected": {
+    "winner": "open",
+    "decidedBy": "equal"
+  }
+}

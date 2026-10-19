@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Amgoud & Cayrol (2002) 'A reasoning model based on the production of acceptable arguments' — priority between arguments of otherwise-equal standing",
+  "description": "two universally-scoped receipts of equal specificity: the one with the higher declared priority wins",
+  "arguments": [
+    {
+      "id": "low-priority",
+      "evidenceChain": [{ "id": "low-priority#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "1"
+    },
+    {
+      "id": "high-priority",
+      "evidenceChain": [{ "id": "high-priority#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "3"
+    }
+  ],
+  "expected": {
+    "winner": "high-priority",
+    "decidedBy": "weight"
+  }
+}

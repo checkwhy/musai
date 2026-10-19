@@ -1,0 +1,16 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Status' step three; research/PITFALLS.md Pitfall 17 (a traversal that folds two at a time can silently miss what a full pairwise check would catch)",
+  "description": "two arguments tie each other on an incomparable point scope, while a third, wider-scoped argument loses specificity to both — a left-to-right fold that only ever compares the running champion against the next candidate would crown one of the first two without ever checking that they tie each other",
+  "reasoning": "a winner must beat every other surviving argument, not merely the ones a fold happens to compare it against; alpha and beta are pairwise incomparable in scope and equal in weight, so neither dominates the other even though both individually beat gamma on specificity; the two agree, so the claim holds, led by alpha, which beat none it agrees with, and gamma, which both beat, never leads",
+  "claims": [{ "id": "claim-y", "supportingArgumentIds": ["arg-alpha", "arg-beta", "arg-gamma"] }],
+  "arguments": [
+    { "id": "arg-alpha", "evidenceKind": "receipt", "scope": { "kind": "point", "value": "alpha" }, "weight": "1" },
+    { "id": "arg-beta", "evidenceKind": "receipt", "scope": { "kind": "point", "value": "beta" }, "weight": "1" },
+    { "id": "arg-gamma", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [],
+  "expected": {
+    "claim-y": { "label": "holds", "winner": "arg-alpha", "rival": null, "corroborated": ["arg-beta"] }
+  }
+}

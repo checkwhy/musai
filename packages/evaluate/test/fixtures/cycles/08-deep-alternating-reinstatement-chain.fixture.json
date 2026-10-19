@@ -1,0 +1,29 @@
+{
+  "kind": "adversarial",
+  "source": "Dung (1995) reinstatement; research/PITFALLS.md Pitfall 17 (a deep chain is where an off-by-one traversal fails silently)",
+  "description": "a four-deep linear chain of direct attacks, a attacks b attacks c attacks d, with no cycle anywhere in it",
+  "reasoning": "a is unattacked and holds; b is defeated by a and fails; c's only attacker, b, is itself defeated, so c is reinstated and holds; d is defeated by the now-in c and fails — the alternation has to reach four levels deep correctly, not just the two levels a shallow fixture would exercise",
+  "claims": [
+    { "id": "claim-a", "supportingArgumentIds": ["claim-a"] },
+    { "id": "claim-b", "supportingArgumentIds": ["claim-b"] },
+    { "id": "claim-c", "supportingArgumentIds": ["claim-c"] },
+    { "id": "claim-d", "supportingArgumentIds": ["claim-d"] }
+  ],
+  "arguments": [
+    { "id": "claim-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-b", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-c", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-d", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "claim-a", "target": "claim-b" },
+    { "attacker": "claim-b", "target": "claim-c" },
+    { "attacker": "claim-c", "target": "claim-d" }
+  ],
+  "expected": {
+    "claim-a": { "label": "holds" },
+    "claim-b": { "label": "fails" },
+    "claim-c": { "label": "holds" },
+    "claim-d": { "label": "fails" }
+  }
+}

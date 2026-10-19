@@ -1,0 +1,22 @@
+{
+  "kind": "cycle",
+  "source": "Dung (1995) grounded extension; research/ARCHITECTURE.md Question 2 (grounded semantics naturally leaves a mutual-attack cycle undecided)",
+  "description": "two claims attack each other directly and nothing else attacks either",
+  "reasoning": "neither claim ever reaches zero live attackers, so the worklist never labels either in; both remain undec, which the evaluator reports as open with reason cycle",
+  "claims": [
+    { "id": "claim-a", "supportingArgumentIds": ["claim-a"] },
+    { "id": "claim-b", "supportingArgumentIds": ["claim-b"] }
+  ],
+  "arguments": [
+    { "id": "claim-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-b", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "claim-a", "target": "claim-b" },
+    { "attacker": "claim-b", "target": "claim-a" }
+  ],
+  "expected": {
+    "claim-a": { "label": "open", "reason": "cycle" },
+    "claim-b": { "label": "open", "reason": "cycle" }
+  }
+}

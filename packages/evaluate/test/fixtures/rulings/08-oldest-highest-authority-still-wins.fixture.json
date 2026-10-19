@@ -1,0 +1,13 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (person, then policy, then delegate) plus research/ARCHITECTURE.md Question 2 (ruling/set-aside semantics have no literature precedent)",
+  "description": "three rulings at three different authorities and three different times, the highest authority being by far the oldest",
+  "reasoning": "authority is the primary key across the whole set, not just the two most recent entries; an old person ruling still beats a same-day policy and a same-hour delegate ruling",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }, { "principal": "the-agent", "role": "delegate" }],
+  "rulings": [
+    { "id": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "principal": "the-agent", "authority": "delegate", "decidedAt": "2026-06-01T09:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:0101010101010101010101010101010101010101010101010101010101010101", "principal": "alice@example.com", "authority": "policy", "decidedAt": "2026-06-01T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:0202020202020202020202020202020202020202020202020202020202020202", "principal": "alice@example.com", "authority": "person", "decidedAt": "2020-01-01T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:0202020202020202020202020202020202020202020202020202020202020202", "decidedBy": "authority" }
+}

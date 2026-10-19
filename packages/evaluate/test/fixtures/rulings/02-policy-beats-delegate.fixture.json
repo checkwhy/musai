@@ -1,0 +1,12 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (person, then policy, then delegate)",
+  "description": "a standing policy and a delegate's provisional ruling conflict: the policy outranks the delegate even though the delegate ruled more recently",
+  "reasoning": "delegate sits at the bottom of the authority order because a delegate rules provisionally on the owner's behalf, per the design's autonomy section; recency never promotes a lower authority above a higher one",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }, { "principal": "the-agent", "role": "delegate" }],
+  "rulings": [
+    { "id": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "principal": "the-agent", "authority": "delegate", "decidedAt": "2026-02-01T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "principal": "alice@example.com", "authority": "policy", "decidedAt": "2026-01-01T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "decidedBy": "authority" }
+}

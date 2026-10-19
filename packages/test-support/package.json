@@ -1,0 +1,29 @@
+{
+  "name": "@musai/test-support",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ts-esm": "./src/ts-esm.mjs",
+    "./workspace-sources": "./src/workspace-sources.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"test-support carries no tests of its own; every package's suite exercises it\""
+  },
+  "dependencies": {
+    "@musai/evaluate": "workspace:*",
+    "@musai/fold": "workspace:*",
+    "@musai/modules": "workspace:*",
+    "@musai/records": "workspace:*",
+    "@musai/store": "workspace:*",
+    "execa": "10.0.1",
+    "vitest": "4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  }
+}

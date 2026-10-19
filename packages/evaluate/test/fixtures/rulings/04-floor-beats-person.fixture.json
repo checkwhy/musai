@@ -1,0 +1,12 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Status' step five (the floor is strict and changes only by a configuration commit)",
+  "description": "the trust branch's own floor and a person's ruling conflict: the floor wins even though it was set long before the person ever ruled",
+  "reasoning": "the floor outranks every ruling and every piece of evidence unconditionally; it is not a ruling authority a person or policy can out-rank by any means, including recency",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }],
+  "rulings": [
+    { "id": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "principal": "alice@example.com", "authority": "person", "decidedAt": "2026-03-01T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "authority": "floor", "decidedAt": "2020-01-01T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "decidedBy": "authority" }
+}

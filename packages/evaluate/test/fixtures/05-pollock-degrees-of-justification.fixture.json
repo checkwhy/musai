@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Pollock (1995) 'Cognitive Carpentry' — reasons come in varying strength, and a stronger reason is never overridden by a weaker one dressed up with narrower scope or higher priority",
+  "description": "a citation, even narrowly scoped and heavily weighted, never beats a receipt: evidence kind is decided before specificity or weight are ever consulted",
+  "arguments": [
+    {
+      "id": "narrow-heavy-citation",
+      "evidenceChain": [{ "id": "narrow-heavy-citation#hop0", "kind": "citation" }],
+      "scope": { "kind": "point", "value": "exact-target" },
+      "weight": "10"
+    },
+    {
+      "id": "universal-light-receipt",
+      "evidenceChain": [{ "id": "universal-light-receipt#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "1"
+    }
+  ],
+  "expected": {
+    "winner": "universal-light-receipt",
+    "decidedBy": "evidence-kind"
+  }
+}

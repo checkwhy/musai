@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Modgil & Prakken (2013) 'A general account of argumentation with preferences' — ASPIC+ argument ordering falling back to rule preference when neither argument's premises are more specific",
+  "description": "two arguments scoped to disjoint, mutually non-containing points: neither is more specific than the other, so the declared rule preference (weight) decides",
+  "arguments": [
+    {
+      "id": "macos-rule",
+      "evidenceChain": [{ "id": "macos-rule#hop0", "kind": "receipt" }],
+      "scope": { "kind": "point", "value": "macos" },
+      "weight": "2"
+    },
+    {
+      "id": "windows-rule",
+      "evidenceChain": [{ "id": "windows-rule#hop0", "kind": "receipt" }],
+      "scope": { "kind": "point", "value": "windows" },
+      "weight": "5"
+    }
+  ],
+  "expected": {
+    "winner": "windows-rule",
+    "decidedBy": "weight"
+  }
+}

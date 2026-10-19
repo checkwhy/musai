@@ -1,0 +1,25 @@
+{
+  "kind": "adversarial",
+  "source": "Dung (1995); research/ARCHITECTURE.md Question 2 (the worklist processes each node once, so an unrelated part of the graph cannot leak into a claim it never attacked)",
+  "description": "an unattacked claim evaluated in the same graph as a wholly separate two-node cycle it shares no edge with",
+  "reasoning": "the cycle between y and z must not contaminate x's status — x has zero live attackers from the start and is labelled in on its own, independent of whatever else in the graph never reached a fixpoint",
+  "claims": [
+    { "id": "claim-x", "supportingArgumentIds": ["claim-x"] },
+    { "id": "claim-y", "supportingArgumentIds": ["claim-y"] },
+    { "id": "claim-z", "supportingArgumentIds": ["claim-z"] }
+  ],
+  "arguments": [
+    { "id": "claim-x", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-y", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-z", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "claim-y", "target": "claim-z" },
+    { "attacker": "claim-z", "target": "claim-y" }
+  ],
+  "expected": {
+    "claim-x": { "label": "holds" },
+    "claim-y": { "label": "open", "reason": "cycle" },
+    "claim-z": { "label": "open", "reason": "cycle" }
+  }
+}

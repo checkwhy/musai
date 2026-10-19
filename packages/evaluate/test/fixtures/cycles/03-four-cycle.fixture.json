@@ -1,0 +1,30 @@
+{
+  "kind": "cycle",
+  "source": "Dung (1995) grounded extension",
+  "description": "four claims attack in a ring: a attacks b, b attacks c, c attacks d, d attacks a",
+  "reasoning": "the cycle length does not matter to the worklist algorithm; every member of any pure cycle keeps exactly one live attacker forever, so a four-cycle leaves all four open with reason cycle exactly as a two- or three-cycle does",
+  "claims": [
+    { "id": "claim-a", "supportingArgumentIds": ["claim-a"] },
+    { "id": "claim-b", "supportingArgumentIds": ["claim-b"] },
+    { "id": "claim-c", "supportingArgumentIds": ["claim-c"] },
+    { "id": "claim-d", "supportingArgumentIds": ["claim-d"] }
+  ],
+  "arguments": [
+    { "id": "claim-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-b", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-c", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "claim-d", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "claim-a", "target": "claim-b" },
+    { "attacker": "claim-b", "target": "claim-c" },
+    { "attacker": "claim-c", "target": "claim-d" },
+    { "attacker": "claim-d", "target": "claim-a" }
+  ],
+  "expected": {
+    "claim-a": { "label": "open", "reason": "cycle" },
+    "claim-b": { "label": "open", "reason": "cycle" },
+    "claim-c": { "label": "open", "reason": "cycle" },
+    "claim-d": { "label": "open", "reason": "cycle" }
+  }
+}

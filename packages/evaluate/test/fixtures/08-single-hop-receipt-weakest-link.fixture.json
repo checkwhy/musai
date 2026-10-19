@@ -1,0 +1,10 @@
+{
+  "kind": "weakest-link",
+  "source": "Musai design, 'Status' (the weakest-link rule) — a chain of one hop is capped by that hop alone",
+  "description": "a single-hop receipt chain: the weakest link is the receipt itself, at the only hop there is",
+  "chain": [{ "id": "only-hop", "kind": "receipt" }],
+  "expected": {
+    "cappedKind": "receipt",
+    "cappedHopIndex": 0
+  }
+}

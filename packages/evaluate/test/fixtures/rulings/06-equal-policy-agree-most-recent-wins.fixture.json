@@ -1,0 +1,12 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (a policy is a standing ruling with a principal and a scope)",
+  "description": "two standing policies at the same authority agree on the verdict, one superseding the other in time",
+  "reasoning": "agreeing rulings at one authority are a sequence, not a conflict — the later one is the standing decision as of now, so time only ever breaks a tie among rulings that already agree",
+  "grants": [{ "principal": "alice@example.com", "role": "maintainer" }],
+  "rulings": [
+    { "id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "principal": "alice@example.com", "authority": "policy", "decidedAt": "2026-01-01T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "principal": "alice@example.com", "authority": "policy", "decidedAt": "2026-06-01T00:00:00.000Z", "verdict": "holds" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "decidedBy": "time" }
+}

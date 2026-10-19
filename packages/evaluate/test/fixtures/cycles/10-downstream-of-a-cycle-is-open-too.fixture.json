@@ -1,0 +1,18 @@
+{
+  "kind": "adversarial",
+  "source": "Dung (1995); research/ARCHITECTURE.md Question 2 (undec propagates to anything reachable only through the cycle)",
+  "description": "a claim whose only supporting argument is itself caught in an unrelated two-node cycle, where the claim's own id is not a node in the attack graph at all",
+  "reasoning": "this exercises the other cycle-detection path from the self-attacking and mutual-attack fixtures: the claim is never directly attacked, so its own label is never consulted — it is open with reason cycle because its sole supporting argument never resolves out of undec, not because the claim itself is part of the cycle",
+  "claims": [{ "id": "downstream-claim", "supportingArgumentIds": ["cyc-a"] }],
+  "arguments": [
+    { "id": "cyc-a", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" },
+    { "id": "cyc-b", "evidenceKind": "receipt", "scope": { "kind": "any" }, "weight": "1" }
+  ],
+  "attacks": [
+    { "attacker": "cyc-a", "target": "cyc-b" },
+    { "attacker": "cyc-b", "target": "cyc-a" }
+  ],
+  "expected": {
+    "downstream-claim": { "label": "open", "reason": "cycle" }
+  }
+}

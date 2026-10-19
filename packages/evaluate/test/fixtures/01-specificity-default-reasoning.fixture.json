@@ -1,0 +1,23 @@
+{
+  "kind": "ordering",
+  "source": "Poole (1985) specificity ordering for default reasoning, as surveyed in Prakken & Sartor (1997) 'Argument-based extended logic programming with defeasible priorities'",
+  "description": "a claim scoped to a specific bird narrower than one scoped to birds in general, equal in evidence kind and weight: the narrower one wins on specificity alone",
+  "arguments": [
+    {
+      "id": "birds-fly",
+      "evidenceChain": [{ "id": "birds-fly#hop0", "kind": "receipt" }],
+      "scope": { "kind": "any" },
+      "weight": "1"
+    },
+    {
+      "id": "penguins-dont-fly",
+      "evidenceChain": [{ "id": "penguins-dont-fly#hop0", "kind": "receipt" }],
+      "scope": { "kind": "point", "value": "penguin" },
+      "weight": "1"
+    }
+  ],
+  "expected": {
+    "winner": "penguins-dont-fly",
+    "decidedBy": "specificity"
+  }
+}

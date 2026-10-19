@@ -1,0 +1,12 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (person, then policy, then delegate)",
+  "description": "a person's ruling and a delegate's provisional ruling conflict directly, skipping the policy tier entirely",
+  "reasoning": "the ordering is total across all three tiers, not just adjacent ones, so person still outranks delegate with no policy present to mediate",
+  "grants": [{ "principal": "alice@example.com", "role": "owner" }, { "principal": "the-agent", "role": "delegate" }],
+  "rulings": [
+    { "id": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "principal": "the-agent", "authority": "delegate", "decidedAt": "2026-01-10T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "principal": "alice@example.com", "authority": "person", "decidedAt": "2026-01-01T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "decided", "winnerId": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "decidedBy": "authority" }
+}

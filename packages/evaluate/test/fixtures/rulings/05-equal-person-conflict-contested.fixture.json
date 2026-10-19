@@ -1,0 +1,15 @@
+{
+  "kind": "ruling",
+  "source": "Musai design, 'Authority' (equal authority in conflict is open with reason contested, gated to the arbiter)",
+  "description": "two people rule on the same claim with opposite verdicts",
+  "reasoning": "two people disagreeing is not a sequence a later timestamp can resolve into a decision neither of them actually made; the design gates this to the arbiter rather than picking the more recent ruling",
+  "grants": [
+    { "principal": "alice@example.com", "role": "owner" },
+    { "principal": "bob@example.com", "role": "arbiter" }
+  ],
+  "rulings": [
+    { "id": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "principal": "alice@example.com", "authority": "person", "decidedAt": "2026-01-01T00:00:00.000Z", "verdict": "holds" },
+    { "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "principal": "bob@example.com", "authority": "person", "decidedAt": "2026-01-05T00:00:00.000Z", "verdict": "fails" }
+  ],
+  "expected": { "outcome": "contested" }
+}

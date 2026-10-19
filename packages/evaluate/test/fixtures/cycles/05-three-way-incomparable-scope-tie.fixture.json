@@ -1,0 +1,16 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Status' step three (scopes neither of which contains the other count as equal) generalised to three candidates",
+  "description": "three supporting arguments at three distinct, mutually incomparable point scopes, equal evidence kind and equal weight",
+  "reasoning": "a point scope contains only its own value, so three distinct points are pairwise incomparable; with evidence kind and weight tied too, no argument beats any other, and since all three support the claim they corroborate it: the claim holds, led by the first in id order and beating none of the others, never open as though they disagreed",
+  "claims": [{ "id": "claim-x", "supportingArgumentIds": ["arg-alpha", "arg-beta", "arg-gamma"] }],
+  "arguments": [
+    { "id": "arg-alpha", "evidenceKind": "receipt", "scope": { "kind": "point", "value": "alpha" }, "weight": "1" },
+    { "id": "arg-beta", "evidenceKind": "receipt", "scope": { "kind": "point", "value": "beta" }, "weight": "1" },
+    { "id": "arg-gamma", "evidenceKind": "receipt", "scope": { "kind": "point", "value": "gamma" }, "weight": "1" }
+  ],
+  "attacks": [],
+  "expected": {
+    "claim-x": { "label": "holds", "winner": "arg-alpha", "rival": null, "corroborated": ["arg-beta", "arg-gamma"] }
+  }
+}

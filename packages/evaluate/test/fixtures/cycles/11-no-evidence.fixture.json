@@ -1,0 +1,12 @@
+{
+  "kind": "adversarial",
+  "source": "Musai design, 'Status' (validity is decided before anything is weighed; nothing is counted)",
+  "description": "a claim with no supporting arguments and no attacks against it at all",
+  "reasoning": "a claim nobody has offered any evidence for is open with reason no-evidence — never holds, never fails, and never confused with an unresolved cycle since it never enters the fixpoint's worklist in the first place",
+  "claims": [{ "id": "claim-empty", "supportingArgumentIds": [] }],
+  "arguments": [],
+  "attacks": [],
+  "expected": {
+    "claim-empty": { "label": "open", "reason": "no-evidence" }
+  }
+}
