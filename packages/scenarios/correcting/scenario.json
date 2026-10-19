@@ -1,0 +1,90 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/casebook/modules/casebook",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "corrected-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/corrected"
+      ]
+    },
+    { "id": "progress-1", "args": ["lab", "progress", "corrected-1"] },
+    { "id": "ask-1", "args": ["lab", "ask", "${progress-1.next.gate}"] },
+    {
+      "id": "answer-1",
+      "args": [
+        "lab",
+        "answer",
+        "${ask-1.pending.input.pending}",
+        "--brief",
+        "${ask-1.brief}",
+        "--choice",
+        "holds",
+        "--reason",
+        "worth the fix"
+      ]
+    },
+    { "id": "status-1", "args": ["status", "${book.minted.2.record.slot}"] },
+    { "id": "ask-2", "args": ["lab", "ask", "${ask-1.pending.input.pending}"] },
+    {
+      "id": "correct",
+      "args": [
+        "lab",
+        "rule",
+        "${ask-1.pending.input.pending}",
+        "--verdict",
+        "fails",
+        "--reason",
+        "the first read found a reason after all",
+        "--brief",
+        "${ask-2.brief}",
+        "--supersedes",
+        "${answer-1.minted.0.id}"
+      ]
+    },
+    { "id": "status-2", "args": ["status", "${book.minted.2.record.slot}"], "exit": 7 },
+    { "id": "why-2", "args": ["why", "${book.minted.2.record.slot}", "--full"] },
+    {
+      "id": "again",
+      "args": [
+        "lab",
+        "rule",
+        "${ask-1.pending.input.pending}",
+        "--verdict",
+        "fails",
+        "--reason",
+        "a second try",
+        "--brief",
+        "${ask-2.brief}",
+        "--supersedes",
+        "${answer-1.minted.0.id}"
+      ],
+      "exit": 2
+    },
+    { "id": "pending", "args": ["lab", "pending"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["status-2", "why-2", "pending", "log"],
+  "holds": [],
+  "unrecorded": []
+}

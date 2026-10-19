@@ -1,0 +1,91 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "pack",
+      "args": ["lab", "module", "build", "$SCENARIO/modules/fieldwork", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "book-owl",
+      "args": [
+        "lab",
+        "book",
+        "owl-3",
+        "--kind",
+        "fixture-fieldwork/survey",
+        "--about",
+        "https://example.test/sites/owl-3?severity=1&exit=0"
+      ]
+    },
+    {
+      "id": "book-bat",
+      "args": [
+        "lab",
+        "book",
+        "bat-2",
+        "--kind",
+        "fixture-fieldwork/survey",
+        "--about",
+        "https://example.test/sites/bat-2?severity=3&exit=1"
+      ],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    {
+      "id": "book-ant",
+      "args": [
+        "lab",
+        "book",
+        "ant-1",
+        "--kind",
+        "fixture-fieldwork/survey",
+        "--about",
+        "https://example.test/sites/ant-1?severity=3&exit=2"
+      ],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    { "id": "soundcheck-owl", "args": ["lab", "soundcheck", "owl-3"], "now": "2026-01-02T00:00:00.000Z" },
+    { "id": "soundcheck-bat", "args": ["lab", "soundcheck", "bat-2"], "now": "2026-01-02T00:00:00.000Z" },
+    { "id": "soundcheck-ant", "args": ["lab", "soundcheck", "ant-1"], "now": "2026-01-02T00:00:00.000Z" },
+    {
+      "id": "status-graded",
+      "args": ["status", "${book-owl.minted.2.record.slot}"],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    {
+      "id": "why-graded",
+      "args": ["why", "${book-owl.minted.2.record.slot}", "--full"],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    {
+      "id": "status-reproduced",
+      "args": ["status", "${book-ant.minted.1.record.slot}"],
+      "now": "2026-01-02T00:00:00.000Z",
+      "exit": 7
+    },
+    {
+      "id": "why-reproduced",
+      "args": ["why", "${book-ant.minted.1.record.slot}", "--full"],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    { "id": "list", "args": ["lab", "list"], "now": "2026-01-02T00:00:00.000Z" },
+    {
+      "id": "severe",
+      "args": ["lab", "list", "--view", "fixture-fieldwork/severe"],
+      "now": "2026-01-02T00:00:00.000Z"
+    },
+    { "id": "log", "args": ["lab", "log"], "now": "2026-01-02T00:00:00.000Z" }
+  ],
+  "replay": [
+    "soundcheck-owl",
+    "soundcheck-bat",
+    "soundcheck-ant",
+    "status-graded",
+    "status-reproduced",
+    "why-graded",
+    "why-reproduced",
+    "list",
+    "severe"
+  ],
+  "holds": ["why-graded", "why-reproduced"],
+  "unrecorded": []
+}

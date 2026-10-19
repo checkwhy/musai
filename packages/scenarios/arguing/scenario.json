@@ -1,0 +1,54 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/casebook/modules/casebook",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "argued-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/argued"
+      ]
+    },
+    { "id": "status-1", "args": ["status", "${book.minted.1.record.slot}"] },
+    { "id": "why-1", "args": ["why", "${book.minted.1.record.slot}", "--full"] },
+    {
+      "id": "challenge",
+      "args": [
+        "lab",
+        "challenge",
+        "${why-1.derivation.children.0.children.0.id}",
+        "--run",
+        "${why-1.derivation.children.0.children.0.id}",
+        "--selector",
+        "musai.core/exit-code@1:exitCode",
+        "--reason",
+        "the suite passes for the wrong reason"
+      ]
+    },
+    { "id": "status-2", "args": ["status", "${book.minted.1.record.slot}"], "exit": 7 },
+    { "id": "why-2", "args": ["why", "${book.minted.1.record.slot}", "--full"] },
+    { "id": "soundcheck", "args": ["lab", "soundcheck", "argued-1"] }
+  ],
+  "replay": ["status-2", "why-2", "soundcheck"],
+  "holds": ["why-1"],
+  "unrecorded": []
+}

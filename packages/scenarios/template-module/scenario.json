@@ -1,0 +1,12 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    { "id": "new", "args": ["lab", "module", "new", "$WORKSPACE/scaffolded"] },
+    { "id": "build", "args": ["lab", "module", "build", "$WORKSPACE/scaffolded"] },
+    { "id": "test", "args": ["lab", "module", "test", "$WORKSPACE/scaffolded"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["log"],
+  "holds": [],
+  "unrecorded": []
+}

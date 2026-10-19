@@ -1,0 +1,1 @@
+{"about":["public"],"code":"invocation","detail":"refusing to run under the clearance public: a run there goes through a container, the recipe declares no image, and the trust branch's configuration names no station.image","reason":"invalid-input"}

@@ -1,0 +1,21 @@
+{
+  "steps": [
+    {
+      "id": "project",
+      "commit": { "repo": "$WORKSPACE", "from": "$SCENARIO/trees/1", "message": "a project with one check" }
+    },
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    { "id": "check", "args": ["check", "the greeting says hello", "node", "check.js"] },
+    { "id": "render", "args": ["render"] },
+    { "id": "edit", "edit": { "path": "$WORKSPACE/greeting.json", "json": { "greeting": "goodbye" } } },
+    { "id": "render-moved", "args": ["render"] },
+    { "id": "status-moved", "args": ["status", "${check.short}"], "exit": 7 },
+    { "id": "restore", "edit": { "path": "$WORKSPACE/greeting.json", "json": { "greeting": "hello" } } },
+    { "id": "check-restored", "args": ["check", "the greeting says hello", "node", "check.js"] },
+    { "id": "why", "args": ["why", "the greeting says hello", "--full"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["render", "why", "log"],
+  "holds": ["why"],
+  "unrecorded": []
+}

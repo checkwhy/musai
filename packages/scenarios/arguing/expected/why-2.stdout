@@ -1,0 +1,1 @@
+{"label":"open","reason":"no-evidence","runs":[{"agrees":false,"command":["node","-e","process.exit(0)"],"exitCode":0,"id":"sha256:<id-14>","outputTail":[],"trees":[]}],"short":"<id-10:12>","statement":"the fault reported in https://example.test/reports/argued reproduces","via":"no evidence"}

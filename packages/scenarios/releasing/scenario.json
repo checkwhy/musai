@@ -1,0 +1,28 @@
+{
+  "steps": [
+    {
+      "id": "project",
+      "commit": { "repo": "$WORKSPACE", "from": "$SCENARIO/trees/1", "message": "a project with one check" }
+    },
+    { "id": "init", "args": ["init", "$WORKSPACE", "--key", "$KEYS/scenario-test-key"] },
+    { "id": "check", "args": ["check", "the greeting says hello", "node", "check.js"] },
+    {
+      "id": "export",
+      "args": [
+        "export",
+        "${check.short}",
+        "--to",
+        "public",
+        "--out",
+        "$WORKSPACE/.musai/local/bundle.tar.gz",
+        "--key",
+        "$KEYS/scenario-test-key"
+      ]
+    },
+    { "id": "rerun-shown", "args": ["rerun", "$WORKSPACE/.musai/local/bundle.tar.gz"] },
+    { "id": "rerun", "args": ["rerun", "$WORKSPACE/.musai/local/bundle.tar.gz", "--yes"] }
+  ],
+  "replay": ["rerun-shown"],
+  "holds": [],
+  "unrecorded": []
+}

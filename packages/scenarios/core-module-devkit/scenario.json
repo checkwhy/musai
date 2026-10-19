@@ -1,0 +1,14 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "build",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    { "id": "test", "args": ["lab", "module", "test", "$REPO/packages/core-module"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["log"],
+  "holds": [],
+  "unrecorded": []
+}

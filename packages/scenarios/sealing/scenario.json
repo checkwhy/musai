@@ -1,0 +1,114 @@
+{
+  "steps": [
+    {
+      "id": "project",
+      "commit": { "repo": "$WORKSPACE", "from": "$SCENARIO/trees/1", "message": "a project with one check" }
+    },
+    { "id": "init", "args": ["init", "$WORKSPACE", "--key", "$KEYS/scenario-test-key"] },
+    { "id": "check", "args": ["check", "the greeting says hello", "node", "check.js"] },
+    {
+      "id": "hidden",
+      "args": ["check", "canary-9d41b7: words only their author reads", "node", "check.js", "greeting.json"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/casebook/modules/casebook",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "report-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/1"
+      ]
+    },
+    {
+      "id": "seal",
+      "args": ["lab", "seal", "${hidden.claim}", "--from", "public", "--key", "$KEYS/scenario-test-key"]
+    },
+    { "id": "author-why-1", "args": ["why", "${hidden.short}", "--full"] },
+    {
+      "id": "challenge",
+      "args": [
+        "lab",
+        "challenge",
+        "${book.minted.2.id}",
+        "--run",
+        "${author-why-1.runs.0.id}",
+        "--selector",
+        "musai.core/exit-code@1:exitCode",
+        "--reason",
+        "canary-3e5c20: a challenge only its author reads"
+      ]
+    },
+    {
+      "id": "seal-challenge",
+      "args": ["lab", "seal", "${challenge.minted.0.id}", "--from", "public", "--key", "$KEYS/scenario-test-key"]
+    },
+    { "id": "author-brief", "args": ["lab", "brief", "${book.minted.2.id}"] },
+    { "id": "station-warm-status", "args": ["status", "${check.short}", "--plan"], "exit": 7, "clearance": "public" },
+    { "id": "station-warm-soundcheck", "args": ["lab", "soundcheck", "report-1"], "exit": 2, "clearance": "public" },
+    { "id": "station-status-1", "args": ["status", "${check.short}", "--plan"], "exit": 7, "clearance": "public" },
+    { "id": "station-why-1", "args": ["why", "${check.short}", "--full", "--plan"], "clearance": "public" },
+    {
+      "id": "station-status-hidden-1",
+      "args": ["status", "${hidden.short}", "--plan"],
+      "exit": 2,
+      "clearance": "public"
+    },
+    {
+      "id": "station-why-hidden-1",
+      "args": ["why", "${hidden.short}", "--full", "--plan"],
+      "exit": 2,
+      "clearance": "public"
+    },
+    { "id": "station-render-1", "args": ["render"], "clearance": "public" },
+    { "id": "station-brief-1", "args": ["lab", "brief", "${book.minted.2.id}", "--plan"], "clearance": "public" },
+    { "id": "station-soundcheck-1", "args": ["lab", "soundcheck", "report-1"], "exit": 2, "clearance": "public" },
+    { "id": "station-progress-1", "args": ["lab", "progress", "report-1", "--plan"], "clearance": "public" },
+    { "id": "station-pending-1", "args": ["lab", "pending"], "clearance": "public" },
+    { "id": "station-list-1", "args": ["lab", "list"], "clearance": "public" },
+    { "id": "station-log-1", "args": ["lab", "log"], "clearance": "public" },
+    {
+      "id": "restate",
+      "args": ["check", "canary-9d41b7: words only their author reads", "--replace", "node", "check.js"]
+    },
+    { "id": "author-why-2", "args": ["why", "${hidden.short}", "--full"] },
+    { "id": "station-status-2", "args": ["status", "${check.short}", "--plan"], "exit": 7, "clearance": "public" },
+    { "id": "station-why-2", "args": ["why", "${check.short}", "--full", "--plan"], "clearance": "public" },
+    {
+      "id": "station-status-hidden-2",
+      "args": ["status", "${hidden.short}", "--plan"],
+      "exit": 2,
+      "clearance": "public"
+    },
+    {
+      "id": "station-why-hidden-2",
+      "args": ["why", "${hidden.short}", "--full", "--plan"],
+      "exit": 2,
+      "clearance": "public"
+    },
+    { "id": "station-render-2", "args": ["render"], "clearance": "public" },
+    { "id": "station-brief-2", "args": ["lab", "brief", "${book.minted.2.id}", "--plan"], "clearance": "public" },
+    { "id": "station-soundcheck-2", "args": ["lab", "soundcheck", "report-1"], "exit": 2, "clearance": "public" },
+    { "id": "station-progress-2", "args": ["lab", "progress", "report-1", "--plan"], "clearance": "public" },
+    { "id": "station-pending-2", "args": ["lab", "pending"], "clearance": "public" },
+    { "id": "station-list-2", "args": ["lab", "list"], "clearance": "public" },
+    { "id": "station-log-2", "args": ["lab", "log"], "clearance": "public" },
+    { "id": "author-log", "args": ["lab", "log"] }
+  ],
+  "replay": ["station-why-2", "station-status-hidden-2", "station-brief-2", "station-soundcheck-2", "station-log-2"],
+  "holds": ["author-why-2"],
+  "unrecorded": []
+}

@@ -1,0 +1,56 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": ["lab", "module", "build", "$SCENARIO/modules/checkout", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "checkout-1",
+      "commit": { "repo": "$WORKSPACE/checkout", "from": "$SCENARIO/trees/1", "message": "the first tree" }
+    },
+    {
+      "id": "bind",
+      "edit": {
+        "path": "$WORKSPACE/.musai/local/checkouts.json",
+        "json": { "checkout": { "directory": "$WORKSPACE/checkout" } }
+      }
+    },
+    {
+      "id": "book-1",
+      "args": ["lab", "book", "change-1", "--kind", "fixture-checkout/change", "--about", "${checkout-1.commit}"]
+    },
+    { "id": "status-1", "args": ["status", "${book-1.minted.1.record.slot}"] },
+    { "id": "why-1", "args": ["why", "${book-1.minted.1.record.slot}", "--full"] },
+    {
+      "id": "checkout-2",
+      "commit": { "repo": "$WORKSPACE/checkout", "from": "$SCENARIO/trees/2", "message": "the second tree" }
+    },
+    {
+      "id": "book-2",
+      "args": ["lab", "book", "change-2", "--kind", "fixture-checkout/change", "--about", "${checkout-2.commit}"]
+    },
+    { "id": "status-2", "args": ["status", "${book-2.minted.1.record.slot}"] },
+    { "id": "why-2", "args": ["why", "${book-2.minted.1.record.slot}", "--full"] },
+    { "id": "status-1-moved", "args": ["status", "${book-1.minted.1.record.slot}"] },
+    {
+      "id": "checkout-3",
+      "commit": { "repo": "$WORKSPACE/checkout", "from": "$SCENARIO/trees/3", "message": "the third tree" }
+    },
+    { "id": "dirty", "edit": { "path": "$WORKSPACE/checkout/README", "append": "an edit never committed\n" } },
+    {
+      "id": "book-3",
+      "args": ["lab", "book", "change-3", "--kind", "fixture-checkout/change", "--about", "${checkout-3.commit}"]
+    },
+    { "id": "status-3-dirty", "args": ["status", "${book-3.minted.1.record.slot}"], "exit": 7 },
+    { "id": "list", "args": ["lab", "list"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["status-1-moved", "status-3-dirty", "list", "log"],
+  "holds": ["why-1", "why-2"],
+  "unrecorded": []
+}

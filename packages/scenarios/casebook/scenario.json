@@ -1,0 +1,68 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": ["lab", "module", "build", "$SCENARIO/modules/casebook", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "report-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/1"
+      ]
+    },
+    { "id": "status-check", "args": ["status", "${book.minted.1.record.slot}"] },
+    { "id": "why-check", "args": ["why", "${book.minted.1.record.slot}", "--full"] },
+    { "id": "progress-1", "args": ["lab", "progress", "report-1"] },
+    { "id": "pending-1", "args": ["lab", "pending"] },
+    { "id": "ask-1", "args": ["lab", "ask", "${progress-1.next.gate}"] },
+    {
+      "id": "answer-1",
+      "args": [
+        "lab",
+        "answer",
+        "${ask-1.pending.input.pending}",
+        "--brief",
+        "${ask-1.brief}",
+        "--choice",
+        "holds",
+        "--reason",
+        "worth the fix"
+      ]
+    },
+    { "id": "progress-2", "args": ["lab", "progress", "report-1"] },
+    { "id": "ask-2", "args": ["lab", "ask", "${progress-2.next.gate}"] },
+    {
+      "id": "answer-2",
+      "args": [
+        "lab",
+        "answer",
+        "${ask-2.pending.input.pending}",
+        "--brief",
+        "${ask-2.brief}",
+        "--choice",
+        "${ask-2.options.0.value}",
+        "--reason",
+        "file it"
+      ]
+    },
+    { "id": "soundcheck", "args": ["lab", "soundcheck", "report-1"] },
+    { "id": "progress-3", "args": ["lab", "progress", "report-1"] },
+    { "id": "pending-2", "args": ["lab", "pending"] },
+    { "id": "list", "args": ["lab", "list"] },
+    { "id": "log", "args": ["lab", "log"] }
+  ],
+  "replay": ["soundcheck", "status-check", "why-check", "progress-3", "pending-2", "list", "log"],
+  "holds": ["why-check"],
+  "unrecorded": []
+}

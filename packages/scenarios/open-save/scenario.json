@@ -1,0 +1,43 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/open-save/modules/drafting",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "drafted-1",
+        "--preset",
+        "drafting/report",
+        "--about",
+        "https://example.test/reports/drafted"
+      ]
+    },
+    { "id": "open", "args": ["lab", "open", "drafted-1"] },
+    {
+      "id": "edit",
+      "edit": { "path": "${open.path}/${open.files.1}", "append": "\nA sentence a person added by hand.\n" }
+    },
+    { "id": "save", "args": ["lab", "save", "drafted-1"] },
+    { "id": "list", "args": ["lab", "list"] },
+    { "id": "save-again", "args": ["lab", "save", "drafted-1"] }
+  ],
+  "replay": ["list"],
+  "holds": [],
+  "unrecorded": []
+}

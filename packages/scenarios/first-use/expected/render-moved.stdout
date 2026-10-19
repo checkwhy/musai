@@ -1,0 +1,1 @@
+{"claims":[{"label":"open","reason":"stale","short":"<id-2:12>","statement":"the greeting says hello"}],"markdown":"- [ ] ◌ the greeting says hello (stale) · `node check.js` — `musai why <id-2:12>`"}

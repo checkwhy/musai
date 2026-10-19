@@ -1,0 +1,50 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/casebook/modules/casebook",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    {
+      "id": "book",
+      "args": [
+        "lab",
+        "book",
+        "brief-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/brief"
+      ]
+    },
+    { "id": "progress", "args": ["lab", "progress", "brief-1"] },
+    { "id": "brief-1", "args": ["lab", "brief", "${progress.next.gate}"] },
+    {
+      "id": "book-2",
+      "args": [
+        "lab",
+        "book",
+        "brief-2",
+        "--kind",
+        "fixture-casebook/report",
+        "--about",
+        "https://example.test/reports/other"
+      ]
+    },
+    { "id": "brief-2", "args": ["lab", "brief", "${progress.next.gate}"] }
+  ],
+  "replay": ["progress"],
+  "holds": [],
+  "unrecorded": []
+}

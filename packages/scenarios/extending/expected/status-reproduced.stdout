@@ -1,0 +1,1 @@
+{"comparison":{"corroborated":[],"rival":"sha256:<id-17>","via":"a challenge to the claim itself","winner":"sha256:<id-15>#rule:musai.core/declarative"},"decidedBy":{"command":["node","-e","process.exit(2)"],"id":"sha256:<id-20>","kind":"run"},"label":"fails","reason":null,"short":"<id-17:12>"}

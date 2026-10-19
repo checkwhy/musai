@@ -1,0 +1,1 @@
+{"minted":[{"id":"sha256:<id-22>","kind":"attestation","record":{"at":"<time>","kind":"attestation","principal":"key:SHA256:Wvg1P7BiLh3uNN2N0Ujsg8lHAAxsPBdB0kxKgQlTuuE","principalClass":"agent","purpose":"sealed","schemaVersion":6,"seal":{"audience":"public"},"subject":"sha256:<id-19>","supersedes":[],"via":"process"}}],"unchanged":0}
