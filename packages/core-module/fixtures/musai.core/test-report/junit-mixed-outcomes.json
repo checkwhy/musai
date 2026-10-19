@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "contribution": "parser",
+  "input": {
+    "output": "<testsuite><testcase name=\"passes\"/><testcase name=\"fails\"><failure message=\"boom\"/></testcase><testcase name=\"errors\"><error message=\"broke\"/></testcase></testsuite>",
+    "exitCode": 1
+  }
+}

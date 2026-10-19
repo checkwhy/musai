@@ -1,0 +1,58 @@
+{
+  "response": {
+    "": {
+      "data": {
+        "status": "ok",
+        "items": [
+          1,
+          2
+        ]
+      }
+    },
+    "/data": {
+      "status": "ok",
+      "items": [
+        1,
+        2
+      ]
+    },
+    "/data/status": "ok",
+    "/data/items": [
+      1,
+      2
+    ],
+    "/data/items/0": 1,
+    "/data/items/1": 2
+  },
+  "reads": [],
+  "rounds": [
+    {
+      "output": {
+        "": {
+          "data": {
+            "status": "ok",
+            "items": [
+              1,
+              2
+            ]
+          }
+        },
+        "/data": {
+          "status": "ok",
+          "items": [
+            1,
+            2
+          ]
+        },
+        "/data/status": "ok",
+        "/data/items": [
+          1,
+          2
+        ],
+        "/data/items/0": 1,
+        "/data/items/1": 2
+      },
+      "reads": []
+    }
+  ]
+}

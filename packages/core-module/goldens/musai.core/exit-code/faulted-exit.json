@@ -1,0 +1,14 @@
+{
+  "response": {
+    "exitCode": 1
+  },
+  "reads": [],
+  "rounds": [
+    {
+      "output": {
+        "exitCode": 1
+      },
+      "reads": []
+    }
+  ]
+}

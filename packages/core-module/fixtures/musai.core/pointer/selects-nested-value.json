@@ -1,0 +1,5 @@
+{
+  "version": "1",
+  "contribution": "parser",
+  "input": { "output": "{\"data\":{\"status\":\"ok\",\"items\":[1,2]}}", "exitCode": 0 }
+}

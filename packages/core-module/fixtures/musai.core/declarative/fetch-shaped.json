@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "input": {
+    "claimId": "declarative-fetch-shaped",
+    "conditions": {
+      "musai.core/declarative": "{\"recipes\":[{\"name\":\"f\",\"kind\":\"fetch\",\"recipe\":{\"locator\":\"http://127.0.0.1:18351/\",\"headers\":[],\"names\":[]}}],\"expectations\":[{\"kind\":\"exitCodeIs\",\"recipe\":\"f\",\"value\":200},{\"kind\":\"equals\",\"selector\":{\"recipe\":\"f\",\"field\":\"output\"},\"value\":\"ok\"}]}"
+    },
+    "evidence": []
+  }
+}

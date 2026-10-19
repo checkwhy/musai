@@ -1,0 +1,7 @@
+{
+  "operation": "case.soundcheck",
+  "version": "1",
+  "input": {
+    "case": "op-log-case"
+  }
+}

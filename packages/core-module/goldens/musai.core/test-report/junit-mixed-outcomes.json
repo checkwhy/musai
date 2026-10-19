@@ -1,0 +1,18 @@
+{
+  "response": {
+    "passes": "passed",
+    "fails": "failed",
+    "errors": "errored"
+  },
+  "reads": [],
+  "rounds": [
+    {
+      "output": {
+        "passes": "passed",
+        "fails": "failed",
+        "errors": "errored"
+      },
+      "reads": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "input": {
+    "claimId": "declarative-data-only-example",
+    "conditions": {
+      "musai.core/declarative": "{\"recipes\":[{\"name\":\"r\",\"kind\":\"run\",\"recipe\":{\"command\":[\"node\",\"-e\",\"process.exit(0)\"],\"workingDirectory\":\"/\",\"environment\":{},\"declared\":[],\"substrates\":[],\"isolation\":\"hygiene\"}}],\"expectations\":[{\"kind\":\"exitCodeIs\",\"recipe\":\"r\",\"value\":0}]}"
+    },
+    "evidence": []
+  }
+}

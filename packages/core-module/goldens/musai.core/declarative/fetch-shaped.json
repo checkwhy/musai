@@ -1,0 +1,42 @@
+{
+  "response": {
+    "kind": "verdict",
+    "label": "fails",
+    "reason": "f's exit code is -1, not 200"
+  },
+  "reads": [
+    "dim:musai.core/declarative={\"recipes\":[{\"name\":\"f\",\"kind\":\"fetch\",\"recipe\":{\"locator\":\"http://127.0.0.1:18351/\",\"headers\":[],\"names\":[]}}],\"expectations\":[{\"kind\":\"exitCodeIs\",\"recipe\":\"f\",\"value\":200},{\"kind\":\"equals\",\"selector\":{\"recipe\":\"f\",\"field\":\"output\"},\"value\":\"ok\"}]}",
+    "evidence:sha256:4cbd5df5bc195938cb0a6cf209c53340e128e9c3ced6180592ab3465363eccf7"
+  ],
+  "rounds": [
+    {
+      "output": {
+        "kind": "request",
+        "needs": [
+          {
+            "kind": "fetch",
+            "recipe": {
+              "locator": "http://127.0.0.1:18351/",
+              "headers": [],
+              "names": []
+            }
+          }
+        ]
+      },
+      "reads": [
+        "dim:musai.core/declarative={\"recipes\":[{\"name\":\"f\",\"kind\":\"fetch\",\"recipe\":{\"locator\":\"http://127.0.0.1:18351/\",\"headers\":[],\"names\":[]}}],\"expectations\":[{\"kind\":\"exitCodeIs\",\"recipe\":\"f\",\"value\":200},{\"kind\":\"equals\",\"selector\":{\"recipe\":\"f\",\"field\":\"output\"},\"value\":\"ok\"}]}"
+      ]
+    },
+    {
+      "output": {
+        "kind": "verdict",
+        "label": "fails",
+        "reason": "f's exit code is -1, not 200"
+      },
+      "reads": [
+        "dim:musai.core/declarative={\"recipes\":[{\"name\":\"f\",\"kind\":\"fetch\",\"recipe\":{\"locator\":\"http://127.0.0.1:18351/\",\"headers\":[],\"names\":[]}}],\"expectations\":[{\"kind\":\"exitCodeIs\",\"recipe\":\"f\",\"value\":200},{\"kind\":\"equals\",\"selector\":{\"recipe\":\"f\",\"field\":\"output\"},\"value\":\"ok\"}]}",
+        "evidence:sha256:4cbd5df5bc195938cb0a6cf209c53340e128e9c3ced6180592ab3465363eccf7"
+      ]
+    }
+  ]
+}
