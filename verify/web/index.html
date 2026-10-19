@@ -143,9 +143,9 @@ a { color: var(--accent); }
   <details id="keys">
     <summary>Check signatures against keys you choose</summary>
     <label for="allowed-signers">Allowed signers, as <code>ssh-keygen</code> reads them</label>
-    <textarea id="allowed-signers" rows="4" spellcheck="false" placeholder="florin ssh-ed25519 AAAAC3Nza…"></textarea>
+    <textarea id="allowed-signers" rows="4" spellcheck="false" placeholder="alice ssh-ed25519 AAAAC3Nza…"></textarea>
     <label for="pins">Pinned keys, one <code>principal=SHA256:fingerprint</code> per line</label>
-    <textarea id="pins" rows="2" spellcheck="false" placeholder="florin=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY"></textarea>
+    <textarea id="pins" rows="2" spellcheck="false" placeholder="alice=SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY"></textarea>
     <p class="hint">Either replaces the allowed signers the bundle carries. Changing them checks the last bundle again.</p>
   </details>
 

@@ -195,3 +195,13 @@ func TestASignerNamedByKeyIsShownWithTheNameItsLineListsBesideIt(t *testing.T) {
 		t.Fatalf("%s: %q", out.Code, out.Detail)
 	}
 }
+
+func TestASignerNamedByItsKeyAloneIsShownByThatKeyOnce(t *testing.T) {
+	message, signature := read(t, attestationPath), read(t, attestationPath+".sig")
+	const key = "key:SHA256:y4ICVW80MG0xQMifgK91MGvkzy6PZDiva22Ln16p6vY"
+	line := strings.Replace(string(read(t, "allowed-signers")), "florin ", key+" ", 1)
+	out := sig.Verify(message, signature, key, attestedAt, signers(t, line))
+	if out.Code != "" || !strings.HasPrefix(out.Detail, "signed by "+key+", trusted by") {
+		t.Fatalf("%s: %q", out.Code, out.Detail)
+	}
+}

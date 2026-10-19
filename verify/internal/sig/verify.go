@@ -60,7 +60,11 @@ func Verify(message, armored []byte, principal string, at time.Time, signers []S
 		}
 		reason := signer.admits(at)
 		if reason.Code == "" {
-			signedBy := fmt.Sprintf("%s (%s)", principal, ssh.FingerprintSHA256(signature.PublicKey))
+			fingerprint := ssh.FingerprintSHA256(signature.PublicKey)
+			signedBy := fmt.Sprintf("%s (%s)", principal, fingerprint)
+			if principal == KeyPrefix+fingerprint {
+				signedBy = principal
+			}
 			if alias := Alias([]Signer{signer}, principal); alias != "" {
 				signedBy = fmt.Sprintf("%s (%s)", alias, principal)
 			}
