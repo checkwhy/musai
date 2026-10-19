@@ -1,0 +1,1 @@
+{ "name": "@musai/trust", "dependencies": { "@musai/store": "workspace:*" } }

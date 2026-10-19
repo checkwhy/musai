@@ -1,0 +1,7 @@
+{
+  "name": "@musai/mcp",
+  "dependencies": {
+    "@musai/records": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.30.0"
+  }
+}

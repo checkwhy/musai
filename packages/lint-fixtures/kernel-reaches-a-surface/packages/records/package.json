@@ -1,0 +1,6 @@
+{
+  "name": "@musai/records",
+  "dependencies": {
+    "@musai/cli": "workspace:*"
+  }
+}

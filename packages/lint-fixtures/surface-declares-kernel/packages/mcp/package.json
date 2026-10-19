@@ -1,0 +1,6 @@
+{
+  "name": "@musai/mcp",
+  "peerDependencies": {
+    "@musai/records": "workspace:*"
+  }
+}

@@ -1,0 +1,4 @@
+# The repository ignores every directory named dist/, since at a package's
+# root one is build output. This one sits under a package's src/, where it
+# holds source the boundary check must read, so the tree keeps it.
+!packages/records/src/dist/

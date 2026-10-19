@@ -1,0 +1,6 @@
+{
+  "name": "@musai/records",
+  "dependencies": {
+    "dist-alias": "workspace:@musai/distribution@*"
+  }
+}

@@ -1,0 +1,12 @@
+# The conformance corpus and the verifier's golden files are compared byte
+# for byte, and a bundle's digest is taken over its files' bytes: a
+# checkout never rewrites their line endings.
+conformance/** -text
+verify/**/testdata/** -text
+verify/internal/refs/references.json -text
+verify/internal/release/roles.json -text
+# The workspace's own bare repository is git's internals, read by the
+# verifier's tests as git wrote them.
+.musai/** -text
+# A committed key's bytes are what ssh-keygen reads and what it signs with.
+packages/scenarios/*/keys/** -text

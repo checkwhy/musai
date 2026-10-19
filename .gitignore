@@ -1,0 +1,26 @@
+# Claude Code's machine-local settings and the worktrees its agents open
+.claude/settings.local.json
+.claude/worktrees/
+
+# IDE
+.idea/
+*.iml
+
+# The planning branch, checked out here as a worktree by the session-start hook.
+.plan/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+# The musai package as its build stages it for npm.
+packages/musai/pack/
+
+# This project's own musai workspace: .musai/ itself is a bare git
+# repository whose objects and refs ARE committed, since git is the only
+# source of truth for a record. Its local/ directory is the disposable
+# fold — the SQLite index and the materialised allowed-signers file —
+# rebuilt from the committed records and never itself a record; git's
+# own default sample hooks carry no content of this project's own.
+.musai/local/
+.musai/hooks/

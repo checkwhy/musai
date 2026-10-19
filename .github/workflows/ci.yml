@@ -1,0 +1,129 @@
+name: CI
+
+# Runs on a push to main, a pull request into main, on demand, or a push to a ci/ branch, which
+# it then deletes.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, "ci/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    strategy:
+      # Each Node's verdict stands on its own: a failure on one never cancels the other.
+      fail-fast: false
+      matrix:
+        # The supported floor and the current release.
+        node-version: [24, 26]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm build
+
+      - run: node scripts/check-index-provider.mjs
+
+      - name: validate the plugin shell against real, built artefacts
+        run: node scripts/validate-plugin-shell.mjs
+
+      - run: pnpm test
+
+      # After the tests: with Bun on PATH, the suites would also run every module under Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - run: bun scripts/check-index-provider.mjs
+
+  package:
+    # The packed tarball installed alone, and what an older Node prints instead of a stack.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - run: echo "OLD_NODE=$(command -v node)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - run: pnpm --filter checkwhy test
+
+      # The tarball installed under a fresh home, its verbs run, its export verified.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: verify/go.mod
+          cache-dependency-path: verify/go.sum
+
+      - run: node scripts/smoke-pack.mjs
+
+  check-run:
+    # The action posting this commit's Check Run from the packed tarball, over a claim it checks.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - id: pack
+        working-directory: packages/musai/pack
+        run: echo "tarball=$RUNNER_TEMP/$(npm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)" >> "$GITHUB_OUTPUT"
+
+      - run: |
+          node packages/distribution/dist/bin/cli.js init
+          node packages/distribution/dist/bin/cli.js check "the verifier has a README" -- test -f verify/README.md
+
+      - uses: ./action
+        with:
+          package: ${{ steps.pack.outputs.tarball }}
+
+  delete-ci-branch:
+    if: always() && startsWith(github.ref, 'refs/heads/ci/')
+    needs: [build-and-test, package, check-run]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/${GITHUB_REF#refs/heads/}"
+        env:
+          GH_TOKEN: ${{ github.token }}

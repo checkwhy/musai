@@ -1,0 +1,6 @@
+{
+  "name": "@musai/mcp",
+  "devDependencies": {
+    "@musai/cli": "workspace:*"
+  }
+}

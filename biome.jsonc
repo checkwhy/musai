@@ -1,0 +1,115 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "**",
+      // Record fixtures, conformance corpora, fixture tables, recorded goldens and recorded
+      // scenario bytes are data whose exact bytes are the test; a formatter never touches them.
+      // The conformance vector table is data of the same kind. The workspace's own bare
+      // repository holds git objects, not sources. A record store is named by its layout,
+      // records/<kind>/<xx>/<yy>/<id>.json, so the records package's own sources stay under
+      // the formatter and the linter.
+      "!**/expected",
+      "!**/previous-versions",
+      "!**/records/*/*/*/*.json",
+      "!**/corpus",
+      "!**/goldens",
+      "!**/fixtures/**/*.json",
+      "!packages/records/src/canonical/vectors.json",
+      // The corpus both implementations of the record form run is written by its generator,
+      // and the Go verifier is a module of its own with its own formatter and linter.
+      "!conformance",
+      "!verify",
+      // A lint fixture tree is built to fail a check on purpose; the formatter
+      // and the linter have no business in content the repository's own scans
+      // refuse. The package's own test and configuration are ordinary code and
+      // stay under both.
+      "!packages/lint-fixtures/*/packages",
+      "!.musai",
+      // The planning branch's worktree and the local run state are notes and logs, not sources.
+      "!.plan",
+      "!.superpowers",
+      // The superpowers skills are a vendored copy, kept byte for byte as published.
+      "!.claude/skills"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    // The code favours one statement per line at any width a screen shows; 120 keeps the
+    // longest signatures and messages on one line without wrapping doc comments.
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "json": {
+    "formatter": { "enabled": true }
+  },
+  "assist": {
+    "actions": { "source": { "organizeImports": "on" } }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        // A non-null assertion follows a check the type system cannot carry — a map's `has`
+        // before its `get`, an index after a length check — and the project forbids a throw
+        // for a state the callers make impossible, which is what the alternative would be.
+        "noNonNullAssertion": "off"
+      },
+      "complexity": {
+        // Bracket access marks a read through an index signature (`process.env["PATH"]`,
+        // a parsed object's field), a distinction the code keeps on purpose so a reader sees
+        // which reads are structural and which are dynamic.
+        "useLiteralKeys": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // A pack module's source is scanned before it loads: the kernel's own import-hygiene
+      // check (packages/modules/src/rule/imports.ts, checkRuleImports) refuses to load a
+      // module whose source carries a template literal's interpolation, since what the
+      // interpolation reaches for is code the scan cannot see. Every module.ts below is
+      // loaded through that scan, in its own tests or a scenario that builds it, so string
+      // concatenation is the only way it can build a message.
+      "includes": [
+        "packages/core-module/module.ts",
+        "packages/devkit/src/templates/default/module.ts",
+        "packages/devkit/test/fixtures/modules/minimal/module.ts",
+        "packages/scenarios/casebook/modules/casebook/module.ts",
+        "packages/scenarios/open-save/modules/drafting/module.ts",
+        "packages/distribution/test/mcp/fixtures/greeter/module.ts",
+        "packages/distribution/test/mcp/fixtures/stamper/module.ts",
+        "packages/distribution/test/fixtures/allocates/module.ts",
+        "packages/distribution/test/fixtures/atoms/module.ts",
+        "packages/distribution/test/fixtures/fails-after-runs/module.ts",
+        "packages/distribution/test/fixtures/misdeclared/module.ts",
+        "packages/distribution/test/fixtures/quiet/module.ts",
+        "packages/distribution/test/fixtures/record-need/module.ts",
+        "packages/distribution/test/fixtures/sentinel/module.ts",
+        "packages/distribution/test/fixtures/skillful/module.ts",
+        "packages/distribution/test/fixtures/skillful-escape/module.ts",
+        "packages/distribution/test/fixtures/tree-command/module.ts",
+        "packages/distribution/test/fixtures/twin-options/module.ts",
+        "packages/distribution/test/fixtures/two-rulers/module.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useTemplate": "off"
+          }
+        }
+      }
+    }
+  ]
+}

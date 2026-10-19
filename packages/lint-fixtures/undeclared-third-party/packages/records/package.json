@@ -1,0 +1,9 @@
+{
+  "name": "@musai/records",
+  "dependencies": {
+    "canonicalize": "4.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

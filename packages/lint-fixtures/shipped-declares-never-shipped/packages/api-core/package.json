@@ -1,0 +1,6 @@
+{
+  "name": "@musai/api-core",
+  "devDependencies": {
+    "@musai/test-support": "workspace:*"
+  }
+}

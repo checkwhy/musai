@@ -1,0 +1,31 @@
+{
+  "name": "musai-workspace",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.10.1",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm build && pnpm test:suites",
+    "test:suites": "pnpm -r --no-bail test && node --test action/check-run.test.mjs && node scripts/test-unprivileged.mjs",
+    "typecheck": "pnpm build && pnpm typecheck:packages",
+    "typecheck:packages": "pnpm -r typecheck",
+    "format": "biome check --write .",
+    "lint": "pnpm build && pnpm lint:checks",
+    "lint:checks": "biome ci . && node scripts/check-package-boundaries.mjs && node scripts/check-orphans.mjs && node scripts/check-cycles.mjs && node scripts/check-clock-reads.mjs && node scripts/check-comments.mjs",
+    "gate": "pnpm build && pnpm typecheck:packages && pnpm lint:checks && pnpm test:suites && node scripts/check-index-provider.mjs && node scripts/validate-plugin-shell.mjs && node scripts/check-go.mjs && node scripts/smoke-pack.mjs",
+    "gate:affected": "node scripts/gate-affected.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.12",
+    "@musai/test-support": "workspace:*",
+    "esbuild": "0.28.2",
+    "madge": "8.0.0",
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

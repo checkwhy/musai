@@ -1,0 +1,155 @@
+name: Verify
+
+# Triggered as CI is; CI deletes a ci/ branch only after this workflow has checked it out.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.1"
+  GOLANGCI_LINT_VERSION: "2.14.0"
+  GOLANGCI_LINT_SHA256: ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      # A pinned binary checked against its checksum: its maintainers advise against a module tool.
+      - name: install golangci-lint
+        run: |
+          archive="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          curl -sSfLO "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/${archive}"
+          echo "${GOLANGCI_LINT_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" --strip-components=1 -C "${RUNNER_TEMP}" "golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint"
+
+      - name: lint for each target
+        run: |
+          for target in linux/amd64 darwin/arm64 windows/amd64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" "${RUNNER_TEMP}/golangci-lint" run ./...
+          done
+          for goos in js wasip1; do
+            GOOS="${goos}" GOARCH=wasm "${RUNNER_TEMP}/golangci-lint" run ./wasm/... ./internal/...
+          done
+
+      - name: the embedded reference table is the conformance table
+        run: cmp internal/refs/references.json ../conformance/references.json
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      # Seed corpora run with the tests; the allowed-signers differential runs where ssh-keygen is.
+      - run: go test -count=1 ./...
+
+      - run: go run ./cmd/musai-verify conformance ../conformance
+
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      - name: native binaries
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/musai-verify-${target%/*}-${target#*/}" ./cmd/musai-verify
+          done
+          go run ./tools/sizegate -limit 100000000 "${RUNNER_TEMP}"/musai-verify-*
+
+      - name: WebAssembly within its budget
+        run: |
+          GOOS=js GOARCH=wasm go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/musai-verify-js.wasm" ./wasm
+          GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags="-s -w" -o "${RUNNER_TEMP}/musai-verify-wasip1.wasm" ./wasm
+          go run ./tools/sizegate -limit 3000000 "${RUNNER_TEMP}/musai-verify-js.wasm" "${RUNNER_TEMP}/musai-verify-wasip1.wasm"
+
+      # Go's exec wrapper refuses a large environment, so the js tests get only what go needs.
+      - name: the js entry answers every argument
+        run: env -i HOME="${HOME}" PATH="${PATH}" GOOS=js GOARCH=wasm go test -count=1 -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./wasm/
+
+      # wasip1 runs through node:wasi with the zip on stdin, js through Go's own wasm_exec.js.
+      - name: both WebAssembly builds verify a zipped bundle
+        run: |
+          (cd ../conformance/bundles && zip -qr "${RUNNER_TEMP}/passing.zip" passing)
+          cat > "${RUNNER_TEMP}/run.mjs" <<SCRIPT
+          import { openSync, readFileSync } from "node:fs";
+          import { WASI } from "node:wasi";
+          import "$(go env GOROOT)/lib/wasm/wasm_exec.js";
+          const dir = process.env.RUNNER_TEMP;
+          const zip = dir + "/passing.zip";
+          const wasi = new WASI({ version: "preview1", args: ["verify", "ci"], stdin: openSync(zip, "r"), returnOnExit: true });
+          const module = await WebAssembly.compile(readFileSync(dir + "/musai-verify-wasip1.wasm"));
+          if (wasi.start(await WebAssembly.instantiate(module, wasi.getImportObject())) !== 0) throw new Error("wasip1 did not verify");
+          const go = new Go();
+          const { instance } = await WebAssembly.instantiate(readFileSync(dir + "/musai-verify-js.wasm"), go.importObject);
+          go.run(instance);
+          const answer = globalThis.musaiVerify(new Uint8Array(readFileSync(zip)), "ci");
+          if (answer.exitCode !== 0) throw new Error("js did not verify: " + (answer.error ?? answer.report));
+          console.log("js/wasm verified the passing bundle");
+          process.exit(0);
+          SCRIPT
+          node "${RUNNER_TEMP}/run.mjs"
+
+  page:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      # The page's test speaks DevTools over Node's own WebSocket, which Node 22 and later carry.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: the page, in the runner's Chrome
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: node --test web/test/page.test.mjs

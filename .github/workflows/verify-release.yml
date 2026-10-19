@@ -1,0 +1,126 @@
+name: Verify release
+
+# The verify/ prefix is what a nested Go module's tag needs for `go install …@vX.Y.Z` to resolve.
+on:
+  push:
+    tags: ["verify/v*"]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.1"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, js/wasm, wasip1/wasm]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      - name: build
+        env:
+          CGO_ENABLED: "0"
+          TARGET: ${{ matrix.target }}
+        run: |
+          version="${GITHUB_REF_NAME#verify/}"
+          goos="${TARGET%/*}" goarch="${TARGET#*/}"
+          mkdir -p "${RUNNER_TEMP}/dist"
+          case "${goarch}" in
+            wasm) package=./wasm name="musai-verify-${goos}.wasm" ;;
+            *) package=./cmd/musai-verify name="musai-verify-${goos}-${goarch}" ;;
+          esac
+          [ "${goos}" = windows ] && name="${name}.exe"
+          GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w -X main.version=${version}" -o "${RUNNER_TEMP}/dist/${name}" "${package}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+  page:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: verify/go.sum
+
+      - name: build the page
+        run: |
+          go run ./tools/webbuild -out "${RUNNER_TEMP}/site" -version "${GITHUB_REF_NAME#verify/}"
+          mkdir -p "${RUNNER_TEMP}/dist"
+          (cd "${RUNNER_TEMP}/site" && zip -qr "${RUNNER_TEMP}/dist/musai-verify-page.zip" .)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-page
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site
+
+  release:
+    needs: [build, page]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - name: checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}" dist/*
+          --repo "${GITHUB_REPOSITORY}"
+          --title "musai-verify ${GITHUB_REF_NAME#verify/}"
+          --notes "Static binaries of the musai verifier, its two WebAssembly builds, and the page that runs one in a browser. Check a download against SHA256SUMS, and its provenance with: gh attestation verify <file> --repo ${GITHUB_REPOSITORY}"
+
+  # Deploys only where the repository's Pages settings deploy from Actions.
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

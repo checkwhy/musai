@@ -1,0 +1,6 @@
+{
+  "name": "@musai/distribution",
+  "dependencies": {
+    "@musai/scenarios": "workspace:*"
+  }
+}
