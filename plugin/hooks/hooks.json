@@ -1,0 +1,29 @@
+{
+  "description": "The two hooks whose handlers call an operation this repository's own kernel already runs: doctor at session start, and at stop the check that a turn claiming tests pass minted a receipt.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../packages/distribution/dist/bin/cli.js\" doctor --workspace \"${CLAUDE_PROJECT_DIR}\" --json",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../packages/distribution/dist/bin/cli.js\" lab hook stop --workspace \"${CLAUDE_PROJECT_DIR}\" --input - --json",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "checkwhy",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "A claim that knows when it stops holding: check a sentence with a command, watch it go stale, walk why to the receipt.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/checkwhy/musai.git",
+    "directory": "packages/musai"
+  },
+  "homepage": "https://github.com/checkwhy/musai#readme",
+  "bugs": "https://github.com/checkwhy/musai/issues",
+  "type": "module",
+  "bin": {
+    "musai": "dist/bin/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "directory": "pack"
+  },
+  "scripts": {
+    "build": "tsup && node scripts/assemble.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@musai/devkit": "workspace:*",
+    "@musai/distribution": "workspace:*",
+    "@musai/modules": "workspace:*",
+    "@types/node": "24.13.3",
+    "execa": "10.0.1",
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

@@ -1,0 +1,30 @@
+name: musai
+description: Re-check a committed musai workspace's claims on this commit and post one Check Run.
+inputs:
+  package:
+    description: The package carrying musai, an npm spec or a tarball's path.
+    default: checkwhy
+  workspace:
+    description: The directory whose .musai/ holds the claims.
+    default: "."
+  token:
+    description: A token holding checks write; the job's own suffices.
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+
+    - shell: bash
+      run: npm install --global --no-audit --no-fund "$PACKAGE"
+      env:
+        PACKAGE: ${{ inputs.package }}
+
+    # Exits 7 when a claim does not hold, after the Check Run says which.
+    - shell: bash
+      run: node "$GITHUB_ACTION_PATH/check-run.mjs"
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+        GITHUB_TOKEN: ${{ inputs.token }}
