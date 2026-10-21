@@ -7,14 +7,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { OperationContext } from "@musai/api-core";
+import { type OperationContext, runHandler } from "@musai/api-core";
 import { buildModule } from "@musai/devkit";
 import { createMcpServer } from "@musai/mcp";
-import { type Audience, CURRENT_SCHEMA_VERSIONS, type RecordId } from "@musai/records";
+import { type ArgumentRecord, type Audience, CURRENT_SCHEMA_VERSIONS, type RecordId } from "@musai/records";
 import { MUSAI_DIR } from "@musai/store";
 import {
   allowedSignersLine,
   blobStoreOf,
+  fixtureRunRecord,
   foldedIndex,
   generateTestKey,
   type TestKey,
@@ -23,6 +24,8 @@ import {
 import { execa } from "execa";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { MUSAI_MCP } from "../../src/mcp/extension.js";
+import { briefRender } from "../../src/ops/brief.js";
+import { rulingMake } from "../../src/ops/ruling.js";
 import {
   CANARY,
   caseCiting,
@@ -92,8 +95,8 @@ interface Answer {
 
 type Call = readonly [name: string, args: Record<string, unknown>];
 
-/** A world whose sealed run and sealed claim carry the canary, a case citing both, a sealed case,
- * and the author's evaluation of a claim resting on the run. */
+/** A world whose sealed runs and sealed claim carry the canary, a case citing both, a sealed case,
+ * and the author's evaluation of and ruling on a claim resting on one run and contested by one. */
 async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: World; names: Names }> {
   const world = await restingWorld(key, scratch);
   for (const dir of FIXTURES) {
@@ -111,6 +114,7 @@ async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: Wo
   const sealsModule = await seal(world, sealedModule.moduleRecordId);
   const [sealsRun, derived] = await sealAndEvaluate(world);
   const [hidden, sealsClaim] = await sealedClaim(world);
+  const contest = await contestedRuling(world, key);
   const [, sealedCase] = await world.store.putMany([
     { kind: "case", value: caseCiting("hides", [world.restsOn, hidden!]) },
     { kind: "case", value: caseCiting("sealed-case", [world.restsOn]) },
@@ -126,7 +130,7 @@ async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: Wo
   const names: Names = {
     sealed: [SEALED_ID, hidden!],
     derived: derived!,
-    unnamed: [sealedCase!, sealedModule.moduleRecordId, sealsRun!, sealsClaim!, sealsCase, sealsModule],
+    unnamed: [sealedCase!, sealedModule.moduleRecordId, sealsRun!, sealsClaim!, sealsCase, sealsModule, ...contest],
     restsOn: world.restsOn,
     slots: [slotOf("rests-on"), slotOf("hidden")],
     cases: ["rests", "hides", "sealed-case"],
@@ -134,6 +138,37 @@ async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: Wo
   };
   await writeNotes(names);
   return { world, names };
+}
+
+/** An argument citing a canary run against the resting claim, the author's ruling on a brief
+ * packing it, then the run sealed; answers the run's, the brief's and the seal's ids. */
+async function contestedRuling(
+  world: World & { readonly restsOn: RecordId },
+  key: TestKey,
+): Promise<readonly RecordId[]> {
+  const [grounds] = await world.store.putMany([
+    { kind: "run", value: fixtureRunRecord(`${CANARY}, grounds for a contest`) },
+  ]);
+  const argument: ArgumentRecord = {
+    kind: "argument",
+    premises: [],
+    supersedes: [],
+    schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+    target: world.restsOn,
+    reason: "it rests on nothing that holds",
+    evidence: [receiptEdge(grounds!)],
+  };
+  await world.store.putMany([{ kind: "argument", value: argument }]);
+  const { brief } = await runHandler(briefRender, { claim: world.restsOn }, world.author);
+  const ruling = {
+    claim: world.restsOn,
+    verdict: "fails",
+    reason: "the contest stands",
+    brief,
+    key: key.keyPath,
+  } as const;
+  await runHandler(rulingMake, ruling, world.author);
+  return [grounds!, brief, await seal(world, grounds!)];
 }
 
 async function writeNotes(names: Names): Promise<void> {

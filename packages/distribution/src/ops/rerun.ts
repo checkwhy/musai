@@ -389,7 +389,9 @@ async function judgedClaims(
 
 async function treeHere(recipe: RunRecipe, localDir: string, workspace: string): Promise<string | null> {
   const trees = recipe.substrates.filter(namesTree);
-  const resolved = await resolveSubstrates(trees, await checkoutBindingsFor(trees, localDir), [workspace]);
+  const resolved = await resolveSubstrates(trees, await checkoutBindingsFor(trees, localDir), [
+    join(workspace, MUSAI_DIR),
+  ]);
   return resolved[0]?.digest?.gitTree ?? null;
 }
 

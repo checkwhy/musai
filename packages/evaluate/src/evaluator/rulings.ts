@@ -40,8 +40,10 @@ export interface Ruling {
   readonly verdict: "holds" | "fails";
 }
 
+/** Stale once its snapshot names an id `currentEvidenceIds` does not hold. */
 export interface PinnedRuling extends Ruling {
   readonly evidenceSnapshot: readonly string[];
+  readonly currentEvidenceIds: readonly string[];
 }
 
 export const FLOOR_CONFIG_KEY = "floor";
@@ -76,6 +78,7 @@ export function floorFrom(config: WorkspaceConfig): FloorRuling | null {
     decidedAt: FLOOR_DECIDED_AT,
     verdict: declared.verdict,
     evidenceSnapshot: [],
+    currentEvidenceIds: [],
     commit: config.commit,
   };
 }
@@ -258,7 +261,6 @@ export type ClaimRulingOutcome = (
 export interface ResolveClaimRulingsInput {
   readonly rulings: readonly PinnedRuling[];
   readonly floor: FloorRuling | null;
-  readonly currentEvidenceIds: readonly string[];
 }
 
 /** Called only over a non-empty set, since a floor never bears on a claim nothing else rules. */
@@ -285,7 +287,7 @@ export function resolveClaimRulings(input: ResolveClaimRulingsInput): ClaimRulin
   }
 
   const winner = all.find((candidate) => candidate.id === resolution.winner.id)!;
-  const stale = pinnedEvidenceMoved(winner.evidenceSnapshot, input.currentEvidenceIds);
+  const stale = pinnedEvidenceMoved(winner.evidenceSnapshot, winner.currentEvidenceIds);
   return {
     outcome: "decided",
     winnerId: resolution.winner.id,

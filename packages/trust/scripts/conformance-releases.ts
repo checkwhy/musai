@@ -6,6 +6,7 @@ import {
   ACTIONS,
   ANY_SCOPE,
   type Audience,
+  CURRENT_SCHEMA_VERSIONS,
   canonicalBytes,
   type RecordId,
   type RecordKind,
@@ -24,6 +25,8 @@ import { covers, parseAudiences } from "../src/audiences.js";
 import { EMPTY_TRUST_DEFAULT, may, roleMatrix } from "../src/authority.js";
 import { ROLES } from "../src/roles.js";
 import { type Bundle, CONFORMANCE_DIR, fixtureBundle, RULING } from "./conformance-bundles.js";
+
+const LATER_ATTESTATION_VERSION = CURRENT_SCHEMA_VERSIONS.attestation + 1;
 
 /** A release case: its integrity verdict, its entitlement verdict, and its error and warning codes,
  * sorted; an informational finding is not listed. */
@@ -145,8 +148,8 @@ interface Shape {
   /** How every release arrived; a release relayed through a model stands for no audience. */
   readonly via?: "model";
   readonly terms?: ReleaseTerms;
-  /** Written by hand over every release: a record of a later version than the kernel reads. */
-  readonly schemaVersion?: number;
+  /** Written by hand over every release or over the seal: a version later than the kernel reads. */
+  readonly laterVersion?: { readonly of: "released" | "sealed"; readonly schemaVersion: number };
   readonly revokeAll?: boolean;
   /** The audience the ruling is sealed from by florin, before anything is released. */
   readonly sealFrom?: string;
@@ -166,6 +169,8 @@ function releaseBundle(dir: string, signers: Record<string, Signer>, shape: Shap
     bundle.set(sidecarPath(id), sign(dir, by, bytes));
     return id;
   };
+  const later = (purpose: "released" | "sealed") =>
+    shape.laterVersion?.of === purpose ? { schemaVersion: shape.laterVersion.schemaVersion } : {};
   const release = (subject: RecordId, extent: ReleaseExtent): RecordId => {
     const { record } = mintAttestation({
       subject,
@@ -176,8 +181,7 @@ function releaseBundle(dir: string, signers: Record<string, Signer>, shape: Shap
       at: timestamp(AT),
       release: { audience: "peer" as Audience, extent, terms: shape.terms ?? TERMS },
     });
-    const later = shape.schemaVersion === undefined ? {} : { schemaVersion: shape.schemaVersion };
-    return put({ ...record, audience: shape.audience, ...later }, signer);
+    return put({ ...record, audience: shape.audience, ...later("released") }, signer);
   };
   if (shape.sealFrom !== undefined) {
     const { record } = mintAttestation({
@@ -194,7 +198,7 @@ function releaseBundle(dir: string, signers: Record<string, Signer>, shape: Shap
     });
     const sealed =
       shape.sealExtent === "record" ? { ...record, seal: { audience: shape.sealFrom, extent: "record" } } : record;
-    put({ ...sealed }, signers["florin"]!);
+    put({ ...sealed, ...later("sealed") }, signers["florin"]!);
   }
   const made = attestationsIn(bundle);
   const released = [
@@ -310,12 +314,31 @@ export const RELEASE_CASES: readonly (ReleaseCase & { readonly shape: Shape })[]
     },
   },
   {
-    name: "unknown-form",
+    name: "later-version",
     verdict: "verified",
     entitlement: "uncovered",
-    codes: [PIN, "release.audience-unknown", "release.uncovered"],
-    what: "released at a later schema version to an audience form this grammar lacks, written by hand: read, not checked, covering nothing",
-    shape: { audience: "group:crew", signer: "florin", schemaVersion: 7, manifest: "peer" },
+    codes: [PIN, "attestation.version-unknown", "release.uncovered"],
+    what: "as released, every release written by hand at a schema version later than the kernel reads: each is skipped, named with its version, and covers nothing",
+    shape: {
+      audience: "maintainers",
+      signer: "florin",
+      laterVersion: { of: "released", schemaVersion: LATER_ATTESTATION_VERSION },
+      manifest: "known",
+    },
+  },
+  {
+    name: "later-version-seal",
+    verdict: "verified",
+    entitlement: "covered",
+    codes: [PIN, "attestation.version-unknown"],
+    what: "as sealed, the seal written by hand at a schema version later than the kernel reads: it is skipped, named with its version, and the releases still cover the bundle",
+    shape: {
+      audience: "maintainers",
+      signer: "florin",
+      sealFrom: "peer",
+      laterVersion: { of: "sealed", schemaVersion: LATER_ATTESTATION_VERSION },
+      manifest: "known",
+    },
   },
   {
     name: "no-manifest",

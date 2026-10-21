@@ -32,7 +32,7 @@ import {
   writeTrustFile,
 } from "@musai/test-support";
 import { onTestFinished } from "vitest";
-import { evaluationRecipe, latestEvaluation } from "../src/evaluation.js";
+import { checkEvaluation } from "../src/evaluation.js";
 import { claimStatus } from "../src/ops/claim.js";
 import { releaseSeal } from "../src/ops/release.js";
 
@@ -161,15 +161,24 @@ export async function restingWorld(
   return { ...world, restsOn: restsOn!, stationRun: await answerStationRun(world) };
 }
 
+/** The record-need module built again at `at`, so its build is a record of its own. */
+export async function rebuildRecordNeed(world: World, at: string): Promise<void> {
+  await buildModule(RECORD_NEED_MODULE_DIR, world.store, {
+    blobs: blobStoreOf(world.workspace),
+    index: await foldedIndex(world.store),
+    now: fixedClock(at),
+  });
+}
+
 /** A station image configured and the station's own receipt for the rule's run, so a station
  * performs the claim on a machine with no container engine. */
-async function answerStationRun(world: World): Promise<RecordId> {
+export async function answerStationRun(world: World, output = ""): Promise<RecordId> {
   const trust = { gitDir: join(world.workspace, MUSAI_DIR) };
   const { values } = (await readTrustBranch(trust)).config;
   const configured = { ...values, [STATION_IMAGE_CONFIG_KEY]: STATION_IMAGE };
   await writeTrustFile(trust, "config.json", `${JSON.stringify(configured)}\n`);
   const image = stationImageFromConfig({ values: configured })!;
-  const clean = fixtureRunRecord("");
+  const clean = fixtureRunRecord(output);
   const [run] = await world.store.putMany([
     {
       kind: "run",
@@ -193,8 +202,8 @@ async function answerStationRun(world: World): Promise<RecordId> {
 export async function latestUnder(context: OperationContext): Promise<RecordId | undefined> {
   const opened = await openWorkspace(context);
   onTestFinished(() => opened.close());
-  const rule = opened.index.contributionById(RECORD_NEED_RULE)!;
-  return latestEvaluation(opened.index, evaluationRecipe(rule, slotOf("rests-on"), opened.clearance))?.id;
+  const restsOn = opened.index.claimAtSlot(slotOf("rests-on"))!.record as ClaimRecord;
+  return checkEvaluation(opened.index, restsOn, () => true, opened.clearance)?.evaluation.id;
 }
 
 /** The sealed record landed and sealed, then the claim resting on it evaluated again; answers the

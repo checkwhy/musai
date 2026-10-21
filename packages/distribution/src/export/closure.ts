@@ -4,6 +4,7 @@ import {
   type DeclarativeParameters,
   declarativeParametersOf,
   expectationsNamedBy,
+  OperationError,
   readDeclarativeParameters,
   rulesNamedBy,
   type Workspace,
@@ -24,6 +25,7 @@ import {
   referencesOf,
 } from "@musai/records";
 import { labelledClaim } from "../claim.js";
+import { shortIdOf } from "../claim-ref.js";
 
 /** `bytes` are what git stores, which are the bytes an id and a signature cover. */
 export interface ClosureMember {
@@ -78,8 +80,19 @@ async function receiptsOf(opened: Workspace, cited: readonly ClosureMember[]): P
     if (byRecipe.length === 0) {
       continue;
     }
-    const { indexed, concluded } = await labelledClaim(opened, claim.slot, "recorded");
-    if (indexed.id !== member.id || concluded === undefined) {
+    const { indexed, concluded, unevaluated } = await labelledClaim(opened, claim.slot, "recorded");
+    if (indexed.id !== member.id) {
+      continue;
+    }
+    if (unevaluated !== undefined) {
+      const short = shortIdOf(claim.slot);
+      throw new OperationError({
+        reason: "invalid-input",
+        about: [member.id],
+        detail: `refusing to export the check ${short}: no evaluation by the installed build of ${unevaluated.rule} has judged it, so the bundle would carry none of its receipts; run \`status ${short}\` first`,
+      });
+    }
+    if (concluded === undefined) {
       continue;
     }
     const trials = new Set(concluded.runs.map((run) => trialOf(performedRun(run, opened.read(run) as RunRecord))));

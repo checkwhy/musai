@@ -87,7 +87,7 @@ A repository that commits `.musai/` gets one Check Run per push from the action 
 repository, in a job holding `checks: write`:
 
 ```yaml
-- uses: checkwhy/musai/action@v0.1.0
+- uses: checkwhy/musai/action@v0.1.1
 ```
 
 It re-checks each claim on the pushed commit, lists each with its `why`, and fails when one does

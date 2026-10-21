@@ -33,6 +33,7 @@ import {
   versionString,
 } from "@musai/records";
 import { shownPrincipal } from "@musai/trust";
+import { cited } from "../cases.js";
 import { contentIdsOf, labelledClaim } from "../claim.js";
 import { shortIdOf } from "../claim-ref.js";
 import { commandText, markOf } from "../text.js";
@@ -62,7 +63,17 @@ export interface WhyRuling {
   readonly principals: readonly string[];
   /** Each principal as the workspace's allowed signers name it, any alias beside its key. */
   readonly names: readonly string[];
+  /** Why the ruling is not weighed here; absent where it is. */
+  readonly uncounted?: Uncounted;
 }
+
+const UNCOUNTED = ["unvouched", "grounds-withheld"] as const;
+type Uncounted = (typeof UNCOUNTED)[number];
+
+const UNCOUNTED_TEXT: Readonly<Record<Uncounted, string>> = {
+  unvouched: "decided nothing: nothing within the matrix vouches for it",
+  "grounds-withheld": "decided nothing: the claim is contested on grounds withheld here",
+};
 
 export interface ClaimWhyOutput {
   readonly statement: string;
@@ -139,10 +150,10 @@ function renderClaimWhyText(output: ClaimWhyOutput): string {
   const reason = output.reason !== null ? ` (${output.reason})` : "";
   const header = [`${markOf(output.label)} ${output.label}${reason} · ${output.statement} (${output.short})`];
   const detail = output.detail !== undefined ? [`  ${output.detail}`] : [];
-  const rulings = (output.rulings ?? []).map(
-    (ruling) =>
-      `  ruling ${shortIdOf(ruling.id)} · ${formatRulingVerdict(ruling.verdict, ruling.authority, ruling.names)}`,
-  );
+  const rulings = (output.rulings ?? []).map((ruling) => {
+    const uncounted = ruling.uncounted === undefined ? "" : ` · ${UNCOUNTED_TEXT[ruling.uncounted]}`;
+    return `  ruling ${shortIdOf(ruling.id)} · ${formatRulingVerdict(ruling.verdict, ruling.authority, ruling.names)}${uncounted}`;
+  });
   if (output.derivation !== undefined) {
     const runs = new Map(output.runs.map((run) => [run.id, run]));
     const tree = kernelRenderText(toDerivationNode(output.derivation), (hop) => {
@@ -214,6 +225,7 @@ const WHY_RULING_SCHEMA = {
     authority: { type: "string" },
     principals: { type: "array", items: { type: "string" } },
     names: { type: "array", items: { type: "string" } },
+    uncounted: { enum: [...UNCOUNTED] },
   },
 } as const;
 
@@ -230,10 +242,10 @@ const DERIVATION_HOP_SCHEMA = {
   },
 } as const;
 
-/** `claim.why@3`: the derivation behind a claim's computed status, walked down to its receipts. */
+/** `claim.why@4`: the derivation behind a claim's computed status, walked down to its receipts. */
 export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
   id: "claim.why",
-  version: versionString("3"),
+  version: versionString("4"),
   input: {
     type: "object",
     additionalProperties: false,
@@ -284,6 +296,7 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
       rulingsById,
       attestationsByRulingId,
       detail,
+      groundsWithheld,
     } = await labelledClaim(opened, input.claim, context.mode === "plan" ? "recorded" : "perform");
 
     const agreeingRuns = new Set(status.comparison.corroborated.flatMap((id) => runIdByArgumentId.get(id) ?? []));
@@ -293,13 +306,22 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
         status.label === "open"
           ? (await weighedRulingsFor(opened, indexed.slot))
               .filter((ruling) => ruling.retiredBy === null)
-              .map((ruling) => ({
-                id: ruling.id,
-                verdict: ruling.record.verdict,
-                authority: ruling.tier ?? "contested-authority",
-                principals: ruling.principals,
-                names: ruling.principals.map((principal) => shownPrincipal(opened.allowedSigners, principal)),
-              }))
+              .map((ruling) => {
+                const uncounted: Uncounted | null =
+                  ruling.tier === null
+                    ? "unvouched"
+                    : groundsWithheld || !cited(opened, ruling.record.brief)
+                      ? "grounds-withheld"
+                      : null;
+                return {
+                  id: ruling.id,
+                  verdict: ruling.record.verdict,
+                  authority: ruling.tier ?? "contested-authority",
+                  principals: ruling.principals,
+                  names: ruling.principals.map((principal) => shownPrincipal(opened.allowedSigners, principal)),
+                  ...(uncounted === null ? {} : { uncounted }),
+                };
+              })
           : [];
       return {
         statement: renderedTextOf((indexed.record as ClaimRecord).rendering),

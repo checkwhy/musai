@@ -97,6 +97,17 @@ function renderCheckText(output: CheckRunOutput): string {
   return [...added, `${markOf(output.label)} ${output.label} · ${output.short}${reason}`, ...hint].join("\n");
 }
 
+/** A sentence already claimed by another command or rule, which only `--replace` moves. */
+export class SentenceClaimedError extends OperationError {
+  readonly short: string;
+  constructor(slot: string, detail: string) {
+    const short = shortIdOf(slot);
+    super({ reason: "invalid-input", about: [short], detail });
+    this.short = short;
+    this.name = "SentenceClaimedError";
+  }
+}
+
 function refused(detail: string, about: string): OperationError {
   return new OperationError({ reason: "invalid-input", about: [about], detail });
 }
@@ -188,16 +199,21 @@ export async function repositoryOf(
   return { top, gitDir, subject: `git:${root}` };
 }
 
+/** The programs a check naming them would add to the workspace's tools. */
+export function programsToAdmit(opened: Workspace, programs: readonly string[]): string[] {
+  const requirements = opened.requirements();
+  return [...new Set(programs)].filter(
+    (program) => authorisedBinary(requirements, program) === undefined && !opened.tools.includes(program),
+  );
+}
+
 /** Adds each program to the trust branch's tools once the recipe resolves; a station adds none. */
 async function admitPrograms(
   opened: Workspace,
   principalName: string | undefined,
   programs: readonly string[],
 ): Promise<string[]> {
-  const requirements = opened.requirements();
-  const added = [...new Set(programs)].filter(
-    (program) => authorisedBinary(requirements, program) === undefined && !opened.tools.includes(program),
-  );
+  const added = programsToAdmit(opened, programs);
   if (added.length > 0) {
     if (opened.station !== undefined) {
       throw new StationRefusedError(
@@ -319,11 +335,10 @@ async function claimFor(opened: Workspace, subject: string, input: CheckRunInput
     const before = judgedBy(existing.record.conditions);
     const after = judgedBy(conditions);
     if (before.key !== after.key) {
-      throw new OperationError({
-        reason: "invalid-input",
-        about: [shortIdOf(slot)],
-        detail: `refusing to check ${JSON.stringify(statement)} by ${after.text}: it is checked by ${before.text}, and one sentence is one claim; pass --replace to check it by ${after.text} from now on`,
-      });
+      throw new SentenceClaimedError(
+        slot,
+        `refusing to check ${JSON.stringify(statement)} by ${after.text}: it is checked by ${before.text}, and one sentence is one claim; pass --replace to check it by ${after.text} from now on`,
+      );
     }
   }
   const record: ClaimRecord = {
@@ -399,6 +414,7 @@ export const checkRun: OperationDescriptor<CheckRunInput, CheckRunOutput> = {
     "not-authorised",
     "declaration-conflict",
     "tool-unavailable",
+    "over-budget",
   ],
   documentation:
     "Mints a claim that a command passes in this repository's working tree, or that an installed rule holds, and checks it.",
@@ -431,7 +447,7 @@ export const checkRun: OperationDescriptor<CheckRunInput, CheckRunOutput> = {
       "command" in judge ? await admitPrograms(before, context.principalName, [judge.command[0]!, ...judge.tool]) : [];
     const opened = toolsAdded.length === 0 ? before : await openWorkspace(context);
     const { slot, id, recipeNames } = await claimFor(opened, subject, input, judge);
-    const { status, runIdByArgumentId } = await labelledClaim(opened, slot, "perform");
+    const { status, runIdByArgumentId } = await labelledClaim(opened, slot, "perform", context.runTimeoutMs);
     const decidedBy = runIdByArgumentId.get(`${id}#rule:${"rule" in judge ? judge.rule : DECLARATIVE_RULE}`);
     return {
       label: status.label,

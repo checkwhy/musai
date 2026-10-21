@@ -97,12 +97,21 @@ export async function mintRuling(
   if (input.verdict === "holds" || view.floor?.verdict === "holds") {
     const group = governing.exclusiveGroup;
     const holder = group === null ? null : await groupHolder(view, group);
-    if (group !== null && holder !== null && holder !== settled.slot) {
-      throw new OperationError({
-        reason: "sibling-conflict",
-        about: [group, holder],
-        detail: `a ${input.verdict} ruling on ${input.claim} would make it hold, and the member at slot ${holder} already holds in exclusive group ${group}`,
-      });
+    if (group !== null && holder !== null && holder.slot !== settled.slot) {
+      const ruling = `a ${input.verdict} ruling on ${input.claim} would make it hold`;
+      throw new OperationError(
+        holder.groundsWithheld
+          ? {
+              reason: "sibling-conflict",
+              about: [group],
+              detail: `${ruling}, and another member of exclusive group ${group} already holds on grounds withheld under the clearance ${view.clearance}`,
+            }
+          : {
+              reason: "sibling-conflict",
+              about: [group, holder.slot],
+              detail: `${ruling}, and the member at slot ${holder.slot} already holds in exclusive group ${group}`,
+            },
+      );
     }
   }
 

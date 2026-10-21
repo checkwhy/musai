@@ -20,7 +20,7 @@ build receipt is the generating machine's.
 | `exports.json`, `exports/` | archives the kernel's own `musai export` wrote, each a gzipped tar of a released closure, with the verdict, the codes and the digest a verifier must give it | `pnpm --filter @musai/distribution conformance` |
 | `roles.json` | the actions each shipped role grants at scope `any`, and those an empty trust branch grants everyone | `pnpm --filter @musai/trust conformance` |
 | `audiences.json` | one `audiences` file and, for every ordered pair of the audiences it names plus `public` and a key and an identity outside it, whether a release to the first covers the second | the same |
-| `releases.json`, `releases/` | bundles carrying releases (one set relayed through a model), revocations, seals of either extent and one written with an extent the kernel never mints, a manifest and the three trust files, with the integrity verdict, the entitlement verdict (`covered`, `uncovered` or `unchecked`) and the exact codes a verifier must produce | the same |
+| `releases.json`, `releases/` | bundles carrying releases (one set relayed through a model), revocations, seals of either extent and one written with an extent the kernel never mints, a release and a seal at a version later than the kernel reads, a manifest and the three trust files, with the integrity verdict, the entitlement verdict (`covered`, `uncovered` or `unchecked`) and the exact codes a verifier must produce | the same |
 
 A path in `references.json` is `$` followed by `.name` and `[*]` steps, every
 array index written as `[*]`. Paths are the union over every schema version a

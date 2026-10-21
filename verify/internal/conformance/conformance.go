@@ -1,7 +1,7 @@
 // Package conformance runs the corpus the kernel writes to conformance/
 // against this verifier: the canonical vectors, the differential corpus,
-// the frozen kinds, the reference table, the bundles and the kernel's own exports, each case
-// passing or failing.
+// the frozen kinds, the reference table, the bundles, the bundles carrying releases and the
+// kernel's own exports, each case passing or failing.
 package conformance
 
 import (
@@ -32,7 +32,7 @@ type Case struct {
 // failing to be read, never a case failing.
 func Run(dir fs.FS) ([]Case, error) {
 	var cases []Case
-	for _, suite := range []func(fs.FS) ([]Case, error){canonical, differential, frozen, references, bundles, exports} {
+	for _, suite := range []func(fs.FS) ([]Case, error){canonical, differential, frozen, references, bundles, releases, exports} {
 		found, err := suite(dir)
 		if err != nil {
 			return nil, err
@@ -215,7 +215,7 @@ func bundles(dir fs.FS) ([]Case, error) {
 			return nil, err
 		}
 		src := &source.Source{Name: row.Name, Bundle: bundle, Trust: bundle, HasBlobs: false}
-		verdict, codes, err := outcome(src, table)
+		got, err := outcome(src, table)
 		if err != nil {
 			return nil, err
 		}
@@ -225,36 +225,87 @@ func bundles(dir fs.FS) ([]Case, error) {
 		}
 		c := Case{
 			Suite: "bundles", Name: row.Name,
-			Passed: verdict == row.Verdict && slices.Equal(codes, row.Codes) && digest == digests[row.Name],
+			Passed: got.verdict == row.Verdict && slices.Equal(got.codes, row.Codes) && digest == digests[row.Name],
 		}
 		if !c.Passed {
 			c.Detail = fmt.Sprintf("%s with %v digesting to %s, want %s with %v digesting to %s",
-				verdict, codes, digest, row.Verdict, row.Codes, digests[row.Name])
+				got.verdict, got.codes, digest, row.Verdict, row.Codes, digests[row.Name])
 		}
 		cases = append(cases, c)
 	}
 	return cases, nil
 }
 
-// outcome is a source's verdict under its own trust, with every error and
-// warning code it produced, sorted.
-func outcome(src *source.Source, table refs.Table) (string, []string, error) {
+// releases checks each bundle carrying releases, revocations or seals: it
+// must answer its row's verdict, entitlement and codes.
+func releases(dir fs.FS) ([]Case, error) {
+	var rows []struct {
+		Name        string   `json:"name"`
+		Verdict     string   `json:"verdict"`
+		Entitlement string   `json:"entitlement"`
+		Codes       []string `json:"codes"`
+	}
+	if err := read(dir, "releases.json", &rows); err != nil {
+		return nil, err
+	}
+	table, err := refs.Load()
+	if err != nil {
+		return nil, err
+	}
+	cases := make([]Case, 0, len(rows))
+	for _, row := range rows {
+		bundle, err := fs.Sub(dir, "releases/"+row.Name)
+		if err != nil {
+			return nil, err
+		}
+		src := &source.Source{Name: row.Name, Bundle: bundle, Trust: bundle, HasBlobs: false}
+		got, err := outcome(src, table)
+		if err != nil {
+			return nil, err
+		}
+		c := Case{
+			Suite: "releases", Name: row.Name,
+			Passed: got.verdict == row.Verdict && got.entitlement == row.Entitlement && slices.Equal(got.codes, row.Codes),
+		}
+		if !c.Passed {
+			c.Detail = fmt.Sprintf("%s and %s with %v, want %s and %s with %v",
+				got.verdict, got.entitlement, got.codes, row.Verdict, row.Entitlement, row.Codes)
+		}
+		cases = append(cases, c)
+	}
+	return cases, nil
+}
+
+// answer is what a source gives under its own trust: its verdict, its
+// entitlement and every error and warning code it produced, sorted.
+type answer struct {
+	verdict     string
+	entitlement string
+	codes       []string
+}
+
+func outcome(src *source.Source, table refs.Table) (answer, error) {
 	result, err := check.Run(src, table, trust.Own(src))
 	if err != nil {
-		return "", nil, err
+		return answer{}, err
 	}
-	verdict := "verified"
+	got := answer{verdict: "verified", entitlement: "unchecked"}
 	if result.Failed() {
-		verdict = "failed"
+		got.verdict = "failed"
 	}
-	var codes []string
-	for _, finding := range result.Findings {
-		if finding.Severity != check.Info && !slices.Contains(codes, finding.Code) {
-			codes = append(codes, finding.Code)
+	if result.Released.Checked {
+		got.entitlement = "uncovered"
+		if result.Released.Covered == result.Released.Total {
+			got.entitlement = "covered"
 		}
 	}
-	slices.Sort(codes)
-	return verdict, codes, nil
+	for _, finding := range result.Findings {
+		if finding.Severity != check.Info && !slices.Contains(got.codes, finding.Code) {
+			got.codes = append(got.codes, finding.Code)
+		}
+	}
+	slices.Sort(got.codes)
+	return got, nil
 }
 
 // exports checks each archive the kernel's own export wrote: opened as a
@@ -288,7 +339,7 @@ func exports(dir fs.FS) ([]Case, error) {
 			cases = append(cases, c)
 			continue
 		}
-		verdict, codes, err := outcome(src, table)
+		got, err := outcome(src, table)
 		if err != nil {
 			return nil, err
 		}
@@ -296,10 +347,10 @@ func exports(dir fs.FS) ([]Case, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.Passed = verdict == row.Verdict && slices.Equal(codes, row.Codes) && digest == row.Digest
+		c.Passed = got.verdict == row.Verdict && slices.Equal(got.codes, row.Codes) && digest == row.Digest
 		if !c.Passed {
 			c.Detail = fmt.Sprintf("%s with %v digesting to %s, want %s with %v digesting to %s",
-				verdict, codes, digest, row.Verdict, row.Codes, row.Digest)
+				got.verdict, got.codes, digest, row.Verdict, row.Codes, row.Digest)
 		}
 		cases = append(cases, c)
 	}

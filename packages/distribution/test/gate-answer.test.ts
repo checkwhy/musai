@@ -413,7 +413,10 @@ describe("gate.answer@2", () => {
     expect(progress.next).toBeNull();
     expect(progress.counts).toEqual({ holds: 1, fails: 0, open: 0, notChosen: 2 });
     expect(progress.flagged).toEqual([claimB]);
-    expect(await groupHolder(opened, "disposition")).toBe(built.slotBySpecId.get("b"));
+    expect(await groupHolder(opened, "disposition")).toEqual({
+      slot: built.slotBySpecId.get("b"),
+      groundsWithheld: false,
+    });
     expect(gatePending.renderText(pending)).toContain("answered on stale evidence");
     expect(caseStatus.renderText(progress)).toContain("answered on stale evidence");
   });

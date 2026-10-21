@@ -99,6 +99,7 @@ func Entitle(src *source.Source, index *Index, table refs.Table, signatureFindin
 	for _, record := range index.Sorted() {
 		if record.Kind == "attestation" {
 			if a, ok := release.FromRecord(record.ID, record.Path, record.Value, verified[record.ID]); ok {
+				_, a.Unknown = unknownVersion(record.Value)
 				attestations = append(attestations, a)
 				continue
 			}
@@ -108,11 +109,8 @@ func Entitle(src *source.Source, index *Index, table refs.Table, signatureFindin
 
 	var findings []Finding
 	for _, a := range attestations {
-		if a.Purpose != "released" {
+		if a.Purpose != "released" || a.Unknown {
 			continue
-		}
-		if release.Form(a.Audience) == "" {
-			findings = append(findings, Finding{Code: "release.audience-unknown", Severity: Warning, Path: a.Path, Record: a.ID, Detail: fmt.Sprintf("released to %q, a form of audience this verifier does not know; it covers nothing here", a.Audience)})
 		}
 		if a.Via == "model" {
 			findings = append(findings, Finding{Code: "release.relayed", Severity: Warning, Path: a.Path, Record: a.ID, Detail: "relayed through a model, so the release stands for no audience: a release is a person's"})

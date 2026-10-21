@@ -11,7 +11,8 @@ import (
 	"github.com/checkwhy/musai/verify/internal/release"
 )
 
-// The attestation versions the kernel reads; a later one is read unchecked.
+// The attestation versions the kernel reads; a later one is read unchecked and, released or sealed,
+// counts for nothing.
 const (
 	oldestAttestation = 2
 	newestAttestation = 6
@@ -92,6 +93,13 @@ func attestationProblem(value map[string]any) string {
 		}
 	}
 	return carriedReleaseFields(value, purpose)
+}
+
+// unknownVersion reports the version of a release or a seal later than any this verifier knows.
+func unknownVersion(value map[string]any) (float64, bool) {
+	version, _ := value["schemaVersion"].(float64)
+	purpose, _ := value["purpose"].(string)
+	return version, version > newestAttestation && (purpose == "released" || purpose == "sealed")
 }
 
 func recordIDs(value any) bool {

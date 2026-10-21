@@ -34,8 +34,11 @@ repository's own build already produces — build the workspace first
   usable menu in this client — never a redirect to a terminal.
 - **Two hooks**, in `hooks/hooks.json`: a `SessionStart` hook reporting
   what this machine has and needs (`doctor --json`), and a `Stop` hook
-  that blocks once a turn ending on "the tests pass" with no receipt
-  minted since the person's last message (`lab hook stop`).
+  for a turn ending on "the tests pass" with no receipt minted since the
+  person's last message (`lab hook stop`): where the turn ran a test,
+  lint or build command at the repository's root and it succeeded, it
+  checks the claim by that command; otherwise it blocks once with the
+  `musai check` that would.
 - **`musai lab plugin sync`**: a module marks one of its own `template`
   contributions as a skill, and this verb writes it into
   `skills/<name>/SKILL.md` on the module's own install and update, so a

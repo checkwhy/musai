@@ -15,10 +15,12 @@ stdout '^warning +release\.not-member +bundle\.json: '
 stdout '^verified: '
 stdout '^released: known — 0 of 9 records covered$'
 
-# An audience of a form the verifier does not know is reported, never failed.
-exec musai-verify verify $CONFORMANCE/releases/unknown-form
-stdout '^warning +release\.audience-unknown +records/attestation/'
+# A release of a schema version the verifier does not know is skipped, named with its version,
+# and covers nothing; integrity still verifies.
+exec musai-verify verify $CONFORMANCE/releases/later-version
+stdout '^warning +attestation\.version-unknown +records/attestation/.*: skipped: a released attestation of schemaVersion 7,'
 stdout '^verified: '
+stdout '^released: known — 0 of 9 records covered$'
 
 # No manifest: what the bundle may be used for is not checked.
 exec musai-verify verify $CONFORMANCE/releases/no-manifest

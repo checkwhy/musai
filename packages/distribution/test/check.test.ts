@@ -139,6 +139,23 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect(await runCount(dir)).toBe(runsBefore);
   }, 120_000);
 
+  test("a run outliving the call's run deadline ends the call, its claim open with no receipt", async () => {
+    const { dir, context } = await repositoryWithWorkspace();
+    const runsBefore = await runCount(dir);
+
+    const ended = await runHandler(
+      checkRun,
+      { statement: "a slow check holds", command: ["sleep", "30"] },
+      { ...context, runTimeoutMs: 200 },
+    ).catch((error: unknown) => error);
+
+    expect(ended).toMatchObject({ reason: "over-budget" });
+    expect((ended as Error).message).toContain("outlived its 200 ms deadline");
+    expect(await runCount(dir)).toBe(runsBefore);
+    const status = await runHandler(claimStatus, { claim: "a slow check holds" }, { ...context, mode: "plan" });
+    expect(status.label).toBe("open");
+  }, 120_000);
+
   test("check with replace runs the new command under the sentence from then on", async () => {
     const { context } = await repositoryWithWorkspace();
     const first = await runHandler(

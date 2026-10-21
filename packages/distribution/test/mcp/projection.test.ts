@@ -251,7 +251,7 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
 
   test("a contribution whose own name would shadow one of the distribution's own operations is refused the same way", () => {
     // A contribution `claim/status` folds through the same transform to `claim_status`.
-    const shadowedKey = "claim.status@2";
+    const shadowedKey = "claim.status@3";
     const [moduleName, localId] = shadowedKey.replace(/@\d+$/, "").split(".") as [string, string];
     const shadowedName = `${moduleName}_${localId}`;
     expect([...REGISTRY.keys()]).toContain(shadowedKey);

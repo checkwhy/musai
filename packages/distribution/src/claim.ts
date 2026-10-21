@@ -2,10 +2,12 @@ import { dirname } from "node:path";
 import type { Workspace } from "@musai/api-core";
 import {
   buildAdmissionWorkspace,
+  checkRecipesOf,
   DECLARATIVE_RULE,
   installedModules,
   isOperationError,
   OperationError,
+  readDeclarativeParameters,
   rulesNamedBy,
   verifiedAttestationFor,
   weighedRulingsFor,
@@ -23,6 +25,7 @@ import {
   type EvidenceKind,
   evaluate,
   evidenceKindOf,
+  type FloorRuling,
   holdingSibling,
   type Labelling,
   type RuleVerdict,
@@ -46,7 +49,9 @@ import {
 } from "@musai/modules";
 import {
   ANY_SCOPE,
+  type Audience,
   type ClaimRecord,
+  type ComputedRunRecord,
   type EvidenceEdge,
   exactDecimal,
   type MadeAttestationRecord,
@@ -70,17 +75,23 @@ import {
   RunRefusedError,
   readBindings,
   resolveSubstrates,
+  STATION_IMAGE_CONFIG_KEY,
+  StationRefusedError,
   secretReadId,
+  stationRecipe,
 } from "@musai/run";
 import { listKeys, readKeyFile } from "@musai/store";
-import { briefLines, lineReadIds } from "./brief/render.js";
-import { citedEvidence, type FoundCase, findCaseForClaim } from "./cases.js";
+import { briefClearanceOf } from "./brief/recipe.js";
+import { type BriefLine, briefLines, givesPrincipalClass, lineReadIds } from "./brief/render.js";
+import { cited, citedEvidence, type FoundCase, findCaseForClaim } from "./cases.js";
 import { CHECK_CLAIM_TYPE, claimSlotNamed } from "./claim-ref.js";
 import {
+  checkEvaluation,
   evaluationMoved,
   evaluationRecipe,
+  type HoldingCheck,
+  holdingCheck,
   type IndexedEvaluation,
-  latestEvaluation,
   mintEvaluation,
   recordedEvaluation,
 } from "./evaluation.js";
@@ -92,14 +103,50 @@ export function contentIdsOf(reads: readonly ReadEntry[]): string[] {
     .filter((id): id is string => id !== null);
 }
 
-/** What a brief over this claim reads besides its case: the set `renderBrief` packs. */
-function briefReadsOf(opened: Workspace, claim: IndexedClaim): string[] {
-  const { direct, attacking } = briefLines(
+/** What a brief over this claim resting on `check` reads besides its case: the set
+ * `renderBrief` packs, with every attestation a testimony's kind could read. */
+function briefReadsOf(opened: Workspace, claim: IndexedClaim, check: HoldingCheck | null): string[] {
+  const { direct, attacking, withheld } = briefLines(
     opened,
+    claim.id,
     claim.record as ClaimRecord,
-    opened.index.argumentsAgainst(claim.id),
+    (target) => opened.index.argumentsAgainst(target),
+    check,
   );
-  return [claim.id, ...[...direct, ...attacking].flatMap(lineReadIds)];
+  return [
+    claim.id,
+    ...[...direct, ...attacking].flatMap((line) => [...lineReadIds(line), ...kindReads(opened, line)]),
+    ...withheld.map((attack) => attack.argument),
+  ];
+}
+
+/** What a brief over `covered` rendered under `clearance` would read now, its case included;
+ * `performed` is the check this call just evaluated, which the fold does not hold yet. */
+function briefsReadNow(
+  opened: Workspace,
+  covered: readonly IndexedClaim[],
+  owningCase: FoundCase | null,
+  clearance: Audience | undefined,
+  performed: { readonly claim: RecordId; readonly check: HoldingCheck | null } | undefined,
+): string[] {
+  const checkOf = (claim: IndexedClaim) =>
+    performed !== undefined && performed.claim === claim.id && clearance === opened.clearance
+      ? performed.check
+      : holdingCheck(opened.index, claim.record as ClaimRecord, () => true, clearance);
+  return [
+    ...(owningCase === null ? [] : [owningCase.id]),
+    ...covered.flatMap((claim) => briefReadsOf(opened, claim, checkOf(claim))),
+  ];
+}
+
+function kindReads(opened: Workspace, line: BriefLine): RecordId[] {
+  if ((opened.read(line.run) as RunRecord).runKind !== "testimony") {
+    return [];
+  }
+  return opened.index
+    .attestationsBySubject(line.run)
+    .filter(({ record }) => givesPrincipalClass(record))
+    .map(({ id }) => id);
 }
 
 /** The weight every evidence argument carries: an edge declares none, so edges compare by kind. */
@@ -120,6 +167,10 @@ export interface LabelledClaim {
   readonly detail?: string;
   /** Read open without performing, its check naming a recipe nothing has run here. */
   readonly unchecked?: true;
+  /** Read without performing, the applicable check no evaluation by this installed rule judged. */
+  readonly unevaluated?: { readonly rule: string };
+  /** Read open on a contest this view withholds the grounds of, so no ruling on it decided. */
+  readonly groundsWithheld?: true;
 }
 
 /** `perform` runs a claim's check; `recorded` evaluates it against the latest receipts, spawning
@@ -132,16 +183,28 @@ export interface VouchedRuling extends IndexedRuling {
   readonly decidedAt: Timestamp;
 }
 
-/** The rulings on a slot an attestation vouches for within the matrix. Every reader of a slot
- * uses this, so no verb reports settled what another still offers. */
-export async function vouchedRulingsFor(opened: Workspace, slot: string): Promise<readonly VouchedRuling[]> {
-  const vouched: VouchedRuling[] = [];
+/** The rulings on a slot an attestation vouches for within the matrix, each marked by whether this
+ * view holds the brief it rests on. */
+async function rulingsVouchedOn(
+  opened: Workspace,
+  slot: string,
+): Promise<readonly { readonly ruling: VouchedRuling; readonly briefHeld: boolean }[]> {
+  const vouched: { ruling: VouchedRuling; briefHeld: boolean }[] = [];
   for (const ruling of await weighedRulingsFor(opened, slot)) {
     if (ruling.retiredBy === null && ruling.tier !== null) {
-      vouched.push({ id: ruling.id, record: ruling.record, authority: ruling.tier, decidedAt: ruling.decidedAt! });
+      vouched.push({
+        ruling: { id: ruling.id, record: ruling.record, authority: ruling.tier, decidedAt: ruling.decidedAt! },
+        briefHeld: cited(opened, ruling.record.brief),
+      });
     }
   }
   return vouched;
+}
+
+/** The rulings on a slot an attestation vouches for within the matrix, on a brief this view holds.
+ * Every reader of a slot uses this, so no verb reports settled what another still offers. */
+export async function vouchedRulingsFor(opened: Workspace, slot: string): Promise<readonly VouchedRuling[]> {
+  return (await rulingsVouchedOn(opened, slot)).filter(({ briefHeld }) => briefHeld).map(({ ruling }) => ruling);
 }
 
 /** The members of `group` that apply here; only these are on the menu. */
@@ -155,35 +218,59 @@ export function applyingMembers(opened: Workspace, group: string): readonly Inde
   });
 }
 
-async function groupRulings(
-  opened: Workspace,
-  group: string,
-): Promise<{ readonly siblings: readonly SiblingClaim[]; readonly rulings: readonly SiblingRuling[] }> {
-  const members = opened.index.claimsInGroup(group);
-  const rulings: SiblingRuling[] = [];
+/** A menu's members and the vouched rulings on those that apply, `held` being those on a brief
+ * this view holds. */
+interface GroupRulings {
+  readonly group: string;
+  readonly siblings: readonly SiblingClaim[];
+  readonly every: readonly SiblingRuling[];
+  readonly held: readonly SiblingRuling[];
+}
+
+async function groupRulings(opened: Workspace, group: string): Promise<GroupRulings> {
+  const every: SiblingRuling[] = [];
+  const held: SiblingRuling[] = [];
   for (const member of applyingMembers(opened, group)) {
-    for (const vouched of await vouchedRulingsFor(opened, member.slot)) {
-      rulings.push({
-        id: vouched.id,
+    for (const { ruling, briefHeld } of await rulingsVouchedOn(opened, member.slot)) {
+      const sibling: SiblingRuling = {
+        id: ruling.id,
         claim: member.slot,
-        authority: vouched.authority,
-        decidedAt: vouched.decidedAt,
-        verdict: vouched.record.verdict,
-      });
+        authority: ruling.authority,
+        decidedAt: ruling.decidedAt,
+        verdict: ruling.record.verdict,
+      };
+      every.push(sibling);
+      if (briefHeld) {
+        held.push(sibling);
+      }
     }
   }
-  return { siblings: members.map((member) => ({ id: member.slot, exclusiveGroup: group })), rulings };
+  const siblings = opened.index.claimsInGroup(group).map((member) => ({ id: member.slot, exclusiveGroup: group }));
+  return { group, siblings, every, held };
 }
 
-/** The slot of the member of `group` that holds, or `null`, as every reader of a menu reads it. */
-export async function groupHolder(opened: Workspace, group: string): Promise<string | null> {
-  const { siblings, rulings } = await groupRulings(opened, group);
-  return holdingSibling(group, siblings, rulings, opened.floor)?.member ?? null;
+function restsOnWithheldGrounds(rulings: GroupRulings): boolean {
+  return rulings.held.length < rulings.every.length;
 }
 
-async function siblingHoldsElsewhere(opened: Workspace, group: string, ownSlot: string): Promise<boolean> {
-  const { siblings, rulings } = await groupRulings(opened, group);
-  return deriveSiblingVerdicts(group, siblings, rulings, opened.floor).some((entry) => entry.claim === ownSlot);
+/** The member of `group` its vouched rulings make hold, or `null`, weighed whether or not this view
+ * holds their briefs, so no view can rule a second member into holding. */
+export async function groupHolder(
+  opened: Workspace,
+  group: string,
+): Promise<{ readonly slot: string; readonly groundsWithheld: boolean } | null> {
+  const rulings = await groupRulings(opened, group);
+  const holder = holdingSibling(group, rulings.siblings, rulings.every, opened.floor);
+  return holder === null ? null : { slot: holder.member, groundsWithheld: restsOnWithheldGrounds(rulings) };
+}
+
+/** Whether a sibling of `ownSlot` holds as this view reads the menu: a ruling on grounds it does
+ * not hold leaves none holding. */
+function siblingHoldsElsewhere(menu: GroupRulings, ownSlot: string, floor: FloorRuling | null): boolean {
+  return (
+    !restsOnWithheldGrounds(menu) &&
+    deriveSiblingVerdicts(menu.group, menu.siblings, menu.held, floor).some((entry) => entry.claim === ownSlot)
+  );
 }
 
 /** Why nothing answers for a name; a superseded record id names its successors. */
@@ -409,6 +496,7 @@ async function performCheck(
   contribution: IndexedContribution,
   owningCase: FoundCase | null,
   perform: boolean,
+  runTimeoutMs?: number,
 ): Promise<CheckOutcome> {
   const point = pointFor(contribution.entry.kind, opened.index);
   if (point === undefined) {
@@ -466,6 +554,7 @@ async function performCheck(
       requirementRegistry,
       slotLayers,
       invocationLimits,
+      runTimeoutMs,
       now: opened.now,
       station: opened.station,
       ...(perform
@@ -519,6 +608,40 @@ async function checkFromEvaluation(opened: Workspace, evaluation: IndexedEvaluat
   return { verdict, runs, unrun: false };
 }
 
+/** A check no evaluation under this view's clearance has judged, read with no rule invoked. */
+function unevaluatedCheck(opened: Workspace, record: ClaimRecord): CheckOutcome {
+  return {
+    verdict: { kind: "verdict", label: "open", reason: unevaluatedReason(opened, record) },
+    runs: [],
+    unrun: true,
+  };
+}
+
+/** Where a station would refuse a recipe the check names, its refusal, which names the fix. */
+function unevaluatedReason(opened: Workspace, record: ClaimRecord): string {
+  const { station } = opened;
+  if (station === undefined) {
+    return "nothing has evaluated this check here yet; `status` evaluates it";
+  }
+  if (station.image === undefined) {
+    const recipes = checkRecipesOf(readDeclarativeParameters(record.conditions));
+    for (const recipe of recipes) {
+      try {
+        stationRecipe(recipe, station);
+      } catch (error) {
+        if (error instanceof StationRefusedError) {
+          return error.message;
+        }
+        throw error;
+      }
+    }
+    if (recipes.length === 0) {
+      return `nothing has evaluated this check under the clearance ${station.clearance} yet, and the trust branch's configuration names no ${STATION_IMAGE_CONFIG_KEY}, so \`status\` under it runs only a recipe declaring its own image`;
+    }
+  }
+  return `nothing has evaluated this check here yet; \`status\` under the clearance ${station.clearance} evaluates it`;
+}
+
 /** The case citing a claim, or `null` where none does. */
 async function owningCaseOf(opened: Workspace, claim: RecordId): Promise<FoundCase | null> {
   try {
@@ -543,11 +666,13 @@ export async function recordedRuleVerdict(
   return performCheck(opened, indexed, record, rule, await owningCaseOf(opened, indexed.id), false);
 }
 
-/** A claim's status as `evaluate` computes it, and the graph behind it. */
+/** A claim's status as `evaluate` computes it, and the graph behind it; a run outliving
+ * `runTimeoutMs` ends the call. */
 export async function labelledClaim(
   opened: Workspace,
   claimName: string,
   evaluation: Evaluation,
+  runTimeoutMs?: number,
 ): Promise<LabelledClaim> {
   const slot = claimSlotNamed(opened.index, claimName);
   const indexed = opened.index.claimAtSlot(slot);
@@ -613,12 +738,14 @@ export async function labelledClaim(
   let openCheckReason: string | undefined;
   let checkUnrun = false;
   let concluded: LabelledClaim["concluded"];
+  let performed: { readonly claim: RecordId; readonly check: HoldingCheck | null } | undefined;
+  let unevaluatedRule: string | undefined;
   let treeMoved: string | null = null;
   let readMoved = false;
   if (rule !== null) {
     const recorded =
       evaluation === "recorded"
-        ? latestEvaluation(opened.index, evaluationRecipe(rule, slot, opened.clearance))
+        ? checkEvaluation(opened.index, indexed.record, () => true, opened.clearance)?.evaluation
         : undefined;
     readMoved = recorded !== undefined && evaluationMoved(opened.index, recorded);
     let check = recorded !== undefined && !readMoved ? await checkFromEvaluation(opened, recorded) : undefined;
@@ -626,10 +753,22 @@ export async function labelledClaim(
     if (check !== undefined && (await treeMovement(opened, recordsOf(check.runs), measureTreeOnce)) !== null) {
       check = undefined;
     }
-    check ??= await performCheck(opened, indexed, indexed.record, rule, owningCase, evaluation === "perform");
+    // Without performing, a check no evaluation judged counts nothing, as its brief packs nothing.
+    unevaluatedRule = evaluation === "recorded" && recorded === undefined ? rule.entry.id : undefined;
+    check ??=
+      unevaluatedRule !== undefined
+        ? unevaluatedCheck(opened, indexed.record)
+        : await performCheck(opened, indexed, indexed.record, rule, owningCase, evaluation === "perform", runTimeoutMs);
     if (evaluation === "recorded") {
       const movement = await treeMovement(opened, recordsOf(check.runs), measureTreeOnce);
       treeMoved = movement === null ? null : describeMovement(movement);
+    }
+    if (evaluation === "perform") {
+      const receipts = check.runs.map((run) => run.id);
+      performed = {
+        claim: indexed.id,
+        check: check.verdict.label === "holds" ? { rule: rule.entry.id, receipts } : null,
+      };
     }
     if (check.verdict.label === "open") {
       openCheckReason = check.verdict.reason;
@@ -692,22 +831,32 @@ export async function labelledClaim(
     supportingIdsByRun.set(edge.run, [...(supportingIdsByRun.get(edge.run) ?? []), argumentId]);
   }
 
-  // An attack on the claim fails it; one on a supporting run only removes that support.
-  for (const argument of opened.index.argumentsAgainst(indexed.id)) {
-    for (const edge of argument.record.evidence) {
+  // An argument or a ruling resting on a record withheld here contests the claim unseen.
+  let groundsWithheld = false;
+
+  /** The nodes an argument's held edges attack with; a withheld edge contests unseen. */
+  async function attackersOf(evidence: readonly EvidenceEdge[]): Promise<string[]> {
+    const held = citedEvidence(opened, evidence);
+    groundsWithheld ||= held.length < evidence.length;
+    const attackers: string[] = [];
+    for (const edge of held) {
       const attacker = await nodeForEdge(edge, false);
       if (attacker !== null) {
-        attacks.push({ attacker, target: slot });
+        attackers.push(attacker);
       }
+    }
+    return attackers;
+  }
+
+  // An attack on the claim fails it; one on a supporting run only removes that support.
+  for (const argument of opened.index.argumentsAgainst(indexed.id)) {
+    for (const attacker of await attackersOf(argument.record.evidence)) {
+      attacks.push({ attacker, target: slot });
     }
   }
   for (const runId of supportingRunIds) {
     for (const argument of opened.index.argumentsAgainst(runId)) {
-      for (const edge of argument.record.evidence) {
-        const attacker = await nodeForEdge(edge, false);
-        if (attacker === null) {
-          continue;
-        }
+      for (const attacker of await attackersOf(argument.record.evidence)) {
         for (const supported of supportingIdsByRun.get(runId) ?? []) {
           attacks.push({ attacker, target: supported });
         }
@@ -722,6 +871,17 @@ export async function labelledClaim(
     scope: ANY_SCOPE,
     declaredWeight: EVIDENCE_ARGUMENT_WEIGHT,
   });
+
+  // A menu's brief covers every member, so each member's ruling pins what that brief read.
+  const group = (indexed.record as ClaimRecord).exclusiveGroup;
+  const menu = group === null ? null : await groupRulings(opened, group);
+  if (menu !== null) {
+    groundsWithheld ||= restsOnWithheldGrounds(menu);
+  }
+  const covered =
+    menu === null
+      ? [indexed]
+      : [indexed, ...opened.index.claimsInGroup(menu.group).filter(({ id }) => id !== indexed.id)];
 
   const rulingsById = new Map<string, RulingRecord>();
   const attestationsByRulingId = new Map<string, readonly MadeAttestationRecord[]>();
@@ -742,8 +902,12 @@ export async function labelledClaim(
       hasUnvouchedRuling = true;
       continue;
     }
+    if (!cited(opened, indexedRuling.record.brief)) {
+      groundsWithheld = true;
+      continue;
+    }
 
-    const briefRun = opened.read(indexedRuling.record.brief) as RunRecord;
+    const briefRun = opened.read(indexedRuling.record.brief) as ComputedRunRecord;
     rulings.push({
       id: indexedRuling.id,
       claim: slot,
@@ -755,25 +919,9 @@ export async function labelledClaim(
       decidedAt: primary!.at,
       verdict: indexedRuling.record.verdict,
       briefReads: contentIdsOf(briefRun.observation.reads),
+      // A station and its author each evaluate under their own recipe, so each brief pins its own.
+      currentIds: briefsReadNow(opened, covered, owningCase, briefClearanceOf(briefRun.recipe), performed),
     });
-  }
-
-  // A ruling's snapshot names run ids, not selector-qualified argument ids, so both are compared.
-  const currentRunIds = new Set(supportingRunIds);
-
-  // Pinned apart from support: a brief also reads the case and the claim, which are not arguments.
-  const pinnedContentIds = briefReadsOf(opened, indexed);
-  if (owningCase !== null) {
-    pinnedContentIds.push(owningCase.id);
-  }
-  // A menu's brief covers every member, so each member's ruling pins what that brief read.
-  const group = (indexed.record as ClaimRecord).exclusiveGroup;
-  if (group !== null) {
-    for (const member of opened.index.claimsInGroup(group)) {
-      if (member.id !== indexed.id) {
-        pinnedContentIds.push(...briefReadsOf(opened, member));
-      }
-    }
   }
 
   const claim: EvaluateClaim = {
@@ -781,8 +929,7 @@ export async function labelledClaim(
     applicable,
     overBudget: false,
     stale: treeMoved !== null || readMoved || (await boundSecretsMoved(opened, supportingRuns)),
-    supportingArgumentIds: [...supportingIds, ...currentRunIds],
-    pinnedContentIds,
+    supportingArgumentIds: supportingIds,
   };
   const { statuses, labelling } = evaluate({
     claims: [claim],
@@ -793,17 +940,20 @@ export async function labelledClaim(
     floor: opened.floor,
   });
 
-  // An unvouched ruling leaves the claim open, never falling back to the evidence alone.
+  // An unvouched ruling or a contest on withheld grounds leaves the claim open, whatever it cites.
   let status: ClaimStatus =
-    hasUnvouchedRuling && applicable
+    (hasUnvouchedRuling || groundsWithheld) && applicable
       ? { label: "open", reason: "contested-authority", comparison: statuses[0]!.status.comparison }
       : statuses[0]!.status;
 
   // A menu member with no decision of its own fails once a sibling holds.
-  if (status.label === "open" && applicable && group !== null && (await siblingHoldsElsewhere(opened, group, slot))) {
+  if (status.label === "open" && applicable && menu !== null && siblingHoldsElsewhere(menu, slot, opened.floor)) {
     status = { label: "fails", comparison: status.comparison };
   }
-  const detail = gate.outcome === "valid" ? (treeMoved ?? openCheckReason) : gate.reason;
+  const withheldDetail = groundsWithheld
+    ? `contested on grounds withheld under the clearance ${opened.clearance}`
+    : undefined;
+  const detail = gate.outcome === "valid" ? (withheldDetail ?? treeMoved ?? openCheckReason) : gate.reason;
 
   return {
     indexed,
@@ -816,6 +966,8 @@ export async function labelledClaim(
     ...(concluded === undefined ? {} : { concluded }),
     ...(status.label === "open" && detail !== undefined ? { detail } : {}),
     ...(status.label === "open" && checkUnrun ? { unchecked: true } : {}),
+    ...(unevaluatedRule === undefined ? {} : { unevaluated: { rule: unevaluatedRule } }),
+    ...(status.label === "open" && groundsWithheld && applicable ? { groundsWithheld: true } : {}),
   };
 }
 

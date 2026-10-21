@@ -1,7 +1,7 @@
 {
   "name": "checkwhy",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "Apache-2.0",
   "description": "A claim that knows when it stops holding: check a sentence with a command, watch it go stale, walk why to the receipt.",
   "repository": {

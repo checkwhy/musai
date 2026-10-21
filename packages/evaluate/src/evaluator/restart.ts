@@ -121,6 +121,18 @@ export class InvokeRefusedError extends KernelError {
   }
 }
 
+/** A run its caller's deadline ended, which ends the call and records no receipt of it. */
+class RunTimedOutError extends KernelError {
+  constructor(command: readonly string[], timeoutMs: number) {
+    super({
+      reason: "over-budget",
+      about: [command[0]!],
+      detail: `the run of ${command.join(" ")} outlived its ${timeoutMs} ms deadline and was ended, with no receipt recorded`,
+    });
+    this.name = "RunTimedOutError";
+  }
+}
+
 function refusalFrom(need: Need, error: unknown): EnvelopeError {
   return {
     code: error instanceof UnsupportedNeedError ? "unsupported-need" : "need-refused",
@@ -167,6 +179,7 @@ interface PerformNeedContext {
   readonly resolutionTable?: ResolutionTable;
   readonly modulePath?: (moduleName: string) => string;
   readonly invocationLimits?: InvocationLimits;
+  readonly runTimeoutMs?: number;
   readonly station?: Station;
   /** What a station's preflight decided for each run need: the receipt reused, or none. */
   readonly reuse: Map<string, RecordId | undefined>;
@@ -452,7 +465,7 @@ async function performNeed(
   if (reused !== undefined) {
     return { kind: "satisfied", recordId: reused };
   }
-  const { recipe, observation } = await performRecipe(asked, {
+  const { recipe, observation, timedOut } = await performRecipe(asked, {
     now: ctx.now,
     localDir: ctx.localDir,
     layerDeclarations: ctx.layerDeclarations,
@@ -460,7 +473,11 @@ async function performNeed(
     slotLayers: ctx.slotLayers,
     requirementRegistry: ctx.requirementRegistry,
     station: ctx.station,
+    timeoutMs: ctx.runTimeoutMs,
   });
+  if (timedOut) {
+    throw new RunTimedOutError(need.recipe.command, ctx.runTimeoutMs!);
+  }
   const receiptValue: RunRecord = {
     kind: "run",
     schemaVersion: CURRENT_SCHEMA_VERSIONS.run,
@@ -529,6 +546,8 @@ export interface SatisfyNeedsOptions {
   readonly modulePath?: (moduleName: string) => string;
   /** Absent, a host takes the invocation-limits slot's declared default. */
   readonly invocationLimits?: InvocationLimits;
+  /** How long each run may take; one outliving it ends the call. Unset, a run is unbounded. */
+  readonly runTimeoutMs?: number;
   /** Set under a clearance: every run need goes through its container, or the call is refused. */
   readonly station?: Station;
   /** Set where a station's refusal answers the need rather than ending the call. */
@@ -561,6 +580,7 @@ export async function satisfyNeeds(options: SatisfyNeedsOptions): Promise<Readon
     resolutionTable: options.resolutionTable,
     modulePath: options.modulePath,
     invocationLimits: options.invocationLimits,
+    runTimeoutMs: options.runTimeoutMs,
     station: options.station,
     reuse: new Map(),
   };
@@ -580,7 +600,7 @@ export async function satisfyNeeds(options: SatisfyNeedsOptions): Promise<Readon
   }
 
   // The first need in round order that was refused is the call's refusal, whatever settled first.
-  const refused: { first?: { readonly order: number; readonly error: StationRefusedError } } = {};
+  const refused: { first?: { readonly order: number; readonly error: KernelError } } = {};
   const heldRefusal = () => refused.first;
   const ordered = toPerform.map(([id, need], order) => ({ id, need, order }));
   await mapWithConcurrency(ordered, options.concurrency, async ({ id, need, order }) => {
@@ -590,8 +610,11 @@ export async function satisfyNeeds(options: SatisfyNeedsOptions): Promise<Readon
     try {
       options.evaluationOutcomes.set(id, await performNeed(need, id as RecordId, ctx));
     } catch (error) {
-      // A run the clearance forbids refuses the call, never the rule a refusal would conclude.
-      if (error instanceof StationRefusedError && options.stationRefusalsAnswer !== true) {
+      // A run the clearance forbids or the deadline ends refuses the call, never the rule.
+      if (
+        (error instanceof StationRefusedError && options.stationRefusalsAnswer !== true) ||
+        error instanceof RunTimedOutError
+      ) {
         if (heldRefusal() === undefined || order < heldRefusal()!.order) {
           refused.first = { order, error };
         }
@@ -651,6 +674,7 @@ export interface RestartLoopOptions {
   readonly modulePath?: (moduleName: string) => string;
   /** Bounds invoked contributions only; the driven rule is bounded by its own invoker. */
   readonly invocationLimits?: InvocationLimits;
+  readonly runTimeoutMs?: number;
   /** The record at the slot the input names, so the read-set reads the claim itself. */
   readonly claim?: RecordId;
   readonly station?: Station;
@@ -745,6 +769,7 @@ export async function runRestartLoop(options: RestartLoopOptions): Promise<Resta
       resolutionTable,
       modulePath: options.modulePath,
       invocationLimits: options.invocationLimits,
+      runTimeoutMs: options.runTimeoutMs,
       station: options.station,
       stationRefusalsAnswer: options.stationRefusalsAnswer,
     });

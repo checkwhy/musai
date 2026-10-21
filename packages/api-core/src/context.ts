@@ -46,6 +46,8 @@ export interface OperationContext {
   readonly principalName?: string;
   /** Fixed where the surface is launched, never by a call; absent, every record is read. */
   readonly clearance?: Audience;
+  /** How long each run `check` performs may take; one outliving it ends the call, unreceipted. */
+  readonly runTimeoutMs?: number;
   reportRefusal?(refusal: WorkspaceRefusal): void | Promise<void>;
   /** Where a subscription's refused answer is left, since a write that landed cannot carry it. */
   reportSubscription?(trace: SubscriptionTrace): Promise<void>;

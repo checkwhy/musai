@@ -16,18 +16,16 @@ import {
 } from "./rulings.js";
 import type { ClaimStatus } from "./status.js";
 
-/** `pinnedContentIds` is what a ruling's brief reads beyond the supporting arguments: the case and
- * the claim record. */
 export interface EvaluateClaim {
   readonly id: string;
   readonly applicable: boolean;
   readonly overBudget: boolean;
   readonly supportingArgumentIds: readonly string[];
-  readonly pinnedContentIds?: readonly string[];
   readonly stale?: boolean;
 }
 
-/** `authority` is unchecked until `evaluate` mints it; the ruling is pinned to `briefReads`. */
+/** `authority` is unchecked until `evaluate` mints it; the ruling is stale once `briefReads` names
+ * an id `currentIds` does not hold. */
 export interface EvaluateRuling {
   readonly id: string;
   readonly claim: string;
@@ -38,6 +36,7 @@ export interface EvaluateRuling {
   readonly decidedAt: Timestamp;
   readonly verdict: "holds" | "fails";
   readonly briefReads: readonly string[];
+  readonly currentIds: readonly string[];
 }
 
 export interface EvaluateInput {
@@ -81,6 +80,7 @@ export function evaluate(input: EvaluateInput): EvaluationResult {
       decidedAt: ruling.decidedAt,
       verdict: ruling.verdict,
       evidenceSnapshot: ruling.briefReads,
+      currentEvidenceIds: ruling.currentIds,
     };
     const forClaim = rulingsByClaim.get(ruling.claim);
     if (forClaim) {
@@ -98,7 +98,6 @@ export function evaluate(input: EvaluateInput): EvaluationResult {
     ruling: resolveClaimRulings({
       rulings: rulingsByClaim.get(claim.id) ?? [],
       floor: input.floor,
-      currentEvidenceIds: [...claim.supportingArgumentIds, ...(claim.pinnedContentIds ?? [])],
     }),
     stale: claim.stale,
   }));

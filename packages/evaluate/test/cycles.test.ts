@@ -44,13 +44,19 @@ const OWNER_MATRIX: RoleMatrix = roleMatrix(
   "deadbeef",
 );
 
-function pinnedRuling(id: string, verdict: "holds" | "fails", evidenceSnapshot: readonly string[] = []): PinnedRuling {
+function pinnedRuling(
+  id: string,
+  verdict: "holds" | "fails",
+  evidenceSnapshot: readonly string[] = [],
+  currentEvidenceIds: readonly string[] = [],
+): PinnedRuling {
   return {
     id,
     authority: authorityOf(OWNER_MATRIX, "alice@example.com", ANY_SCOPE, "person"),
     decidedAt: timestamp("2026-01-01T00:00:00.000Z"),
     verdict,
     evidenceSnapshot,
+    currentEvidenceIds,
   };
 }
 
@@ -199,12 +205,13 @@ describe("evaluateClaims: the reasons the fixpoint alone cannot produce", () => 
 
   test("a claim whose winning ruling is stale reads the ruling's verdict, flagged decided on stale evidence", () => {
     const args = new Map<string, Argument>([["arg-1", receipt("arg-1")]]);
-    const winning = pinnedRuling("sha256:ruling", "holds", ["sha256:evidence-the-ruling-saw"]);
-    const ruling = resolveClaimRulings({
-      rulings: [winning],
-      floor: null,
-      currentEvidenceIds: ["sha256:evidence-since-replaced"],
-    });
+    const winning = pinnedRuling(
+      "sha256:ruling",
+      "holds",
+      ["sha256:evidence-the-ruling-saw"],
+      ["sha256:evidence-since-replaced"],
+    );
+    const ruling = resolveClaimRulings({ rulings: [winning], floor: null });
     const claim: ClaimEvaluationInput = {
       id: "claim",
       applicable: true,
@@ -224,7 +231,7 @@ describe("evaluateClaims: the reasons the fixpoint alone cannot produce", () => 
     const args = new Map<string, Argument>([["arg-1", receipt("arg-1")]]);
     const one = pinnedRuling("sha256:one", "holds");
     const two = pinnedRuling("sha256:two", "fails");
-    const ruling = resolveClaimRulings({ rulings: [one, two], floor: null, currentEvidenceIds: [] });
+    const ruling = resolveClaimRulings({ rulings: [one, two], floor: null });
     const claim: ClaimEvaluationInput = {
       id: "claim",
       applicable: true,
@@ -257,7 +264,7 @@ describe("evaluateClaims: the reasons the fixpoint alone cannot produce", () => 
   test("a decided ruling that disagrees with a decided receipt applies its own verdict", () => {
     const args = new Map<string, Argument>([["arg-1", receipt("arg-1")]]);
     const decided = pinnedRuling("sha256:ruling", "fails");
-    const ruling = resolveClaimRulings({ rulings: [decided], floor: null, currentEvidenceIds: [] });
+    const ruling = resolveClaimRulings({ rulings: [decided], floor: null });
     const claim: ClaimEvaluationInput = {
       id: "claim",
       applicable: true,
@@ -396,6 +403,7 @@ describe("evaluate: the role matrix and the trust branch's floor gate a ruling's
       decidedAt: timestamp("2026-01-01T00:00:00.000Z"),
       verdict: "fails",
       briefReads: [],
+      currentIds: [],
     };
 
     const trustingMatrix = roleMatrix(
@@ -441,6 +449,7 @@ describe("evaluate: the role matrix and the trust branch's floor gate a ruling's
       decidedAt: timestamp("2026-01-01T00:00:00.000Z"),
       verdict: "holds",
       briefReads: [],
+      currentIds: [],
     };
     const trustingMatrix = roleMatrix(
       [],
@@ -468,6 +477,38 @@ describe("evaluate: the role matrix and the trust branch's floor gate a ruling's
       floor,
     });
     expect(statusFor(withFloor.statuses, claimId).label).toBe("fails");
+  });
+
+  test("a ruling is held to its own current ids, whatever its claim's supporting arguments hold", () => {
+    const trustingMatrix = roleMatrix(
+      [],
+      [{ principal: "alice@example.com", role: "owner", scope: ANY_SCOPE }],
+      "deadbeef",
+    );
+    const ruled = (currentIds: readonly string[]) =>
+      evaluate({
+        claims: [claim],
+        arguments: args,
+        attacks: [],
+        rulings: [
+          {
+            id: "sha256:ruling",
+            claim: claimId,
+            principal: "alice@example.com",
+            scope: ANY_SCOPE,
+            authority: "person",
+            decidedAt: timestamp("2026-01-01T00:00:00.000Z"),
+            verdict: "holds",
+            briefReads: [argId],
+            currentIds,
+          },
+        ],
+        matrix: trustingMatrix,
+        floor: null,
+      });
+
+    expect(statusFor(ruled([]).statuses, claimId)).toMatchObject({ label: "holds", decidedOnStaleEvidence: true });
+    expect(statusFor(ruled([argId]).statuses, claimId)).not.toHaveProperty("decidedOnStaleEvidence");
   });
 });
 
@@ -559,6 +600,7 @@ async function runCycleFixtures(dir: string): Promise<void> {
               decidedAt: timestamp(claim.ruling.decidedAt),
               verdict: claim.ruling.verdict,
               briefReads: claim.ruling.evidenceSnapshot ?? [],
+              currentIds: claim.supportingArgumentIds,
             },
           ]
         : [],

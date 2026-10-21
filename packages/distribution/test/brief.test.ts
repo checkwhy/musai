@@ -30,6 +30,7 @@ import { declareClaimTypes, fixedClock } from "@musai/test-support";
 import { afterEach, describe, expect, test } from "vitest";
 import { BRIEF_BUDGET_SLOT_ID, BRIEF_COMMAND, briefRecipe, parseBriefSubstrates } from "../src/brief/recipe.js";
 import { type BriefRender, renderBrief } from "../src/brief/render.js";
+import { byteLengthUtf8 } from "../src/brief/trim.js";
 import { briefRender } from "../src/ops/brief.js";
 
 const CLAIM_TYPE = "musai.brief-fixture-test/claim@1";
@@ -307,6 +308,74 @@ describe("renderBrief", () => {
     expect(rendered.reads).toContainEqual(readEntryFor(f.argumentId));
   });
 
+  test("an argument against a run the claim cites is packed as attacking evidence naming that run", async () => {
+    const f = await setUp();
+    const [againstRunId] = await f.store.putMany([
+      { kind: "run", value: receiptRun("attacking evidence: the direct run's exit code lies") },
+    ]);
+    const argument: ArgumentRecord = {
+      kind: "argument",
+      premises: [],
+      supersedes: [],
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+      target: f.directRunId,
+      reason: "the direct run passed for the wrong reason",
+      evidence: [receiptEdge(againstRunId!, "result")],
+    };
+    const [argumentId] = await f.store.putMany([{ kind: "argument", value: argument }]);
+    const rendered = await render(f, 20000);
+
+    expect(rendered.output.split("\n")).toContain(
+      `- receipt ${againstRunId} (musai.core/exit-code@1:result) against the run ${f.directRunId}: the direct run passed for the wrong reason`,
+    );
+    expect(rendered.reads).toContainEqual(readEntryFor(argumentId!));
+    expect(rendered.reads).toContainEqual(readEntryFor(againstRunId!));
+  });
+
+  test("the trim drops an argument whole and never prints a line it omits, even beside a kept line on its run", async () => {
+    const f = await setUp();
+    const against = (target: RecordId, reason: string, runs: readonly RecordId[]): ArgumentRecord => ({
+      kind: "argument",
+      premises: [],
+      supersedes: [],
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+      target,
+      reason,
+      evidence: runs.map((run) => receiptEdge(run, "result")),
+    });
+    const [selfCiting, twoRuns] = await f.store.putMany([
+      { kind: "argument", value: against(f.directRunId, "the run attacks itself", [f.directRunId]) },
+      { kind: "argument", value: against(f.claimId, "two runs tell against it", [f.directRunId, f.attackRunId]) },
+    ]);
+    const linesOf = new Map<string, number>([
+      [f.argumentId, 1],
+      [selfCiting, 1],
+      [twoRuns, 2],
+    ]);
+    const attackLines = (rendered: BriefRender) =>
+      rendered.output.split("## Attacking evidence\n")[1]!.split("\n\n")[0]!.split("\n");
+    const itemLines = (rendered: BriefRender) => rendered.output.split("\n").filter((line) => line.startsWith("- "));
+    const full = await render(f, 20000);
+    expect(attackLines(full)).toHaveLength(4);
+
+    const bytesOf = (lines: readonly string[]) => lines.reduce((total, line) => total + byteLengthUtf8(line), 0);
+    let mostOmitted = 0;
+    for (let budget = bytesOf(itemLines(full)); ; budget -= 8) {
+      const rendered = await render(f, budget).catch((error: unknown) => error);
+      if (isOperationError(rendered)) {
+        break;
+      }
+      const { omissions } = rendered as BriefRender;
+      const printed = attackLines(rendered as BriefRender).filter((line) => line !== "(none)");
+      const omittedLines = omissions.reduce((total, omission) => total + linesOf.get(omission.id)!, 0);
+      expect(printed.length + omittedLines).toBe(4);
+      expect(new Set(omissions.map((omission) => omission.id)).size).toBe(omissions.length);
+      expect(bytesOf(itemLines(rendered as BriefRender))).toBeLessThanOrEqual(budget);
+      mostOmitted = Math.max(mostOmitted, omissions.length);
+    }
+    expect(mostOmitted).toBe(3);
+  });
+
   test("an argument a later one supersedes is packed at a head before the succession and left out at one after it", async () => {
     const f = await setUp();
     const hexOf = (id: RecordId) => id.slice("sha256:".length);
@@ -351,7 +420,7 @@ describe("renderBrief", () => {
   test("changing the budget changes the output; changing nothing changes nothing", async () => {
     const f = await setUp();
     const full = await render(f, 20000);
-    const tiny = await render(f, 330);
+    const tiny = await render(f, 350);
     expect(tiny.output).not.toBe(full.output);
     expect(tiny.omissions.length).toBeGreaterThan(0);
 
@@ -484,12 +553,12 @@ describe("brief.render@1", () => {
     const f = await setUp("brief-op-case-4");
     const output = await runHandler(
       briefRender,
-      { claim: f.claimId, budget: 330 },
+      { claim: f.claimId, budget: 350 },
       { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT) },
     );
     const record = output.minted[0]!.record as RunRecord;
     const { budget } = parseBriefSubstrates(record.recipe);
-    expect(budget).toBe(330);
+    expect(budget).toBe(350);
   });
 
   test("declares the reasons it can raise", () => {

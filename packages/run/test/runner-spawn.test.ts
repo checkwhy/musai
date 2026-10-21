@@ -1,12 +1,13 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ContributionEntry, RunRecipe } from "@musai/records";
 import { canonicalBytes, textOf, versionString } from "@musai/records";
 import { currentKey, readKeyFile } from "@musai/store";
 import { bindCheckouts, COMMIT_ENV, headCommit, headTree, makeCheckout } from "@musai/test-support";
 import { execa } from "execa";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   authorisedBinary,
   BinaryNotFoundError,
@@ -234,6 +235,122 @@ describe("performRecipe: exit codes and lossy decoding", () => {
         requirementRegistry: registryDeclaring("definitely-not-a-real-binary-musai-test"),
       }),
     ).rejects.toThrow(BinaryNotFoundError);
+  });
+});
+
+describe("performRecipe: a run ends with every process it started", () => {
+  const RUN_DIST = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+
+  /** A grandchild writing its pid to the file its argument names, then waiting forever. */
+  const LINGERING =
+    'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)';
+  const IGNORING_SIGTERM = `process.on("SIGTERM", () => {}); ${LINGERING}`;
+
+  /** A command starting `grandchild` with the run's own output streams, then waiting forever. */
+  function startingGrandchild(grandchild: string, pidFile: string): string[] {
+    const child = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}, ${JSON.stringify(pidFile)}], { stdio: "inherit" }); setInterval(() => {}, 1000)`;
+    return ["node", "-e", child];
+  }
+
+  /** A zombie has ended: PID 1 in a container may never reap an orphan. */
+  async function running(pid: number): Promise<boolean> {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+    if (process.platform !== "linux") {
+      return true;
+    }
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
+    return stat !== "" && stat.slice(stat.lastIndexOf(")") + 2)[0] !== "Z";
+  }
+
+  async function pidIn(file: string): Promise<number> {
+    for (;;) {
+      const written = await readFile(file, "utf8").catch(() => "");
+      if (written !== "") {
+        return Number(written);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  async function endedWithin(pid: number, ms: number): Promise<boolean> {
+    for (const until = Date.now() + ms; Date.now() < until; ) {
+      if (!(await running(pid))) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return false;
+  }
+
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of dirs.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function pidFile(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "musai-grandchild-"));
+    dirs.push(dir);
+    return join(dir, "pid");
+  }
+
+  test("a grandchild holding the run's output ends with the run at its deadline", async () => {
+    const file = await pidFile();
+    const { timedOut } = await performRecipe(recipe({ command: startingGrandchild(LINGERING, file) }), {
+      requirementRegistry: registryDeclaring("node"),
+      timeoutMs: 2000,
+    });
+
+    expect(timedOut).toBe(true);
+    expect(await running(await pidIn(file))).toBe(false);
+  });
+
+  test("a grandchild ignoring SIGTERM is killed once the deadline's grace has passed", async () => {
+    const file = await pidFile();
+    const { timedOut } = await performRecipe(recipe({ command: startingGrandchild(IGNORING_SIGTERM, file) }), {
+      requirementRegistry: registryDeclaring("node"),
+      timeoutMs: 2000,
+    });
+
+    expect(timedOut).toBe(true);
+    expect(await running(await pidIn(file))).toBe(false);
+  });
+
+  test("a grandchild ignoring SIGTERM ends at the deadline though it holds none of the run's output", async () => {
+    const file = await pidFile();
+    const quiet = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(IGNORING_SIGTERM)}, ${JSON.stringify(file)}], { stdio: "ignore" }); setInterval(() => {}, 1000)`;
+    const { timedOut } = await performRecipe(recipe({ command: ["node", "-e", quiet] }), {
+      requirementRegistry: registryDeclaring("node"),
+      timeoutMs: 2000,
+    });
+
+    expect(timedOut).toBe(true);
+    expect(await endedWithin(await pidIn(file), 1000)).toBe(true);
+  });
+
+  test("a caller interrupted mid-run ends the grandchildren of its run", async () => {
+    const file = await pidFile();
+    const command = JSON.stringify(startingGrandchild(LINGERING, file));
+    const caller = execa(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { performRecipe } from ${JSON.stringify(RUN_DIST)}; await performRecipe({ command: ${command}, workingDirectory: "/", environment: {}, declared: [], substrates: [], isolation: "hygiene" });`,
+      ],
+      { reject: false },
+    );
+    const grandchild = await pidIn(file);
+    caller.kill("SIGINT");
+
+    expect((await caller).signal).toBe("SIGINT");
+    expect(await endedWithin(grandchild, 5000)).toBe(true);
   });
 });
 

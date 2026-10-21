@@ -22,6 +22,9 @@ type Attestation struct {
 	Until      *time.Time
 	Supersedes []string
 	Signed     bool
+	// Unknown marks a release of a schema version the verifier does not know: it covers nothing,
+	// yet still withdraws what it supersedes, so skipping it never widens what stands.
+	Unknown bool
 }
 
 // FromRecord reads a release or a revocation from an attestation's value,
@@ -102,7 +105,7 @@ func Standing(attestations []Attestation, roles Roles) []Attestation {
 			withdrawn[id] = true
 		}
 	}
-	return slices.DeleteFunc(releases, func(r Attestation) bool { return withdrawn[r.ID] })
+	return slices.DeleteFunc(releases, func(r Attestation) bool { return withdrawn[r.ID] || r.Unknown })
 }
 
 func revocationCounts(revocation Attestation, attestations []Attestation, roles Roles) bool {

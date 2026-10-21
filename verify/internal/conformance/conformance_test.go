@@ -14,8 +14,8 @@ func TestTheRepositorysCorpusPassesEveryCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) < 20+1+1+16 {
-		t.Fatalf("%d cases, want at least 38", len(cases))
+	if len(cases) < 20+1+1+16+7 {
+		t.Fatalf("%d cases, want at least 45", len(cases))
 	}
 	for _, c := range cases {
 		if !c.Passed {
@@ -31,6 +31,7 @@ func TestACorpusDisagreeingWithTheVerifierFailsTheCase(t *testing.T) {
 		"frozen.json":       &fstest.MapFile{Data: []byte(`{"cases":[{"name":"wrong","kind":"rule","record":{"b":1,"a":2},"canonical":"{\"b\":1,\"a\":2}","id":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}]}`)},
 		"references.json":   &fstest.MapFile{Data: []byte(`{}`)},
 		"bundles.json":      &fstest.MapFile{Data: []byte(`[]`)},
+		"releases.json":     &fstest.MapFile{Data: []byte(`[]`)},
 		"digests.json":      &fstest.MapFile{Data: []byte(`{}`)},
 		"exports.json":      &fstest.MapFile{Data: []byte(`[]`)},
 	}
@@ -55,6 +56,7 @@ func TestABundleDigestingOtherwiseThanTheCorpusNamesFailsItsCase(t *testing.T) {
 		"frozen.json":       &fstest.MapFile{Data: []byte(`{"cases":[]}`)},
 		"references.json":   &fstest.MapFile{Data: []byte(`{}`)},
 		"bundles.json":      &fstest.MapFile{Data: []byte(`[{"name":"passing","verdict":"verified","codes":["ref.pin-absent"]}]`)},
+		"releases.json":     &fstest.MapFile{Data: []byte(`[]`)},
 		"digests.json":      &fstest.MapFile{Data: []byte(`{"passing":"0000000000000000000000000000000000000000000000000000000000000000"}`)},
 		"exports.json":      &fstest.MapFile{Data: []byte(`[]`)},
 	}

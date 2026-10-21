@@ -3,14 +3,27 @@ interface Entry {
   readonly timestamp?: unknown;
   readonly isMeta?: unknown;
   readonly isSidechain?: unknown;
+  readonly cwd?: unknown;
   readonly message?: { readonly content?: unknown };
 }
 
 interface Block {
   readonly type?: unknown;
   readonly text?: unknown;
+  readonly id?: unknown;
   readonly name?: unknown;
-  readonly input?: { readonly command?: unknown };
+  readonly input?: { readonly command?: unknown; readonly run_in_background?: unknown };
+  readonly tool_use_id?: unknown;
+  readonly is_error?: unknown;
+}
+
+/** A Bash command the assistant called, and the directory the call was made in. */
+export interface TurnCommand {
+  readonly command: string;
+  /** Whether it ran in the foreground and its result came back as no error, which a refused
+   * call's never does. */
+  readonly ran: boolean;
+  readonly cwd: string | null;
 }
 
 /** The person's last message onward, as Claude Code's session transcript records it. */
@@ -18,7 +31,7 @@ export interface Turn {
   readonly startedAt: string;
   /** What the assistant said after the turn's last tool call. */
   readonly closingText: string;
-  readonly commands: readonly string[];
+  readonly commands: readonly TurnCommand[];
 }
 
 function entries(jsonl: string): Entry[] {
@@ -57,13 +70,25 @@ export function lastTurn(jsonl: string): Turn | null {
   if (opening === undefined || typeof opening.timestamp !== "string") {
     return null;
   }
-  const commands: string[] = [];
+  const turn = all.slice(start + 1);
+  const returned = new Set(
+    turn
+      .filter((entry) => entry.type === "user")
+      .flatMap(blocksOf)
+      .filter((block) => block.type === "tool_result" && block.is_error !== true)
+      .map((block) => block.tool_use_id),
+  );
+  const commands: TurnCommand[] = [];
   let closing: string[] = [];
-  for (const entry of all.slice(start + 1).filter((candidate) => candidate.type === "assistant")) {
+  for (const entry of turn.filter((candidate) => candidate.type === "assistant")) {
     for (const block of blocksOf(entry)) {
       if (block.type === "tool_use") {
         if (block.name === "Bash" && typeof block.input?.command === "string") {
-          commands.push(block.input.command);
+          commands.push({
+            command: block.input.command,
+            ran: block.input.run_in_background !== true && typeof block.id === "string" && returned.has(block.id),
+            cwd: typeof entry.cwd === "string" ? entry.cwd : null,
+          });
         }
         closing = [];
       } else if (block.type === "text" && typeof block.text === "string") {

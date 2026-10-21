@@ -2,7 +2,7 @@ import type { OperationDescriptor, Workspace } from "@musai/api-core";
 import { openWorkspace } from "@musai/api-core";
 import { type CaseRecord, type ClaimRecord, conditionString, type RecordId, versionString } from "@musai/records";
 import { citedClaims, findCase } from "../cases.js";
-import { type LabelledClaim, labelledClaim } from "../claim.js";
+import { groupHolder, type LabelledClaim, labelledClaim } from "../claim.js";
 import { GATE_CLASSES, type GateClass, isGateClass } from "../gate-classes.js";
 
 export interface CaseStatusInput {
@@ -71,6 +71,12 @@ function undecided(options: readonly Counted[]): Counted {
   return waiting === undefined ? { label: "fails", waiting: null } : { label: "open", waiting };
 }
 
+/** Whether an open gate awaits an answer as `gate pending` reads it: a menu does only while none
+ * of its members holds, on grounds this view holds or not. */
+async function awaitsAnswer(opened: Workspace, claim: ClaimRecord): Promise<boolean> {
+  return claim.exclusiveGroup === null || (await groupHolder(opened, claim.exclusiveGroup)) === null;
+}
+
 /** A case's progress: its first open gate in playbook order, its claims' counts, and whether every
  * claim it cites holds or fails only as a menu option not chosen. */
 export async function deriveCaseStatus(
@@ -98,7 +104,7 @@ export async function deriveCaseStatus(
     if (!isGateClass(gateClass)) {
       continue;
     }
-    if (next === null && status.label === "open") {
+    if (next === null && status.label === "open" && (await awaitsAnswer(opened, claim))) {
       next = { gate: claimId, class: gateClass };
     }
     if (status.label !== "open" && status.decidedOnStaleEvidence) {

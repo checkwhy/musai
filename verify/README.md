@@ -4,7 +4,7 @@ Check a musai bundle as its receiver: no Node, no git, no ssh-keygen, and
 signatures checked against keys you chose rather than keys the sender chose.
 
 ```console
-$ curl -sSfLO https://github.com/checkwhy/musai/releases/download/verify%2Fv0.1.0/musai-verify-linux-amd64
+$ curl -sSfLO https://github.com/checkwhy/musai/releases/download/verify%2Fv0.1.1/musai-verify-linux-amd64
 $ chmod +x musai-verify-linux-amd64 && mv musai-verify-linux-amd64 musai-verify
 
 $ musai-verify verify path/to/bundle
@@ -139,6 +139,7 @@ codes each tampered bundle must produce.
 | `record.id-mismatch` | error | the bytes digest to another id than the path names |
 | `record.path-mismatch` | error | stored under another kind's or prefix's directory |
 | `record.stray` | warning | a file under `records/` that is neither a record nor a signature |
+| `attestation.version-unknown` | warning | a release or a seal of a schema version later than the verifier knows, the detail naming it: skipped, it covers nothing, though a release still withdraws what it supersedes |
 | `ref.dangling` | error | a citation names a record the source does not hold |
 | `ref.pin-absent` | warning | a pin (a case's preset module) names a record a distribution may hold |
 | `ref.kind-mismatch` | error | a reference names a record of a kind the table does not allow there |
@@ -162,7 +163,6 @@ codes each tampered bundle must produce.
 | `release.uncovered` | warning | a record no standing release in the bundle covers for its audience |
 | `release.unauthorised` | warning | a release by a principal the bundle's `roles` grants no `publish` |
 | `release.relayed` | warning | a release relayed through a model, which stands for no audience |
-| `release.audience-unknown` | warning | a release to a form of audience this verifier does not know, which only a later schema version can carry; it covers nothing |
 | `release.window` | warning | a release whose window excludes the time the bundle was cut, checked against the sender's time |
 | `release.unchecked` | info | no `bundle.json` names an audience, so entitlement is not checked |
 | `release.member`, `release.not-member` | info, warning | whether the receiver `--as` names is in the bundle's audience |
@@ -231,9 +231,10 @@ $ python3 -m http.server -d site
 the canonical vectors, a few thousand random values in non-canonical spellings
 with the kernel's canonical bytes for each, the reference table (embedded in
 the binary as `internal/refs/references.json`, byte for byte), the tampered
-bundles with each one's digest, and an archive the kernel's own `musai
-export` wrote. `musai-verify conformance ../conformance` runs all of it and CI runs
-it on every push.
+bundles with each one's digest, the bundles carrying releases with each one's
+entitlement, and an archive the kernel's own `musai export` wrote.
+`musai-verify conformance ../conformance` runs all of it and CI runs it on every
+push.
 
 ## Developing
 

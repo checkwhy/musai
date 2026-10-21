@@ -846,6 +846,7 @@ describe("why names every open reason as status names it, and walks no derivatio
     const unvouched = await rule(claimId, "fails", null);
 
     const why = await runHandler(claimWhy, { claim: slotOf("unvouched"), full: true }, context());
+    const status = await runHandler(claimStatus, { claim: slotOf("unvouched") }, context());
     const text = claimWhy.renderText!(why);
 
     expect(held).toMatchObject({ label: "holds" });
@@ -853,10 +854,20 @@ describe("why names every open reason as status names it, and walks no derivatio
     expect(why).toMatchObject({ label: "open", reason: "contested-authority" });
     expect(why.derivation).toBeUndefined();
     expect(why.rulings).toEqual([
-      { id: unvouched, verdict: "fails", authority: "contested-authority", principals: [], names: [] },
+      {
+        id: unvouched,
+        verdict: "fails",
+        authority: "contested-authority",
+        principals: [],
+        names: [],
+        uncounted: "unvouched",
+      },
     ]);
+    expect(status.decidedBy).toBeNull();
     expect(text.split("\n")[0]).toMatch(/^◌ open \(contested-authority\) · unvouched /);
-    expect(text).toContain(`  ruling ${unvouched.slice(7, 19)} · fails, contested-authority ruling attested by nobody`);
+    expect(text).toContain(
+      `  ruling ${unvouched.slice(7, 19)} · fails, contested-authority ruling attested by nobody · decided nothing: nothing within the matrix vouches for it`,
+    );
     expect(text).not.toContain("decided by");
   });
 
@@ -870,7 +881,7 @@ describe("why names every open reason as status names it, and walks no derivatio
     const [run] = held.runs;
     const [ruling] = contested.rulings!;
 
-    expect(REGISTRY.get("claim.why@3")).toBe(claimWhy);
+    expect(REGISTRY.get("claim.why@4")).toBe(claimWhy);
     expect(derivation.children.length).toBeGreaterThan(0);
     for (const output of [held, contested]) {
       expect(validateOperationOutput(claimWhy, output)).toEqual({ ok: true });

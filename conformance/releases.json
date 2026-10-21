@@ -91,14 +91,24 @@
     ]
   },
   {
-    "name": "unknown-form",
+    "name": "later-version",
     "verdict": "verified",
     "entitlement": "uncovered",
-    "what": "released at a later schema version to an audience form this grammar lacks, written by hand: read, not checked, covering nothing",
+    "what": "as released, every release written by hand at a schema version later than the kernel reads: each is skipped, named with its version, and covers nothing",
     "codes": [
+      "attestation.version-unknown",
       "ref.pin-absent",
-      "release.audience-unknown",
       "release.uncovered"
+    ]
+  },
+  {
+    "name": "later-version-seal",
+    "verdict": "verified",
+    "entitlement": "covered",
+    "what": "as sealed, the seal written by hand at a schema version later than the kernel reads: it is skipped, named with its version, and the releases still cover the bundle",
+    "codes": [
+      "attestation.version-unknown",
+      "ref.pin-absent"
     ]
   },
   {

@@ -498,8 +498,11 @@ export class IndexDb {
   }
 
   /** A condition on `column` admitting only the records installed names resolve to. */
-  private resolvedModuleRecords(column: string): { condition: string; ids: string[] } {
-    const ids = this.installedModuleRecords().map((install) => install.id);
+  private resolvedModuleRecords(
+    column: string,
+    landed: (id: RecordId) => boolean = () => true,
+  ): { condition: string; ids: string[] } {
+    const ids = this.installedModuleRecords(landed).map((install) => install.id);
     return { condition: `${column} IN (${ids.map(() => "?").join(", ")})`, ids };
   }
 
@@ -652,9 +655,10 @@ export class IndexDb {
     return rows.map((row) => row.started_at);
   }
 
-  /** Only a record an installed name resolves to answers, the latest in the log among them. */
-  contributionById(id: string): IndexedContribution | undefined {
-    const resolved = this.resolvedModuleRecords("module_contributions.module_record");
+  /** Only a record an installed name resolves to answers, the latest in the log among them; with
+   * `landed`, installed as of the records it holds. */
+  contributionById(id: string, landed?: (id: RecordId) => boolean): IndexedContribution | undefined {
+    const resolved = this.resolvedModuleRecords("module_contributions.module_record", landed);
     const row = this.db
       .prepare(
         "SELECT module_contributions.module_record AS module_record, module_contributions.module_name AS module_name, " +
@@ -680,8 +684,9 @@ export class IndexDb {
     };
   }
 
-  /** The latest record in the log per name, never by id: a hash says nothing of age. */
-  installedModuleRecords(): IndexedModuleInstall[] {
+  /** The latest record in the log per name among those `landed`, never by id: a hash says nothing
+   * of age. */
+  installedModuleRecords(landed: (id: RecordId) => boolean = () => true): IndexedModuleInstall[] {
     const rows = this.db
       .prepare(
         "SELECT records.id AS id, records.record_json AS record_json FROM records " +
@@ -690,7 +695,7 @@ export class IndexDb {
       )
       .all() as Array<{ id: string; record_json: string }>;
     const byName = new Map<string, IndexedModuleInstall>();
-    for (const row of rows) {
+    for (const row of rows.filter((candidate) => landed(candidate.id as RecordId))) {
       const record = JSON.parse(row.record_json) as ModuleRecord;
       byName.set(record.name, { id: row.id as RecordId, name: record.name, version: record.version });
     }

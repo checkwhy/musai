@@ -1,6 +1,6 @@
 {
   "name": "musai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Conversational entry into Musai: read where a case stands and answer its pending gates through the tools this repository's own MCP server exposes.",
   "author": {
     "name": "Flo",

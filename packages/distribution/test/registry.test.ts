@@ -183,8 +183,8 @@ describe("the projection contract every declared operation holds, which a lint o
       "scope.drop@1": "drops only when the call is performing",
       "case.soundcheck@1": "performs a check only when the call is performing",
       "case.status@2": "performs a check only when the call is performing",
-      "claim.status@2": "performs a check only when the call is performing",
-      "claim.why@3": "performs a check only when the call is performing",
+      "claim.status@3": "performs a check only when the call is performing",
+      "claim.why@4": "performs a check only when the call is performing",
       "gate.ask@1": "reaches brief.render through the same context, whose plan mode it carries",
     };
     const planning = [...REGISTRY.entries()]

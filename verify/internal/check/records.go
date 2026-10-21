@@ -173,6 +173,9 @@ func readRecord(file File, match []string, table refs.Table) (*Record, []Finding
 	if dirKind != kind || first != hex[:2] || second != hex[2:4] {
 		findings = append(findings, Finding{Code: "record.path-mismatch", Severity: Error, Path: file.Path, Record: id, Detail: fmt.Sprintf("a %s record belongs at records/%s/%s/%s/%s.json", kind, kind, hex[:2], hex[2:4], hex)})
 	}
+	if version, unknown := unknownVersion(value); kind == "attestation" && unknown {
+		findings = append(findings, Finding{Code: "attestation.version-unknown", Severity: Warning, Path: file.Path, Record: id, Detail: fmt.Sprintf("skipped: a %s attestation of schemaVersion %v, a version this verifier does not know, counts for nothing", value["purpose"], version)})
+	}
 	return &Record{ID: id, Path: file.Path, Kind: kind, Bytes: file.Data, Value: value}, findings
 }
 

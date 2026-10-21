@@ -2,8 +2,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DECLARATIVE_RULE, type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
-import { blobPath, type ModuleRecord, recordPath } from "@musai/records";
+import { DECLARATIVE_RULE, isOperationError, type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
+import {
+  blobPath,
+  type ClaimRecord,
+  CURRENT_SCHEMA_VERSIONS,
+  exactDecimal,
+  type ModuleRecord,
+  type RecordId,
+  recordPath,
+  slotFor,
+} from "@musai/records";
 import {
   type Checkout,
   fixedClock,
@@ -13,10 +22,12 @@ import {
   type TestKey,
 } from "@musai/test-support";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { shortIdOf } from "../src/claim-ref.js";
 import { untarGz } from "../src/export/untar.js";
 import { caseBook } from "../src/ops/case.js";
 import { caseStatus } from "../src/ops/case-status.js";
 import { checkRun } from "../src/ops/check.js";
+import { claimStatus } from "../src/ops/claim.js";
 import { bundleExport } from "../src/ops/export.js";
 import { moduleBuild } from "../src/ops/module.js";
 import { releaseRevoke } from "../src/ops/release.js";
@@ -25,6 +36,8 @@ import { workspaceInit } from "../src/ops/workspace.js";
 
 const scope = "default";
 const now = fixedClock("2026-10-11T00:00:00.000Z");
+/** A later clock, so building the module again lands a build of its own. */
+const rebuiltAt = fixedClock("2026-10-12T00:00:00.000Z");
 /** A rule running the command its condition names in the project's working tree. */
 const TREE_COMMAND_MODULE_DIR = fileURLToPath(new URL("./fixtures/tree-command", import.meta.url));
 const TREE_COMMAND_RULE = "tree-command/exits-cleanly";
@@ -78,7 +91,7 @@ async function sender(settle: (context: OperationContext) => Promise<string>) {
   const out = (name: string) => join(scratch, `${name}.tar.gz`);
   const exported = (name: string) =>
     runHandler(bundleExport, { id: root, to: "public", out: out(name), key: key.keyPath }, made.context);
-  return { ...made, module, out, exported };
+  return { ...made, root, module, out, exported };
 }
 
 /** A sender whose case of `kind` holds its `holds` claims, ready to export the case. */
@@ -119,6 +132,24 @@ describe("a check a module's rule judges leaves with what a stranger re-derives 
     expect(files.has(recordPath("run", module.build!))).toBe(true);
     expect(files.has(blobPath(module.bundle!))).toBe(true);
     expect(output.underivable).toBeUndefined();
+  }, 240_000);
+
+  test("after a rebuild nothing has evaluated with, export refuses the check by name, and carries its receipt once status evaluates it", async () => {
+    const from = await checkSender();
+    const { slot } = (await openWorkspace(from.context)).read(from.root as RecordId) as ClaimRecord;
+    await runHandler(moduleBuild, { dir: TREE_COMMAND_MODULE_DIR }, { ...from.context, now: rebuiltAt });
+
+    const refused = await from.exported("rebuilt").catch((error: unknown) => error);
+    expect(isOperationError(refused)).toBe(true);
+    expect((refused as Error).message).toContain(`refusing to export the check ${shortIdOf(slot)}`);
+    expect((refused as Error).message).toContain(`run \`status ${shortIdOf(slot)}\` first`);
+
+    expect((await runHandler(claimStatus, { claim: slot }, from.context)).label).toBe("holds");
+    await from.exported("re-evaluated");
+    const files = untarGz(new Uint8Array(await readFile(from.out("re-evaluated"))));
+    const runs = [...files.keys()].filter((path) => path.startsWith("records/run/"));
+    const commands = runs.map((path) => JSON.parse(new TextDecoder().decode(files.get(path))).recipe.command);
+    expect(commands).toContainEqual(TRACKED_IS_HELLO);
   }, 240_000);
 
   test("a cold workspace without the module re-runs it and reaches the same verdict", async () => {
@@ -364,6 +395,42 @@ describe("a claim whose expectation a module decides leaves with that module", (
     expect([exported.blobs, exported.underivable]).toEqual([0, undefined]);
   }, 240_000);
 });
+
+test("an inapplicable check sharing the recipe of a check that held exports, for no status evaluates it", async () => {
+  const from = await sender(async (context) => {
+    const checked = await runHandler(checkRun, { statement: STATEMENT, command: TRACKED_IS_HELLO }, context);
+    expect(checked.label).toBe("holds");
+    return checked.claim;
+  });
+  const opened = await openWorkspace(from.context);
+  const checked = opened.read(from.root as RecordId) as ClaimRecord;
+  const conditions = { ...checked.conditions, statement: "the tracked file still says hello" };
+  const slot = slotFor(opened.claimTypes.get(checked.type)!, conditions);
+  // A rule record scoping the interpreter to a tier no check names leaves every check out of it.
+  await opened.put([
+    {
+      kind: "rule",
+      value: {
+        kind: "rule",
+        schemaVersion: CURRENT_SCHEMA_VERSIONS.rule,
+        name: "gold-only",
+        scope: { tier: "gold" },
+        weight: exactDecimal("1"),
+        supersedes: [],
+        contribution: DECLARATIVE_RULE,
+      },
+    },
+  ]);
+  const [stray] = await opened.put([{ kind: "claim", value: { ...checked, slot, conditions } }]);
+  opened.close();
+  const out = join(scratch, "inapplicable.tar.gz");
+
+  const status = await runHandler(claimStatus, { claim: stray! }, { ...from.context, mode: "plan" });
+  await runHandler(bundleExport, { id: stray!, to: "public", out, key: key.keyPath }, from.context);
+
+  expect(status.reason).toBe("inapplicable");
+  expect(untarGz(new Uint8Array(await readFile(out))).has(recordPath("claim", stray!))).toBe(true);
+}, 240_000);
 
 test("a module whose code this machine lacks is named by export, and rerun names it uncarried", async () => {
   const from = await checkSender();

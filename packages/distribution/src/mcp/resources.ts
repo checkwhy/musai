@@ -42,7 +42,7 @@ async function readClaimResource(
   registry: ReadonlyMap<string, OperationDescriptor>,
   context: OperationContext,
 ): Promise<ReadResourceResult> {
-  const claimStatus = lookupOperation(registry, "claim.status", versionString("2"));
+  const claimStatus = lookupOperation(registry, "claim.status", versionString("3"));
   const output = await runHandler(claimStatus, { claim: slot }, context);
   return { contents: [textContents(uri, "application/json", new TextDecoder().decode(canonicalBytes(output)))] };
 }

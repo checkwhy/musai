@@ -89,7 +89,7 @@ function answeredAs(status: ClaimStatus): Answered {
 }
 
 /** `gate.pending@1`: every gate claim awaiting an answer. A menu is listed once, by its first
- * applying member, until any member holds. */
+ * applying member, until any member holds, on grounds this view holds or not. */
 export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutput> = {
   id: "gate.pending",
   version: versionString("1"),
@@ -180,8 +180,8 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
           const holder = await groupHolder(opened, group);
           if (holder === null) {
             gates.push({ case: caseRecord.slug, claim: representative.id, gateClass });
-          } else if (answeredAs((await labelledClaim(opened, holder, "none")).status) === "flagged") {
-            flagged.push({ case: caseRecord.slug, claim: opened.index.claimAtSlot(holder)!.id, gateClass });
+          } else if (answeredAs((await labelledClaim(opened, holder.slot, "none")).status) === "flagged") {
+            flagged.push({ case: caseRecord.slug, claim: opened.index.claimAtSlot(holder.slot)!.id, gateClass });
           }
           continue;
         }

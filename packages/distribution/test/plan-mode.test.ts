@@ -309,6 +309,7 @@ describe("a verb that drives a kernel primitive, in plan mode", () => {
     "bundle.export@2",
     "case.open@1",
     "check.run@1",
+    "hook.stop@1",
     "key.rotate@1",
     "module.build@1",
     "module.new@1",
@@ -334,6 +335,8 @@ describe("a verb that drives a kernel primitive, in plan mode", () => {
         return { case: "some-case" };
       case "check.run@1":
         return { statement: "a sentence", command: ["node"] };
+      case "hook.stop@1":
+        return { hook: { transcript_path: join(workspace, "transcript.jsonl") } };
       case "workspace.init@1":
         return { workspace: join(workspace, "fresh") };
       case "bundle.export@2":

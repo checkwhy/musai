@@ -126,3 +126,13 @@ func TestAReleaseRelayedThroughAModelNeverStands(t *testing.T) {
 		t.Fatalf("standing %v, want only r1", standing)
 	}
 }
+
+func TestAReleaseOfAnUnknownVersionCoversNothingYetWithdrawsWhatItSupersedes(t *testing.T) {
+	roles, _ := release.ParseRoles("p owner any\n", false)
+	earlier := release.Attestation{ID: "r1", Subject: "s", Principal: "p", Via: "signature", Purpose: "released", Audience: "public", Extent: "record", Signed: true}
+	later := release.Attestation{ID: "r2", Subject: "s", Principal: "p", Via: "signature", Purpose: "released", Audience: "public", Extent: "record", Supersedes: []string{"r1"}, Signed: true, Unknown: true}
+
+	if standing := release.Standing([]release.Attestation{earlier, later}, roles); len(standing) != 0 {
+		t.Fatalf("standing %v, want none", standing)
+	}
+}

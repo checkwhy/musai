@@ -89,7 +89,7 @@ function receiptEdge(run: RecordId, key: string): EvidenceEdge {
   };
 }
 
-describe("claim.status@2 answers a terminal and an MCP tool call with the same bytes", () => {
+describe("claim.status@3 answers a terminal and an MCP tool call with the same bytes", () => {
   let fixture: FixtureWorkspace;
   let slot: string;
 

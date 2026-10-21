@@ -112,7 +112,7 @@ export const caseSoundcheck: OperationDescriptor<CaseSoundcheckInput, CaseSoundc
     const claims: CaseSoundcheckOutput["claims"][number][] = [];
     for (const { record } of citedClaims(opened, caseRecord)) {
       const claim = record as ClaimRecord;
-      const { status } = await labelledClaim(opened, claim.slot, context.mode === "plan" ? "none" : "perform");
+      const { status } = await labelledClaim(opened, claim.slot, context.mode === "plan" ? "recorded" : "perform");
       claims.push({
         slot: claim.slot,
         label: status.label,

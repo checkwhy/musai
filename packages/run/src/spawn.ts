@@ -113,6 +113,9 @@ export interface HygieneProof {
   readonly channels: readonly { readonly status: "absent" | "denied" | "present" }[];
 }
 
+/** How long a run ended at its deadline has to stop before its whole process tree is killed. */
+const DEADLINE_KILL_GRACE_MS = 2000;
+
 /** A bound secret shorter than this is not scrubbed, so output never becomes substitutions. */
 const DEFAULT_SCRUB_MINIMUM_LENGTH = 6;
 
@@ -151,7 +154,8 @@ export interface PerformRecipeOptions {
   readonly requirementRegistry?: RequirementRegistry;
   /** Bytes written to the child's standard input before it is closed. */
   readonly input?: Uint8Array | string;
-  /** How long to wait before ending the child; `timedOut` tells that ending apart. */
+  /** How long to wait before ending the run and every process it started; `timedOut` tells that
+   * ending apart. */
   readonly timeoutMs?: number;
   /** Set under a clearance: the run goes through the container substrate or is refused. */
   readonly station?: Station;
@@ -326,6 +330,20 @@ export async function refuseStationRun(
   }
 }
 
+/** The grace's SIGKILL is dropped once the call settles, so a group ignoring SIGTERM ends here. */
+function endGroup(pid: number): void {
+  if (process.platform === "win32") {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
 /** The kernel's one spawn path. Everything refusable is refused before the child starts, and a
  * non-zero exit is data on the observation, never a thrown error. */
 export async function performRecipe(asked: RunRecipe, options: PerformRecipeOptions = {}): Promise<SpawnResult> {
@@ -437,9 +455,18 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
       ? environment
       : { ...environment, PATH: await declaredProgramsPath(scratch.root, resolvedBinaries) };
 
+    const spawned = {
+      reject: false,
+      encoding: "buffer",
+      input: options.input,
+      timeout: options.timeoutMs,
+      // A grandchild holding the output pipes would hold the call past its deadline and outlive it.
+      killDescendants: true,
+      forceKillAfterDelay: DEADLINE_KILL_GRACE_MS,
+    } as const;
     const startedAt = now();
-    const result = containerHeld
-      ? await execa(
+    const subprocess = containerHeld
+      ? execa(
           engine,
           containerArgv(
             recipe,
@@ -451,23 +478,18 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
             masked,
             Object.keys(bound),
           ),
-          {
-            env: bound,
-            reject: false,
-            encoding: "buffer",
-            input: options.input,
-            timeout: options.timeoutMs,
-          },
+          { ...spawned, env: bound },
         )
-      : await execa(program, args, {
+      : execa(program, args, {
+          ...spawned,
           cwd: hostWorkingDirectory,
           env: childEnvironment,
           extendEnv: false,
-          reject: false,
-          encoding: "buffer",
-          input: options.input,
-          timeout: options.timeoutMs,
         });
+    const result = await subprocess;
+    if (result.timedOut && subprocess.pid !== undefined) {
+      endGroup(subprocess.pid);
+    }
     const finishedAt = now();
 
     const captured = Buffer.concat([result.stdout ?? new Uint8Array(), result.stderr ?? new Uint8Array()]);

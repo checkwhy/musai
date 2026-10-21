@@ -46,6 +46,7 @@ function floor(verdict: "holds" | "fails"): FloorRuling {
     decidedAt: timestamp("1970-01-01T00:00:00.000Z"),
     verdict,
     evidenceSnapshot: [],
+    currentEvidenceIds: [],
     commit: "a-commit",
   };
 }

@@ -111,8 +111,8 @@ describe("every reason in REASONS is either carried by a claim status or declare
     expect(orphans.sort()).toEqual([...RESERVED_FOR_A_LATER_OPERATION].sort());
   });
 
-  test("claim.status@2, claim.why@3 and case.soundcheck@1 each declare no-such-record, the reason their own lookup can refuse with", () => {
-    for (const key of ["claim.status@2", "claim.why@3", "case.soundcheck@1"]) {
+  test("claim.status@3, claim.why@4 and case.soundcheck@1 each declare no-such-record, the reason their own lookup can refuse with", () => {
+    for (const key of ["claim.status@3", "claim.why@4", "case.soundcheck@1"]) {
       const descriptor = REGISTRY.get(key);
       expect(descriptor, `registry entry ${key}`).toBeDefined();
       expect(descriptor!.reasons).toContain("no-such-record");
@@ -142,8 +142,8 @@ describe("a verb declares the refusals its own reads can raise", () => {
   const LABELLING: readonly Reason[] = ["declaration-conflict", "invalid-input", "sibling-conflict"];
 
   const RAISED: Readonly<Record<string, readonly Reason[]>> = {
-    "claim.status@2": LABELLING,
-    "claim.why@3": LABELLING,
+    "claim.status@3": LABELLING,
+    "claim.why@4": LABELLING,
     "case.soundcheck@1": LABELLING,
     "case.status@2": LABELLING,
     "case.open@1": LABELLING,

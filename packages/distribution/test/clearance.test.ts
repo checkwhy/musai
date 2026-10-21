@@ -3,11 +3,18 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type OperationContext, type OperationDescriptor, openWorkspace, runHandler } from "@musai/api-core";
+import {
+  isOperationError,
+  type OperationContext,
+  type OperationDescriptor,
+  openWorkspace,
+  runHandler,
+} from "@musai/api-core";
 import {
   type ArgumentRecord,
   BRIEF_MEDIA_TYPE,
   type CaseRecord,
+  type ClaimRecord,
   type ComputedRunRecord,
   CREW_MEDIA_TYPE,
   CURRENT_SCHEMA_VERSIONS,
@@ -31,10 +38,11 @@ import {
   stationImageFromConfig,
   stationRecipe,
 } from "@musai/run";
-import { initWorkspace, MUSAI_DIR, readTrustBranch, Store } from "@musai/store";
+import { initWorkspace, LOCAL_DIR, MUSAI_DIR, readTrustBranch, Store } from "@musai/store";
 import {
   allowedSignersLine,
   commitAroundTheStore,
+  fixedClock,
   fixtureBrief,
   fixtureRunRecord,
   generateTestKey,
@@ -46,9 +54,13 @@ import {
   type TestKey,
   writeTrustFile,
 } from "@musai/test-support";
-import { mintAttestation } from "@musai/trust";
+import { mintAttestation, writeSignerConfig } from "@musai/trust";
 import { execa } from "execa";
 import { afterAll, beforeAll, describe, expect, onTestFinished, test } from "vitest";
+import { parseBriefSubstrates } from "../src/brief/recipe.js";
+import { fullReadIds } from "../src/brief/render.js";
+import { contentIdsOf } from "../src/claim.js";
+import { checkEvaluation, evaluationRecipe, recordedEvaluation } from "../src/evaluation.js";
 import { briefRender } from "../src/ops/brief.js";
 import { caseBook, caseSoundcheck } from "../src/ops/case.js";
 import { caseStatus } from "../src/ops/case-status.js";
@@ -56,10 +68,11 @@ import { type CheckRunInput, checkRun } from "../src/ops/check.js";
 import { claimStatus } from "../src/ops/claim.js";
 import { doctorRun } from "../src/ops/doctor.js";
 import { eventsSinceOperation } from "../src/ops/events.js";
-import { gatePending } from "../src/ops/gate.js";
+import { gateAnswer, gateAsk, gatePending } from "../src/ops/gate.js";
 import { moduleBuild } from "../src/ops/module.js";
 import { caseOpen } from "../src/ops/open.js";
 import { releaseRevoke, releaseSeal } from "../src/ops/release.js";
+import { rulingMake } from "../src/ops/ruling.js";
 import { caseSave } from "../src/ops/save.js";
 import { scopeDrop, scopeFork, scopeList, scopeMerge } from "../src/ops/scope.js";
 import { storeRelayout } from "../src/ops/store.js";
@@ -67,6 +80,7 @@ import { viewRun } from "../src/ops/view.js";
 import { claimWhy } from "../src/ops/why.js";
 import { workspaceInit } from "../src/ops/workspace.js";
 import {
+  answerStationRun,
   CANARY,
   caseCiting,
   claim,
@@ -76,6 +90,7 @@ import {
   opensshAvailable,
   PUBLISHER,
   RECORD_NEED_RULE,
+  rebuildRecordNeed,
   receiptEdge,
   restingWorld,
   SCOPE,
@@ -466,8 +481,9 @@ describe.skipIf(!opensshAvailable)(
       return { run: run!, attestation };
     }
 
-    /** A claim resting on its own receipt, and an argument against it citing `evidence`. */
-    async function attackedClaim(world: World, id: string, evidence: readonly RecordId[]): Promise<RecordId> {
+    /** A claim resting on its own receipt, and an argument citing `evidence` against the claim, or
+     * against that receipt where `onReceipt` is set. */
+    async function attackedClaim(world: World, id: string, evidence: readonly RecordId[], onReceipt = false) {
       const [own] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord("the claim's own receipt") }]);
       const [attacked] = await world.store.putMany([{ kind: "claim", value: claim(id, {}, [receiptEdge(own!)]) }]);
       const argument: ArgumentRecord = {
@@ -475,44 +491,640 @@ describe.skipIf(!opensshAvailable)(
         premises: [],
         supersedes: [],
         schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
-        target: attacked!,
+        target: onReceipt ? own! : attacked!,
         reason: "it does not hold",
         evidence: evidence.map(receiptEdge),
       };
-      await world.store.putMany([{ kind: "argument", value: argument }]);
-      return attacked!;
+      const [argued] = await world.store.putMany([{ kind: "argument", value: argument }]);
+      return { claim: attacked!, argument: argued!, receipt: own! };
+    }
+
+    /** Every output a reader of the claim `name` and its case is shown, as JSON and as text. */
+    async function claimReadings(context: OperationContext, name: string, claimId: RecordId, slug: string) {
+      const planned: OperationContext = { ...context, mode: "plan" };
+      const slot = slotOf(name);
+      const asked: readonly (readonly [OperationDescriptor, object])[] = [
+        [claimStatus, { claim: slot }],
+        [claimWhy, { claim: slot }],
+        [claimWhy, { claim: slot, full: true }],
+        [briefRender, { claim: claimId }],
+        [caseStatus, { case: slug }],
+        [caseSoundcheck, { case: slug }],
+        [viewRun, {}],
+      ];
+      const shown: string[] = [];
+      for (const [descriptor, input] of asked) {
+        const output = await runHandler(descriptor, input, planned);
+        shown.push(JSON.stringify(output), descriptor.renderText(output));
+      }
+      return shown;
     }
 
     test.each([
       ["wholly on a sealed run", false],
       ["on a sealed receipt and a held testimony", true],
     ])(
-      "an argument resting %s refuses the station, since the held part alone could read a contest as holding",
+      "an argument resting %s leaves the station's claim open, contested on grounds it is not shown",
       async (_, withTestimony) => {
         const world = await emptyWorld(key, scratch);
         const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
         const held = withTestimony ? [(await putTestimony(world)).run] : [];
-        const attacked = await attackedClaim(world, "attacked", [sealed!, ...held]);
+        const { claim: attacked } = await attackedClaim(world, "attacked", [sealed!, ...held]);
         await world.store.putMany([{ kind: "case", value: caseCiting("cites", [attacked]) }]);
         await seal(world, sealed!);
         const planned: OperationContext = { ...world.station, mode: "plan" };
 
-        await runHandler(claimStatus, { claim: slotOf("attacked") }, { ...world.author, mode: "plan" });
-        for (const [descriptor, input] of [
-          [claimStatus, { claim: slotOf("attacked") }],
-          [claimWhy, { claim: slotOf("attacked"), full: true }],
-          [briefRender, { claim: attacked }],
-        ] as const) {
-          await expect(
-            runHandler(descriptor as OperationDescriptor, input, planned),
-            descriptor.id,
-          ).rejects.toMatchObject({
-            reason: "no-such-record",
-          });
+        const status = await runHandler(claimStatus, { claim: slotOf("attacked") }, planned);
+        const why = await runHandler(claimWhy, { claim: slotOf("attacked"), full: true }, planned);
+        const soundcheck = await runHandler(caseSoundcheck, { case: "cites" }, planned);
+
+        expect([status.label, status.reason]).toEqual(["open", "contested-authority"]);
+        expect(why.detail).toBe(`contested on grounds withheld under the clearance ${WRITER}`);
+        expect(soundcheck.claims.map((claim) => claim.label)).toEqual(["open"]);
+        for (const output of await claimReadings(world.station, "attacked", attacked, "cites")) {
+          expect(output).not.toContain(CANARY);
+          expect(output).not.toContain(sealed!);
         }
       },
       120_000,
     );
+
+    test("a station's brief names an argument contesting on withheld grounds, and a ruling on it reads fresh", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const { claim: attacked, argument } = await attackedClaim(world, "attacked", [sealed!]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("cites", [attacked]) }]);
+      await seal(world, sealed!);
+
+      const planned = await runHandler(briefRender, { claim: attacked }, { ...world.station, mode: "plan" });
+      const rendered = await runHandler(briefRender, { claim: attacked }, world.station);
+      const run = (await world.store.read(rendered.brief, "run")) as ComputedRunRecord;
+      const { head, caseId } = parseBriefSubstrates(run.recipe);
+      const staleness = await fullReadIds(await openWorkspace(world.station), caseId, attacked, head);
+      const verdict = { claim: attacked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      await runHandler(rulingMake, verdict, world.station);
+      const authors = await runHandler(claimStatus, { claim: slotOf("attacked") }, { ...world.author, mode: "plan" });
+
+      expect(rendered.output).toContain(
+        `- argument ${argument} contests the claim on grounds withheld under the clearance ${WRITER}: it does not hold`,
+      );
+      expect(planned.brief).toBe(rendered.brief);
+      expect(new Set(contentIdsOf(run.observation.reads))).toEqual(new Set(staleness));
+      expect(staleness).toContain(argument);
+      expect(authors).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+      expect(authors.decidedOnStaleEvidence).toBeUndefined();
+      for (const hidden of [CANARY, sealed!]) {
+        expect(JSON.stringify(run)).not.toContain(hidden);
+      }
+    }, 120_000);
+
+    test("a station's brief names an argument against the claim's receipt on withheld grounds, and a ruling on it reads fresh", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const { claim: attacked, argument, receipt } = await attackedClaim(world, "attacked", [sealed!], true);
+      await world.store.putMany([{ kind: "case", value: caseCiting("cites", [attacked]) }]);
+      await seal(world, sealed!);
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const status = await runHandler(claimStatus, { claim: slotOf("attacked") }, planned);
+      const rendered = await runHandler(briefRender, { claim: attacked }, world.station);
+      const run = (await world.store.read(rendered.brief, "run")) as ComputedRunRecord;
+      const { head, caseId } = parseBriefSubstrates(run.recipe);
+      const staleness = await fullReadIds(await openWorkspace(world.station), caseId, attacked, head);
+      const verdict = { claim: attacked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      await runHandler(rulingMake, verdict, world.station);
+      const authors = await runHandler(claimStatus, { claim: slotOf("attacked") }, { ...world.author, mode: "plan" });
+
+      expect([status.label, status.reason]).toEqual(["open", "contested-authority"]);
+      expect(rendered.output).toContain(
+        `- argument ${argument} contests the run ${receipt} on grounds withheld under the clearance ${WRITER}: it does not hold`,
+      );
+      expect(new Set(contentIdsOf(run.observation.reads))).toEqual(new Set(staleness));
+      expect(staleness).toContain(argument);
+      expect(authors).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+      expect(authors.decidedOnStaleEvidence).toBeUndefined();
+      for (const output of [
+        JSON.stringify(run),
+        ...(await claimReadings(world.station, "attacked", attacked, "cites")),
+      ]) {
+        expect(output).not.toContain(CANARY);
+        expect(output).not.toContain(sealed!);
+      }
+    }, 120_000);
+
+    /** A check the record-need rule judges over a held record, cited by a case. */
+    async function checkedWorld() {
+      const world = await restingWorld(key, scratch);
+      const [record] = await world.store.putMany([
+        { kind: "run", value: fixtureRunRecord("the record the rule asks for") },
+      ]);
+      const [checked] = await world.store.putMany([
+        { kind: "claim", value: claim("checked", { [RECORD_NEED_RULE]: record! }) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("checks", [checked!]) }]);
+      return { ...world, checked: checked!, checkedRecord: record! };
+    }
+
+    /** The receipts the check's latest evaluation under `context` rests on. */
+    async function checkReceiptsUnder(context: OperationContext): Promise<readonly RecordId[]> {
+      const opened = await openWorkspace(context);
+      onTestFinished(() => opened.close());
+      const checked = opened.index.claimAtSlot(slotOf("checked"))!.record as ClaimRecord;
+      const chosen = checkEvaluation(opened.index, checked, () => true, opened.clearance);
+      return recordedEvaluation(chosen!.evaluation).receipts;
+    }
+
+    async function argueAgainst(world: World, target: RecordId, evidence: readonly RecordId[], reason: string) {
+      const argument: ArgumentRecord = {
+        kind: "argument",
+        premises: [],
+        supersedes: [],
+        schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+        target,
+        reason,
+        evidence: evidence.map(receiptEdge),
+      };
+      const [argued] = await world.store.putMany([{ kind: "argument", value: argument }]);
+      return argued!;
+    }
+
+    /** A brief's run, and every id staleness checks it against at the head it was rendered at. */
+    async function readsAtHead(world: World, context: OperationContext, claimId: RecordId, brief: RecordId) {
+      const run = (await world.store.read(brief, "run")) as ComputedRunRecord;
+      const { head, caseId } = parseBriefSubstrates(run.recipe);
+      const opened = await openWorkspace(context);
+      onTestFinished(() => opened.close());
+      return { run, staleness: await fullReadIds(opened, caseId, claimId, head) };
+    }
+
+    test("a check challenged at its receipt has a brief packing the receipt and the challenge, and a ruling on it reads fresh", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const [receipt] = await checkReceiptsUnder(world.author);
+      const [counter] = await world.store.putMany([
+        { kind: "run", value: fixtureRunRecord("the challenge's own run") },
+      ]);
+      const argument = await argueAgainst(world, receipt!, [counter!], "it passes for the wrong reason");
+      const planned: OperationContext = { ...world.author, mode: "plan" };
+
+      const contested = await runHandler(claimStatus, { claim: slotOf("checked") }, planned);
+      const rendered = await runHandler(briefRender, { claim: world.checked }, world.author);
+      const { run, staleness } = await readsAtHead(world, world.author, world.checked, rendered.brief);
+      const verdict = { claim: world.checked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      await runHandler(rulingMake, verdict, world.author);
+      const ruled = await runHandler(claimStatus, { claim: slotOf("checked") }, planned);
+
+      expect(contested.label).toBe("open");
+      expect(rendered.output).toContain(`## Direct evidence\n- receipt ${receipt} (rule ${RECORD_NEED_RULE})\n`);
+      expect(rendered.output).toContain(
+        `- receipt ${counter} (musai.core/exit-code@1:result) against the run ${receipt}: it passes for the wrong reason`,
+      );
+      expect(new Set(contentIdsOf(run.observation.reads))).toEqual(new Set(staleness));
+      expect(staleness).toEqual(expect.arrayContaining([receipt, counter, argument]));
+      expect(ruled).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+      expect(ruled.decidedOnStaleEvidence).toBeUndefined();
+    }, 240_000);
+
+    test("a station's brief on a check challenged at its receipt on withheld grounds packs the receipt and the pinned contest, naming nothing withheld", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.station)).label).toBe("holds");
+      expect(await checkReceiptsUnder(world.station)).toEqual([world.stationRun]);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const argument = await argueAgainst(world, world.stationRun, [sealed!], "it does not hold");
+      await seal(world, sealed!);
+
+      const status = await runHandler(claimStatus, { claim: slotOf("checked") }, { ...world.station, mode: "plan" });
+      const rendered = await runHandler(briefRender, { claim: world.checked }, world.station);
+      const { run, staleness } = await readsAtHead(world, world.station, world.checked, rendered.brief);
+
+      expect([status.label, status.reason]).toEqual(["open", "contested-authority"]);
+      expect(rendered.output).toContain(
+        `## Direct evidence\n- receipt ${world.stationRun} (rule ${RECORD_NEED_RULE})\n`,
+      );
+      expect(rendered.output).toContain(
+        `- argument ${argument} contests the run ${world.stationRun} on grounds withheld under the clearance ${WRITER}: it does not hold`,
+      );
+      expect(new Set(contentIdsOf(run.observation.reads))).toEqual(new Set(staleness));
+      expect(staleness).toContain(argument);
+      expect(JSON.stringify(run)).not.toContain(CANARY);
+      expect(JSON.stringify(run)).not.toContain(sealed!);
+    }, 240_000);
+
+    test("a station's brief trims an argument's held evidence whole, apart from its pinned contest on withheld grounds", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [own, held, sealed] = await world.store.putMany([
+        { kind: "run", value: fixtureRunRecord("the claim's own receipt") },
+        { kind: "run", value: fixtureRunRecord("a receipt the station holds") },
+        { kind: "run", value: fixtureRunRecord(CANARY) },
+      ]);
+      const [mixed] = await world.store.putMany([{ kind: "claim", value: claim("mixed", {}, [receiptEdge(own!)]) }]);
+      const argument = await argueAgainst(world, mixed!, [held!, sealed!], "it does not hold");
+      await world.store.putMany([{ kind: "case", value: caseCiting("mixed", [mixed!]) }]);
+      await seal(world, sealed!);
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+      const itemLines = (output: string) => output.split("\n").filter((line) => line.startsWith("- "));
+      const bytesOf = (lines: readonly string[]) => lines.reduce((total, line) => total + Buffer.byteLength(line), 0);
+      const full = await runHandler(briefRender, { claim: mixed! }, planned);
+      expect(full.output).toContain(`- argument ${argument} contests the claim on grounds withheld`);
+
+      let mostOmitted = 0;
+      for (let budget = bytesOf(itemLines(full.output)); ; budget -= 8) {
+        const rendered = await runHandler(briefRender, { claim: mixed!, budget }, planned).catch(
+          (error: unknown) => error,
+        );
+        if (isOperationError(rendered)) {
+          break;
+        }
+        const { output } = rendered as { readonly output: string };
+        const omitted = itemLines(output).filter((line) => line.endsWith("— omitted (over-budget)"));
+        const printed = itemLines(output).filter((line) => line.startsWith(`- receipt ${held}`));
+        expect(printed.length + omitted.length).toBe(1);
+        expect(bytesOf(itemLines(output))).toBeLessThanOrEqual(budget);
+        expect(output).toContain(`- argument ${argument} contests the claim on grounds withheld`);
+        expect(output).not.toContain(CANARY);
+        expect(output).not.toContain(sealed!);
+        mostOmitted = Math.max(mostOmitted, omitted.length);
+      }
+      expect(mostOmitted).toBe(1);
+    }, 240_000);
+
+    /** The check's claim read without performing, and its brief, both as the author. */
+    async function readUnperformed(world: World, slot: string, claimId: RecordId) {
+      const status = await runHandler(claimStatus, { claim: slot }, { ...world.author, mode: "plan" });
+      const rendered = await runHandler(briefRender, { claim: claimId }, world.author);
+      return { status, brief: rendered.output };
+    }
+
+    test("a check no evaluation has judged reads open without performing, and its brief packs no receipt", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const [twin] = await world.store.putMany([
+        { kind: "claim", value: claim("twin", { [RECORD_NEED_RULE]: world.checkedRecord }) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("twins", [twin!]) }]);
+
+      const { status, brief } = await readUnperformed(world, slotOf("twin"), twin!);
+
+      expect([status.label, status.detail]).toEqual([
+        "open",
+        "nothing has evaluated this check here yet; `status` evaluates it",
+      ]);
+      expect(brief).not.toContain(`(rule ${RECORD_NEED_RULE})`);
+    }, 240_000);
+
+    test("a check its rule's current build has not evaluated reads open without performing, and its brief packs no receipt", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      await rebuildRecordNeed(world, "2026-10-10T00:00:00.000Z");
+
+      const unperformed = await readUnperformed(world, slotOf("checked"), world.checked);
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const performed = await readUnperformed(world, slotOf("checked"), world.checked);
+
+      expect(unperformed.status.label).toBe("open");
+      expect(unperformed.brief).not.toContain(`(rule ${RECORD_NEED_RULE})`);
+      expect(performed.status.label).toBe("holds");
+      const [receipt] = await checkReceiptsUnder(world.author);
+      expect(performed.brief).toContain(`- receipt ${receipt} (rule ${RECORD_NEED_RULE})`);
+    }, 240_000);
+
+    test("a ruling on a check reads fresh from the status that first evaluates it after a rebuild, on the same receipts", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const rendered = await runHandler(briefRender, { claim: world.checked }, world.author);
+      const verdict = { claim: world.checked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      await runHandler(rulingMake, verdict, world.author);
+      const [before] = await checkReceiptsUnder(world.author);
+      await rebuildRecordNeed(world, "2026-10-10T00:00:00.000Z");
+
+      const evaluating = await runHandler(claimStatus, { claim: slotOf("checked") }, world.author);
+      const reread = await runHandler(claimStatus, { claim: slotOf("checked") }, { ...world.author, mode: "plan" });
+
+      expect(await checkReceiptsUnder(world.author)).toEqual([before]);
+      for (const status of [evaluating, reread]) {
+        expect(status).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+        expect(status.decidedOnStaleEvidence).toBeUndefined();
+      }
+    }, 240_000);
+
+    test("a later evaluation by an earlier build of the rule moves neither the status nor the brief off the current build's", async () => {
+      const world = await checkedWorld();
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const opened = await openWorkspace(world.author);
+      onTestFinished(() => opened.close());
+      const earlier = opened.index.contributionById(RECORD_NEED_RULE)!;
+      const [byEarlier] = opened.index.receiptsByRecipe(
+        recordId(evaluationRecipe(earlier, slotOf("checked"), undefined)),
+      );
+      await rebuildRecordNeed(world, "2026-10-10T00:00:00.000Z");
+      expect((await runHandler(claimStatus, { claim: slotOf("checked") }, world.author)).label).toBe("holds");
+      const [receipt] = await checkReceiptsUnder(world.author);
+      const held = byEarlier!.record as ComputedRunRecord;
+      await world.store.putMany([
+        {
+          kind: "run",
+          value: {
+            ...held,
+            supersedes: [byEarlier!.recordId],
+            observation: { ...held.observation, output: JSON.stringify({ label: "fails", reason: "it does not" }) },
+          },
+        },
+      ]);
+
+      const { status, brief } = await readUnperformed(world, slotOf("checked"), world.checked);
+
+      expect(status).toMatchObject({ label: "holds", decidedBy: { kind: "run", id: receipt } });
+      expect(brief).toContain(`- receipt ${receipt} (rule ${RECORD_NEED_RULE})`);
+    }, 240_000);
+
+    /** A ruling `ruler` makes on its own brief over the check, as `reader` then reads the claim. */
+    async function ruledAcross(ruler: "author" | "station", reader: "author" | "station") {
+      const world = await checkedWorld();
+      for (const context of [world.author, world.station]) {
+        expect((await runHandler(claimStatus, { claim: slotOf("checked") }, context)).label).toBe("holds");
+      }
+      const rendered = await runHandler(briefRender, { claim: world.checked }, world[ruler]);
+      const verdict = { claim: world.checked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      await runHandler(rulingMake, verdict, world[ruler]);
+      const read = await runHandler(claimStatus, { claim: slotOf("checked") }, { ...world[reader], mode: "plan" });
+      return { rendered, read, receipts: await checkReceiptsUnder(world[ruler]) };
+    }
+
+    test("a station's ruling on a check, over the station's own receipt, reads fresh to the author", async () => {
+      const { rendered, read, receipts } = await ruledAcross("station", "author");
+
+      expect(rendered.output).toContain(`- receipt ${receipts[0]} (rule ${RECORD_NEED_RULE})`);
+      expect(read).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+      expect(read.decidedOnStaleEvidence).toBeUndefined();
+    }, 240_000);
+
+    test("an author's ruling on a check, over the author's own receipt, reads fresh to the station", async () => {
+      const { rendered, read, receipts } = await ruledAcross("author", "station");
+
+      expect(rendered.output).toContain(`- receipt ${receipts[0]} (rule ${RECORD_NEED_RULE})`);
+      expect(read).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+      expect(read.decidedOnStaleEvidence).toBeUndefined();
+    }, 240_000);
+
+    /** Both rule on their own briefs, `later` last, the author's reading the station's receipt
+     * through a challenge citing it; then the station evaluates on a receipt of its own. */
+    async function stationMovesAfterBothRule(later: "author" | "station") {
+      const world = await checkedWorld();
+      for (const context of [world.author, world.station]) {
+        expect((await runHandler(claimStatus, { claim: slotOf("checked") }, context)).label).toBe("holds");
+      }
+      const [authorReceipt] = await checkReceiptsUnder(world.author);
+      await argueAgainst(world, authorReceipt!, [world.stationRun], "the station's run says otherwise");
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      const earlier = later === "author" ? "station" : "author";
+      for (const [ruler, at] of [
+        [earlier, "2026-10-09T01:00:00.000Z"],
+        [later, "2026-10-09T02:00:00.000Z"],
+      ] as const) {
+        const rendered = await runHandler(briefRender, { claim: world.checked }, world[ruler]);
+        const verdict = { claim: world.checked, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+        await runHandler(rulingMake, verdict, { ...world[ruler], now: fixedClock(at) });
+      }
+      const moved = await answerStationRun(world, "a later run in the station's image");
+      await runHandler(claimStatus, { claim: slotOf("checked") }, world.station);
+      expect(await checkReceiptsUnder(world.station)).toEqual([moved]);
+      const readBy = (reader: "author" | "station") =>
+        runHandler(claimStatus, { claim: slotOf("checked") }, { ...world[reader], mode: "plan" });
+      return { author: await readBy("author"), station: await readBy("station") };
+    }
+
+    test("a station evaluating on other receipts leaves its own ruling stale for the author and for the station", async () => {
+      const read = await stationMovesAfterBothRule("station");
+
+      for (const status of [read.author, read.station]) {
+        expect(status).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" }, decidedOnStaleEvidence: true });
+      }
+    }, 240_000);
+
+    test("a station evaluating on other receipts leaves the author's ruling fresh for the author and for the station", async () => {
+      const read = await stationMovesAfterBothRule("author");
+
+      for (const status of [read.author, read.station]) {
+        expect(status).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+        expect(status.decidedOnStaleEvidence).toBeUndefined();
+      }
+    }, 240_000);
+
+    test("a ruling whose brief read a sealed run leaves the station's claim open, naming neither the run nor the brief", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const [held] = await world.store.putMany([
+        { kind: "run", value: fixtureRunRecord("a receipt the station holds") },
+      ]);
+      const [ruled] = await world.store.putMany([
+        { kind: "claim", value: claim("ruled", {}, [receiptEdge(sealed!), receiptEdge(held!)]) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("ruled", [ruled!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: ruled! }, world.author);
+      const verdict = { claim: ruled!, verdict: "fails", reason: "it does not hold", brief, key: key.keyPath } as const;
+      await runHandler(rulingMake, verdict, world.author);
+      await seal(world, sealed!);
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const authors = await runHandler(claimStatus, { claim: slotOf("ruled") }, { ...world.author, mode: "plan" });
+      const status = await runHandler(claimStatus, { claim: slotOf("ruled") }, planned);
+      const why = await runHandler(claimWhy, { claim: slotOf("ruled"), full: true }, planned);
+
+      expect(authors.label).toBe("fails");
+      expect([status.label, status.reason]).toEqual(["open", "contested-authority"]);
+      expect(why.detail).toBe(`contested on grounds withheld under the clearance ${WRITER}`);
+      for (const output of await claimReadings(world.station, "ruled", ruled!, "ruled")) {
+        for (const hidden of [CANARY, sealed!, brief]) {
+          expect(output).not.toContain(hidden);
+        }
+      }
+    }, 120_000);
+
+    test("a ruling on grounds withheld from the station reads there as deciding nothing, and nothing as deciding the claim", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const [held] = await world.store.putMany([
+        { kind: "run", value: fixtureRunRecord("a receipt the station holds") },
+      ]);
+      const [ruled] = await world.store.putMany([
+        { kind: "claim", value: claim("ruled", {}, [receiptEdge(sealed!), receiptEdge(held!)]) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("ruled", [ruled!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: ruled! }, world.author);
+      const verdict = { claim: ruled!, verdict: "fails", reason: "it does not hold", brief, key: key.keyPath } as const;
+      const ruling = (await runHandler(rulingMake, verdict, world.author)).minted[0]!.id;
+      await seal(world, sealed!);
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const status = await runHandler(claimStatus, { claim: slotOf("ruled") }, planned);
+      const why = await runHandler(claimWhy, { claim: slotOf("ruled") }, planned);
+
+      expect(status).toMatchObject({ label: "open", decidedBy: null });
+      expect(claimStatus.renderText(status)).not.toContain(" · run ");
+      expect(why.rulings).toEqual([expect.objectContaining({ id: ruling, uncounted: "grounds-withheld" })]);
+      expect(claimWhy.renderText(why)).toContain(
+        `  ruling ${ruling.slice(7, 19)} · fails, person ruling by ${PUBLISHER} (${key.principal}) · decided nothing: the claim is contested on grounds withheld here`,
+      );
+    }, 120_000);
+
+    test("a station's own ruling on a claim contested on withheld grounds reads in why as deciding nothing", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const { claim: attacked } = await attackedClaim(world, "attacked", [sealed!]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("cites", [attacked]) }]);
+      await seal(world, sealed!);
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      const { brief } = await runHandler(briefRender, { claim: attacked }, world.station);
+      const verdict = { claim: attacked, verdict: "holds", reason: "it holds", brief } as const;
+      const ruling = (await runHandler(rulingMake, verdict, world.station)).minted[0]!.id;
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const why = await runHandler(claimWhy, { claim: slotOf("attacked") }, planned);
+
+      expect([why.label, why.reason]).toEqual(["open", "contested-authority"]);
+      expect(why.rulings).toEqual([expect.objectContaining({ id: ruling, uncounted: "grounds-withheld" })]);
+      expect(claimWhy.renderText(why)).toContain(
+        `  ruling ${ruling.slice(7, 19)} · holds, person ruling by ${PUBLISHER} (${key.principal}) · decided nothing: the claim is contested on grounds withheld here`,
+      );
+      for (const output of await claimReadings(world.station, "attacked", attacked, "cites")) {
+        expect(output).not.toContain(CANARY);
+        expect(output).not.toContain(sealed!);
+      }
+    }, 120_000);
+
+    test("a station's own ruling on an option of a menu whose holder rests on a withheld brief reads in why as deciding nothing", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const [chosen, other] = await world.store.putMany([
+        { kind: "claim", value: { ...claim("chosen", {}, [receiptEdge(sealed!)]), exclusiveGroup: "menu" } },
+        { kind: "claim", value: { ...claim("other", {}), exclusiveGroup: "menu" } },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("menu", [chosen!, other!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: chosen! }, world.author);
+      const chose = { claim: chosen!, verdict: "holds", reason: "this one", brief, key: key.keyPath } as const;
+      await runHandler(rulingMake, chose, world.author);
+      await seal(world, sealed!);
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      const asked = await runHandler(briefRender, { claim: other! }, world.station);
+      const verdict = { claim: other!, verdict: "fails", reason: "not this one", brief: asked.brief } as const;
+      const ruling = (await runHandler(rulingMake, verdict, world.station)).minted[0]!.id;
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const why = await runHandler(claimWhy, { claim: slotOf("other") }, planned);
+
+      expect([why.label, why.reason]).toEqual(["open", "contested-authority"]);
+      expect(why.rulings).toEqual([expect.objectContaining({ id: ruling, uncounted: "grounds-withheld" })]);
+      for (const output of await claimReadings(world.station, "other", other!, "menu")) {
+        for (const hidden of [CANARY, sealed!, brief]) {
+          expect(output).not.toContain(hidden);
+        }
+      }
+    }, 120_000);
+
+    test("a ruling on one option of a menu whose brief read a sealed run leaves every option open to the station", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const [chosen, other] = await world.store.putMany([
+        { kind: "claim", value: { ...claim("chosen", {}, [receiptEdge(sealed!)]), exclusiveGroup: "menu" } },
+        { kind: "claim", value: { ...claim("other", {}), exclusiveGroup: "menu" } },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("menu", [chosen!, other!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: chosen! }, world.author);
+      const verdict = { claim: chosen!, verdict: "holds", reason: "this one", brief, key: key.keyPath } as const;
+      await runHandler(rulingMake, verdict, world.author);
+      await seal(world, sealed!);
+      const labels = async (context: OperationContext) =>
+        (await runHandler(caseSoundcheck, { case: "menu" }, { ...context, mode: "plan" })).claims.map((entry) => [
+          entry.label,
+          entry.reason,
+        ]);
+
+      expect(await labels(world.author)).toEqual([
+        ["holds", null],
+        ["fails", null],
+      ]);
+      expect(await labels(world.station)).toEqual([
+        ["open", "contested-authority"],
+        ["open", "contested-authority"],
+      ]);
+      for (const output of await claimReadings(world.station, "other", other!, "menu")) {
+        for (const hidden of [CANARY, sealed!, brief]) {
+          expect(output).not.toContain(hidden);
+        }
+      }
+    }, 120_000);
+
+    test("a station cannot rule a second option into holding where the menu's holder rests on a withheld brief", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const option = (id: string, evidence: readonly RecordId[]) => ({
+        ...claim(id, { gateClass: "intent", disposition: id }, evidence.map(receiptEdge)),
+        exclusiveGroup: "menu",
+      });
+      const [chosen, other] = await world.store.putMany([
+        { kind: "claim", value: option("chosen", [sealed!]) },
+        { kind: "claim", value: option("other", []) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("menu", [chosen!, other!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: chosen! }, world.author);
+      const verdict = { claim: chosen!, verdict: "holds", reason: "this one", brief, key: key.keyPath } as const;
+      await runHandler(rulingMake, verdict, world.author);
+      await seal(world, sealed!);
+      await writeSignerConfig(join(world.workspace, MUSAI_DIR, LOCAL_DIR), { keyPath: key.keyPath });
+      const hidden = [CANARY, sealed!, brief];
+
+      const pending = await runHandler(gatePending, {}, { ...world.station, mode: "plan" });
+      const asked = await runHandler(gateAsk, { claim: other! }, world.station);
+      const answer = { pending: other!, brief: asked.brief, choice: "other", reason: "the other one" };
+      const refused = await runHandler(gateAnswer, answer, world.station).catch((error: unknown) => error);
+
+      expect(refused).toMatchObject({
+        reason: "sibling-conflict",
+        detail: expect.stringContaining(`on grounds withheld under the clearance ${WRITER}`),
+      });
+      expect(pending.gates).toEqual([]);
+      const labels = await runHandler(caseSoundcheck, { case: "menu" }, { ...world.author, mode: "plan" });
+      expect(labels.claims.map((entry) => entry.label)).toEqual(["holds", "fails"]);
+      const shown = [pending, asked, refused].map((output) => JSON.stringify(output));
+      for (const output of [...shown, gatePending.renderText(pending), (refused as Error).message]) {
+        for (const withheld of hidden) {
+          expect(output).not.toContain(withheld);
+        }
+      }
+    }, 120_000);
+
+    test("a station's progress names as next no menu whose holder rests on a withheld brief, as pending lists none", async () => {
+      const world = await emptyWorld(key, scratch);
+      const [sealed] = await world.store.putMany([{ kind: "run", value: fixtureRunRecord(CANARY) }]);
+      const option = (id: string, evidence: readonly RecordId[]) => ({
+        ...claim(id, { gateClass: "intent", disposition: id }, evidence.map(receiptEdge)),
+        exclusiveGroup: "menu",
+      });
+      const [chosen, other] = await world.store.putMany([
+        { kind: "claim", value: option("chosen", [sealed!]) },
+        { kind: "claim", value: option("other", []) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("menu", [chosen!, other!]) }]);
+      const { brief } = await runHandler(briefRender, { claim: chosen! }, world.author);
+      const verdict = { claim: chosen!, verdict: "holds", reason: "this one", brief, key: key.keyPath } as const;
+      await runHandler(rulingMake, verdict, world.author);
+      await seal(world, sealed!);
+      const planned: OperationContext = { ...world.station, mode: "plan" };
+
+      const pending = await runHandler(gatePending, { case: "menu" }, planned);
+      const progress = await runHandler(caseStatus, { case: "menu" }, planned);
+
+      expect(pending.gates).toEqual([]);
+      expect(progress).toMatchObject({ next: null, done: false, reason: "claim-open" });
+      for (const hidden of [CANARY, sealed!, brief]) {
+        expect(JSON.stringify(progress)).not.toContain(hidden);
+      }
+    }, 120_000);
 
     test("a run that lands withheld after corrupt bytes named its id leaves the station's refusal standing, cold and warm alike", async () => {
       const world = await emptyWorld(key, scratch);
@@ -571,6 +1183,20 @@ describe.skipIf(!opensshAvailable)(
       const brief = await runHandler(briefRender, { claim: cites! }, { ...world.author, mode: "plan" });
 
       expect(brief.output).toContain(own!);
+    }, 120_000);
+
+    test("a brief packing a testimony names the attestation its kind word reads among its reads", async () => {
+      const world = await emptyWorld(key, scratch);
+      const { run, attestation } = await putTestimony(world);
+      const [testified] = await world.store.putMany([
+        { kind: "claim", value: claim("testified", {}, [receiptEdge(run!)]) },
+      ]);
+      await world.store.putMany([{ kind: "case", value: caseCiting("testified", [testified!]) }]);
+
+      const planned = await runHandler(briefRender, { claim: testified! }, { ...world.author, mode: "plan" });
+      const brief = planned.minted[0]!.record as RunRecord;
+
+      expect(brief.observation.reads).toContainEqual(readEntryFor(attestation.id));
     }, 120_000);
 
     test("a brief packing a testimony is refused a corrupt attestation at its head to a station as to its author", async () => {
@@ -791,17 +1417,38 @@ describe("a station's runs go through a container that cannot see the workspace'
     expect(onHost!.recipe.substrates.some(isContainerImageSubstrate)).toBe(false);
   }, 240_000);
 
-  test("a station reading without performing reads its own receipts in the station's image, never the author's", async () => {
+  test("a station with no image reads a check nothing has evaluated there as the refusal naming the image it lacks", async () => {
+    const { author, station } = await stationWorkspace();
+    const says = { statement: "the tracked file says hello", command: ["node", "-e", TRACKED_SAYS_HELLO] };
+    const checked = await runHandler(checkRun, says, author);
+
+    const status = await runHandler(claimStatus, { claim: checked.slot }, { ...station, mode: "plan" });
+
+    expect([status.label, status.detail]).toEqual([
+      "open",
+      `refusing to run under the clearance ${WRITER}: a run there goes through a container, the recipe declares no image, and the trust branch's configuration names no ${STATION_IMAGE_CONFIG_KEY}`,
+    ]);
+  }, 120_000);
+
+  test("a station's status and soundcheck without performing answer from its own evaluation in the station's image, never the author's", async () => {
     const { dir, trust, author, station } = await stationWorkspace();
     const says = { statement: "the tracked file says hello", command: ["node", "-e", TRACKED_SAYS_HELLO] };
     const checked = await runHandler(checkRun, says, author);
     expect(checked.label).toBe("holds");
+    const store = new Store({ ctx: { gitDir: join(dir, MUSAI_DIR) }, scope: SCOPE, now });
+    await store.putMany([{ kind: "case", value: caseCiting("checks", [checked.claim as RecordId]) }]);
     const { values } = (await readTrustBranch(trust)).config;
     const configured = { ...values, [STATION_IMAGE_CONFIG_KEY]: `registry.example/station@sha256:${"5".repeat(64)}` };
     await writeTrustFile(trust, "config.json", `${JSON.stringify(configured)}\n`);
     const reading = { ...station, mode: "plan" as const };
+    const labelled = async (context: OperationContext) => {
+      const status = await runHandler(claimStatus, { claim: checked.slot }, context);
+      const { claims } = await runHandler(caseSoundcheck, { case: "checks" }, context);
+      expect(claims).toEqual([{ slot: checked.slot, label: status.label, reason: status.reason }]);
+      return status;
+    };
 
-    const unrun = await runHandler(claimStatus, { claim: checked.slot }, reading);
+    const unrun = await labelled(reading);
     expect([unrun.label, unrun.detail]).toEqual(["open", expect.stringContaining("`status` under the clearance")]);
 
     const [onHost] = (await runsIn(dir)).filter(
@@ -809,7 +1456,7 @@ describe("a station's runs go through a container that cannot see the workspace'
     );
     const image = stationImageFromConfig({ values: configured })!;
     const held = { clearance: WRITER, image, musaiDir: join(dir, MUSAI_DIR) };
-    await new Store({ ctx: { gitDir: join(dir, MUSAI_DIR) }, scope: SCOPE, now }).putMany([
+    await store.putMany([
       {
         kind: "run",
         value: {
@@ -824,8 +1471,10 @@ describe("a station's runs go through a container that cannot see the workspace'
         },
       },
     ]);
-    expect((await runHandler(claimStatus, { claim: checked.slot }, reading)).label).toBe("fails");
-    expect((await runHandler(claimStatus, { claim: checked.slot }, { ...author, mode: "plan" })).label).toBe("holds");
+    expect((await labelled(reading)).detail).toBe(unrun.detail);
+    await runHandler(claimStatus, { claim: checked.slot }, station);
+    expect((await labelled(reading)).label).toBe("fails");
+    expect((await labelled({ ...author, mode: "plan" })).label).toBe("holds");
   }, 120_000);
 
   test("a station's check runs the image's own node and sh, with a home and a temp it can write", async (context) => {

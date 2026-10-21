@@ -66,6 +66,11 @@ export function substrateNamed(recipe: ComputedRecipe, name: string): ResourceDe
   return found;
 }
 
+/** The clearance a brief's recipe names it rendered under, or `undefined` for none. */
+export function briefClearanceOf(recipe: ComputedRecipe): Audience | undefined {
+  return recipe.command[0] === BRIEF_COMMAND ? (recipe.command[2] as Audience | undefined) : undefined;
+}
+
 export interface ParsedBriefSubstrates {
   readonly head: string;
   readonly caseId: RecordId;

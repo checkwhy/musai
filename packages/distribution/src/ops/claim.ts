@@ -49,7 +49,11 @@ function renderClaimStatusText(output: ClaimStatusOutput): string {
   return `${markOf(output.label)} ${output.label} · ${output.short}${reasonText}${decidedText}${agreeingText}${staleText}${detailText}`;
 }
 
+/** An open claim names none: nothing decided it, whatever its comparison would have chosen. */
 async function decidingRecordOf(opened: Workspace, labelled: LabelledClaim): Promise<DecidingRecord | null> {
+  if (labelled.status.label === "open") {
+    return null;
+  }
   const winner = labelled.status.comparison.winner;
   if (labelled.rulingsById.has(winner)) {
     return { kind: "ruling", id: winner };
@@ -61,10 +65,10 @@ async function decidingRecordOf(opened: Workspace, labelled: LabelledClaim): Pro
   return run === null ? null : { kind: "run", id: run.id, command: run.record.recipe.command };
 }
 
-/** `claim.status@2`: a claim's computed status. */
+/** `claim.status@3`: a claim's computed status. */
 export const claimStatus: OperationDescriptor<ClaimStatusInput, ClaimStatusOutput> = {
   id: "claim.status",
-  version: versionString("2"),
+  version: versionString("3"),
   input: {
     type: "object",
     additionalProperties: false,

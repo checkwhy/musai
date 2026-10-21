@@ -331,6 +331,7 @@ describe("a case for a currently open question about this project's own kernel",
           decidedAt: timestamp(FIXED_INSTANT),
           verdict: "holds",
           briefReads: [runAId!],
+          currentIds: [runAId!],
         },
       ];
       const result = evaluate({ claims, arguments: argumentsMap, attacks: [], rulings, matrix, floor: null });

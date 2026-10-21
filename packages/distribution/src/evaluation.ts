@@ -1,8 +1,9 @@
-import { EVALUATE_COMMAND, type Workspace } from "@musai/api-core";
+import { EVALUATE_COMMAND, rulesNamedBy, type Workspace } from "@musai/api-core";
 import type { RuleVerdict } from "@musai/evaluate";
 import type { IndexDb, IndexedContribution } from "@musai/fold";
 import {
   type Audience,
+  type ClaimRecord,
   type ComputedRecipe,
   type ComputedRunRecord,
   CURRENT_SCHEMA_VERSIONS,
@@ -75,12 +76,6 @@ export async function mintEvaluation(
   return minted!;
 }
 
-/** The claim's latest evaluation by this rule, where any was performed. */
-export function latestEvaluation(index: IndexDb, recipe: ComputedRecipe): IndexedEvaluation | undefined {
-  const latest = index.receiptByRecipe(recordId(recipe));
-  return latest === undefined ? undefined : { id: latest.recordId, run: latest.record as ComputedRunRecord };
-}
-
 export interface IndexedEvaluation {
   readonly id: RecordId;
   readonly run: ComputedRunRecord;
@@ -102,4 +97,44 @@ export function recordedEvaluation(evaluation: IndexedEvaluation): {
     .filter((read) => recipeOfReadKey(read.key) !== undefined)
     .map((read) => `sha256:${read.consumed.sha256}` as RecordId);
   return { verdict: { kind: "verdict", label, reason }, receipts };
+}
+
+/** The evaluation a check is read from as of the records `landed` holds: the latest under
+ * `clearance` by its rule's build installed then, what a brief packs and a read answers from. */
+export function checkEvaluation(
+  index: IndexDb,
+  claim: Pick<ClaimRecord, "slot" | "conditions">,
+  landed: (id: RecordId) => boolean,
+  clearance: Audience | undefined,
+): { readonly rule: IndexedContribution; readonly evaluation: IndexedEvaluation } | null {
+  const [rule] = rulesNamedBy(index, claim.conditions, landed);
+  if (rule === undefined) {
+    return null;
+  }
+  const recipe = recordId(evaluationRecipe(rule, claim.slot, clearance));
+  const latest = index.receiptsByRecipe(recipe).find((receipt) => landed(receipt.recordId));
+  return latest === undefined
+    ? null
+    : { rule, evaluation: { id: latest.recordId, run: latest.record as ComputedRunRecord } };
+}
+
+/** The rule a check rests on and the receipts it holds on. */
+export interface HoldingCheck {
+  readonly rule: string;
+  readonly receipts: readonly RecordId[];
+}
+
+/** The rule and receipts of the evaluation a check is read from, where that evaluation holds. */
+export function holdingCheck(
+  index: IndexDb,
+  claim: Pick<ClaimRecord, "slot" | "conditions">,
+  landed: (id: RecordId) => boolean,
+  clearance: Audience | undefined,
+): HoldingCheck | null {
+  const chosen = checkEvaluation(index, claim, landed, clearance);
+  if (chosen === null) {
+    return null;
+  }
+  const { verdict, receipts } = recordedEvaluation(chosen.evaluation);
+  return verdict.label === "holds" ? { rule: chosen.rule.entry.id, receipts } : null;
 }

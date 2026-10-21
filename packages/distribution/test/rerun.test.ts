@@ -264,6 +264,16 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     expect(claim!.verdicts).toEqual({ recorded: "holds", rerun: null, matches: null });
   }, 180_000);
 
+  test("the tree it would read leaves out the receiver's own workspace, as the receipt's run did", async () => {
+    const bundle = await exported("own-workspace");
+    const receiver = await checkout();
+    await runHandler(workspaceInit, { workspace: receiver.dir, key: key.keyPath }, receiver.context);
+
+    const output = await runHandler(bundleRerun, { bundle }, receiver.context);
+
+    expect(output.claims[0]!.tree?.here).toBe(output.claims[0]!.tree?.recorded);
+  }, 180_000);
+
   test("a rerun on the same tree matches the receipt, and leaves the receiver's directory as it was", async () => {
     const bundle = await exported("matches");
     const receiver = await checkout();

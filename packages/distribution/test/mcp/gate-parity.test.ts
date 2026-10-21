@@ -192,7 +192,7 @@ describe("ruling.make's supersession check reaches a plain MCP call, since mintR
       )) as MintedOutput;
       const rulingId = personRuling.minted.find((item) => item.kind === "ruling")!.id;
 
-      const claimStatus = REGISTRY.get("claim.status@2")!;
+      const claimStatus = REGISTRY.get("claim.status@3")!;
       const before = (await runHandler(claimStatus, { claim: slot }, terminalContext)) as {
         comparison: { winner: string };
       };

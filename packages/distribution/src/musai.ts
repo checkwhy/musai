@@ -10,14 +10,14 @@ export const REGISTRY = buildRegistry(ALL_OPERATIONS, DEPRECATED_REASONS);
 export const MUSAI: Distribution = {
   name: "musai",
   command: "musai",
-  version: "0.1.0",
+  version: "0.1.1",
   registry: REGISTRY,
   admitDrafts,
   publicOperations: new Set([
     "workspace.init@1",
     "check.run@1",
-    "claim.status@2",
-    "claim.why@3",
+    "claim.status@3",
+    "claim.why@4",
     "render.markdown@2",
     "bundle.export@2",
     "bundle.rerun@3",

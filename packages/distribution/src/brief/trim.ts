@@ -81,7 +81,7 @@ export function trimToBudget(items: readonly TrimItem[], budget: number): TrimRe
     throw new OperationError({
       reason: "over-budget",
       about: pinned.map((item) => item.id),
-      detail: `refusing to trim: even with every trimmable item removed, the claim under judgment, its direct evidence and the omission list occupy ${String(totalBytes())} bytes against a budget of ${String(budget)}`,
+      detail: `refusing to trim: even with every trimmable item removed, the claim under judgment, its direct evidence, any contest on withheld grounds and the omission list occupy ${String(totalBytes())} bytes against a budget of ${String(budget)}`,
     });
   }
 

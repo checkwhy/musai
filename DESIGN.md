@@ -174,7 +174,8 @@ and its exit-code classes.
   the conformance suite any other backend passes. One fold per scope, so a fork or a lane has its
   own and dropping a scope drops a file. A fork takes a copy of its base's fold and claims its ref
   at the commit that copy holds. A drop removes the fold before the ref, since a fold without its
-  ref still answers while a ref without its fold refolds. A merge is one single-parent commit on
+  ref still answers while a ref without its fold refolds. A drop reclaims nothing: the scope's
+  objects stay in the repository, and a branch at the tip the drop prints restores it. A merge is one single-parent commit on
   the target splicing in what the source holds and it lacks, a union the fold reads as if both
   scopes' records had been written there. A challenge is an argument
   attacking a claim or a run, an answer is an
@@ -183,7 +184,8 @@ and its exit-code classes.
 - **Evaluator.** Computes every claim's status with its justification, and what went stale: a
   claim whose latest evaluation read a key that holds something else now, found by a lookup in
   the fold's reverse index over every run's read-set rather than a scan. A claim read without
-  performing answers from an evaluation nothing has moved under, with no rule invoked.
+  performing answers from an evaluation nothing has moved under, with no rule invoked: the one its
+  brief packs, by its rule's installed build, so where that build evaluated nothing it counts none.
 - **Scheduler.** Decides what to compute next under budgets and concurrency, and when to park.
 - **Runner and fetcher.** Musai's own performer of runs and fetches. Every receipt names who
   performed it, so a foreign tool's run is admitted under its own performer and trusted as far as
@@ -215,7 +217,11 @@ and its exit-code classes.
   client itself reads (`DOCKER_*`, `CONTAINER_*`, `LD_*` and the like) is refused for such a run.
   The observation records what each name resolved to, so a receipt taken under
   hygiene is scoped to its host by its isolation level, and a re-run elsewhere is the same recipe
-  with a new observation. A checkout a run stands on is named in its recipe by commit, bound to a
+  with a new observation. A host run is its own session, with no terminal: its deadline ends the whole
+  group, SIGTERM then SIGKILL after a short grace, and its caller's interruption sends the group
+  SIGTERM, since a grandchild holding the run's output would otherwise hold the call and outlive
+  it. A container run's deadline ends only the engine's client.
+  Windows, which has no groups, ends the tree with `taskkill /T /F`. A checkout a run stands on is named in its recipe by commit, bound to a
   directory on this machine outside any record, and measured before anything spawns: a checkout
   whose tree is not the commit's, or a working directory that leaves it, by its spelling or through a symlink, is refused, and a receipt for the commit keeps satisfying after
   the checkout moves on, checked against the commit's tree rather than the disk. A working tree a
@@ -495,10 +501,18 @@ kind's setlist instead, and the case records which kind it was booked under.
   it, and `musai plugin sync` writes that file into the plugin on install and update.
   Ships now: the manifest, the MCP registration, the two conversational-entry skills (case and
   claim status; finding and answering a gate), and `SessionStart`/`Stop` hooks calling `doctor`
-  and the stop check. The stop check blocks a turn once when its last message says tests, a build
-  or lint pass and no receipt was minted since the person last wrote, naming the `check` that
-  would make one; it never blocks twice running. It reads Claude Code's session transcript, whose
-  line shape is Claude Code's own and unpublished, so a change there breaks the check. A GitHub Action in the repository re-runs a
+  and the stop check. The stop check reads a turn whose last message says tests, a build or lint
+  pass and that minted no receipt since the person last wrote. Where the turn ran a check the
+  sentence rests on (a checker such as `vitest` or `tsc`, or a runner's `test`, `lint`, `build`,
+  `typecheck` or `check`), in the foreground at the repository's root, its result came back as no
+  error, and checking it adds no program to the workspace's tools, the check mints the claim through
+  `check`, which runs it again in its declared environment under a deadline below the hook's
+  timeout, and blocks once if it does not hold. Otherwise it blocks once naming the `check` that
+  would make one, with `--replace` where another command already checks the sentence: a refused
+  call writes a result too, so only one's coming back as no error counts as having run, and a
+  command naming no check is never run for the turn. It never blocks twice running. It reads Claude
+  Code's session transcript, whose line shape is Claude Code's own and unpublished, so a change
+  there breaks the check, and its test pins the shape it reads. A GitHub Action in the repository re-runs a
   committed workspace's checks and posts one Check Run, holding only `checks: write`. Arrives with the crew's own phase: the funnel, retro and kind-drafting skills, the
   `PreToolUse` blindness hook and the `SubagentStop` hook, and every agent — a directory nothing
   yet has something behind it is not scaffolded empty in the meantime.
@@ -518,7 +532,9 @@ kind's setlist instead, and the case records which kind it was booked under.
   the same recipes that read the same tree and binaries, each under a record release of its own;
   a module rule's are the runs its evaluations read, and its module record, build receipt and code
   travel beside them, as a module's do where it decides an expectation the interpreter invokes, or
-  `export` names the rule a receiver cannot re-derive.
+  `export` names the rule a receiver cannot re-derive. An applicable check its rule's installed
+  build has not evaluated has no runs that decide it, so `export` refuses it, naming the `status`
+  that evaluates it.
   `rerun <bundle|url>` checks a stranger's bundle as the verifier does, prints the recipe it would
   perform and the tree it would read, and performs it only with `--yes`, in a scratch workspace
   over this checkout, writing nothing to the receiver's own; a check's run matches its receipt when
@@ -663,9 +679,17 @@ the credential a declared secret, the transcript as the output, and the answer a
 from it by parsers. A brief run is what a decider was shown: rendered from the store's head, the
 case and a byte budget, all named in its recipe beside the kernel version that rendered it and
 the clearance it was rendered under where one is set, reading exactly the records whose bytes it
-carries (each it packed, and each argument whose reason it quotes) and writing the rendered bytes
-as its output, so a receiver re-renders it byte-for-byte, a ruling's evidence is its read-set,
-and a seal on anything it quotes withholds it. A rule's evaluation is a run of its own kind, its
+carries (each it packed, and each argument whose reason it quotes, standing against the claim or
+a run it rests on: one it cites, or for a check each receipt of its latest evaluation at that head,
+by its rule's build installed there, that holds) and writing the rendered bytes as its output,
+so a receiver re-renders it byte-for-byte, a ruling's evidence is its read-set, and a seal on
+anything it quotes withholds it.
+It does not read the evaluation that chose a check's receipts, whose bytes it carries none of: a
+later one holding on the same receipts moves nothing, and one on others moves the receipts. A
+station and its author each evaluate under their own recipe, so a ruling is held to the receipts
+of the clearance its brief was rendered under, whoever reads it. Its budget trims what is not
+pinned weakest first, an argument whole, and names each omission.
+A rule's evaluation is a run of its own kind, its
 reads in that same shape, so the dependency fold reads one shape for every derived thing and a
 verdict is a receipt a stranger re-runs. An evaluation's
 read-set is what the kernel handed its rule: the claim under its slot, each evidence run, each
@@ -965,7 +989,9 @@ stays reserved outside that format. A later version of a frozen kind may add an 
 a value a field did not take before, and nothing else: it never removes or renames a field, changes
 one's type or meaning, or makes an optional one required, and a record keeps the version it was
 minted at and is read as minted. `conformance/frozen.json` holds a record of each frozen kind at its
-version, which the kernel mints and a verifier reads byte for byte. Every other kind, and the kernel
+version, which the kernel mints and a verifier reads byte for byte. A verifier extends trust only for
+meanings it knows: a release or a seal of a version later than it reads counts for nothing, and its
+report names it skipped, with its version. Every other kind, and the kernel
 around them, keeps changing for the packs.
 References are ids, so a ruling's snapshot commits to the exact evidence it saw. A payload too large
 for a record is a blob, a git object on the store's `blobs` branch at `<xx>/<hex>`, hashed raw,
@@ -1017,12 +1043,18 @@ and from `public`, and reaches no audience beside `cast` either way; a run is se
 with anything it consumed, a record with what it supersedes, and an attestation with its subject,
 unless a standing release over it covers the clearance; a bare citation is not a read, so a case
 citing a sealed claim stays and lists the rest, and a claim citing a sealed run is judged on the
-rest of its evidence. A closure seal over a check claim withholds every receipt of its recipes,
-more than its export ships: each carries the recipe the sealed claim names, and which ones read the
-deciding tree moves as later runs land, so a narrower set would show a station sealed evidence once
-the check runs again; a condition that does not read withholds the receipts of each recipe it does
-name, of those its cited runs ran and of those its evaluations read, so only the receipts of a
-recipe it names in no form the kernel reads, cites no run of and no evaluation reads stay visible.
+rest of its evidence, while an argument citing one, or a ruling whose brief is withheld, stays and
+contests the claim on grounds the station is not shown, so the claim, and every option of a menu
+so ruled, reads open, never holding on what the station cannot see; a brief there packs such an
+argument by its reason alone, pinned against any budget, saying it contests on withheld grounds;
+a menu so ruled is not pending there, nor its case's next gate, and a ruling made there is weighed
+against every vouched ruling, so a station never rules a second option into holding. A closure seal over a check
+claim withholds every receipt of its recipes, more than its export ships: each carries the recipe
+the sealed claim names, and which ones read the deciding tree moves as later runs land, so a
+narrower set would show a station sealed evidence once the check runs again; a condition that
+does not read withholds the receipts of each recipe it does name, of those its cited runs ran and
+of those its evaluations read, so only the receipts of a recipe it names in no form the kernel
+reads, cites no run of and no evaluation reads stay visible.
 What its evaluations read is judged in log order: a receipt is judged at the later of the earliest
 standing closure seal's commit and its own, and withheld where the sealed claim and an evaluation of
 it reading its recipe had both landed by then, so neither an evaluation nor a closure member a
@@ -1058,7 +1090,10 @@ station reading without performing reads only the receipts in that image; a run 
 project is refused, since its mount would show the host; with no image, or no engine, the run is
 refused before anything spawns, and nothing of that run is recorded, a round's runs all judged
 before any of its needs starts, the refusal ending the station's own call and answering a
-subscription's dispatched run as any refused need does, its write standing. A recipe refused for its
+subscription's dispatched run as any refused need does, its write standing. A recipe declaring its
+own image keeps its id there, so a station's receipt may answer the author's need: the image and the
+tree are the same, the mask withholds only `.musai/`, and a result resting on `.musai/` is the
+recipe's own mistake. A recipe refused for its
 own words (a working directory leaving its checkout, an engine client name declared) is answered as
 the author's is, before the mount is judged; one refused only once the machine resolves it (a
 substrate that does not resolve, a working directory reaching out of its checkout through a link) is
@@ -1066,7 +1101,10 @@ judged by its mount first, and a mount's refusal ends the call. A sealed record 
 value: the `$sealed` form above is ciphertext every reader holds. A seal hides bytes and a salt
 hides guesses: a station that holds the text of a sealed, unsalted record, or guesses it, confirms
 it by hashing it to an id it saw cited, which a salted record's id resists, since the station salts
-under its clearance.
+under its clearance. A station still learns that something was withheld, never what: two logs that
+differ in a sealed record's bytes differ in every later commit a station sees, and a cursor naming
+a commit its cleared fold no longer holds is refused `stale`, as a read by id of a record it once
+saw answers `no-such-record`.
 
 **Signing** is a slot: `off`, `person` (every attestation by a human is signed and verified against
 the allowed-signers file before anything advances), `all`. It defaults to `off`, since a fresh

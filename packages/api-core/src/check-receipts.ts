@@ -94,10 +94,15 @@ export function contributionKeysOf(conditions: Conditions): string[] {
   return Object.keys(conditions).filter((key) => key.includes("/"));
 }
 
-/** The installed rules a claim's conditions name as keys; naming one makes the claim a check. */
-export function rulesNamedBy(index: IndexDb, conditions: Conditions): IndexedContribution[] {
+/** The installed rules a claim's conditions name as keys, as of the records `landed` holds where
+ * given; naming one makes the claim a check. */
+export function rulesNamedBy(
+  index: IndexDb,
+  conditions: Conditions,
+  landed?: (id: RecordId) => boolean,
+): IndexedContribution[] {
   return contributionKeysOf(conditions)
-    .map((key) => index.contributionById(key))
+    .map((key) => index.contributionById(key, landed))
     .filter((found): found is IndexedContribution => found !== undefined && found.entry.kind === "rule");
 }
 
