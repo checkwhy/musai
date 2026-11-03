@@ -15,6 +15,8 @@ import { MUSAI_DIR } from "@musai/store";
 import {
   allowedSignersLine,
   blobStoreOf,
+  fixtureArtifact,
+  fixtureCase,
   fixtureRunRecord,
   foldedIndex,
   generateTestKey,
@@ -23,12 +25,13 @@ import {
 } from "@musai/test-support";
 import { execa } from "execa";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { shortIdOf } from "../../src/claim-ref.js";
 import { MUSAI_MCP } from "../../src/mcp/extension.js";
 import { briefRender } from "../../src/ops/brief.js";
+import { releaseGrant } from "../../src/ops/release.js";
 import { rulingMake } from "../../src/ops/ruling.js";
 import {
   CANARY,
-  caseCiting,
   claim,
   emptyWorld,
   now,
@@ -100,15 +103,17 @@ type Call = readonly [name: string, args: Record<string, unknown>];
 async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: World; names: Names }> {
   const world = await restingWorld(key, scratch);
   for (const dir of FIXTURES) {
+    using folded = await foldedIndex(world.store);
     await buildModule(dir, world.store, {
       blobs: blobStoreOf(world.workspace),
-      index: await foldedIndex(world.store),
+      index: folded,
       now,
     });
   }
+  using folded = await foldedIndex(world.store);
   const sealedModule = await buildModule(SEALED_MODULE, world.store, {
     blobs: blobStoreOf(world.workspace),
-    index: await foldedIndex(world.store),
+    index: folded,
     now,
   });
   const sealsModule = await seal(world, sealedModule.moduleRecordId);
@@ -116,8 +121,8 @@ async function sealedWorld(key: TestKey, scratch: string[]): Promise<{ world: Wo
   const [hidden, sealsClaim] = await sealedClaim(world);
   const contest = await contestedRuling(world, key);
   const [, sealedCase] = await world.store.putMany([
-    { kind: "case", value: caseCiting("hides", [world.restsOn, hidden!]) },
-    { kind: "case", value: caseCiting("sealed-case", [world.restsOn]) },
+    { kind: "case", value: fixtureCase("hides", [world.restsOn, hidden!]) },
+    { kind: "case", value: fixtureCase("sealed-case", [world.restsOn]) },
   ]);
   const sealsCase = await seal(world, sealedCase!);
   const gitDir = join(world.workspace, MUSAI_DIR);
@@ -207,6 +212,7 @@ function toolCalls(names: Names, key: TestKey): readonly Call[] {
     render_markdown: [{ file: notes }],
     hook_stop: [{ hook: { transcript_path: notes } }],
     scope_list: [{}],
+    attestation_show: ids.map((id) => ({ id })),
     key_list: [{}],
     doctor_run: [{}],
     "musai_core_exit-code": [parsed],
@@ -217,8 +223,14 @@ function toolCalls(names: Names, key: TestKey): readonly Call[] {
     greeter_greets: [{ name: SEALED_ID }],
     greeter_note: [{ who: SEALED_ID }],
     "stamper_answers-as-read": plans.map((answer) => ({ answer })),
-    brief_render: claims.map((claim) => ({ claim })),
-    gate_ask: claims.map((claim) => ({ claim })),
+    brief_render: [
+      ...claims.map((claim) => ({ claim })),
+      ...names.cases.map((name) => ({ claim: names.restsOn, case: name })),
+    ],
+    gate_ask: [
+      ...claims.map((claim) => ({ claim })),
+      ...names.cases.map((name) => ({ claim: names.restsOn, case: name })),
+    ],
     gate_answer: ids.map((pending) => ({ pending, brief: pending })),
     bundle_export: claims.map((id, index) => ({ id, to: WRITER, out: bundles[index], key: key.keyPath })),
     bundle_rerun: bundles.flatMap((bundle) => [{ bundle }, { bundle, yes: true }]),
@@ -233,6 +245,7 @@ function toolCalls(names: Names, key: TestKey): readonly Call[] {
       selector: "musai.core/exit-code@1:result",
     })),
     check_run: [{ statement: "node exits cleanly", command: ["node", "-e", "process.exit(0)"] }],
+    fork_keep: ids.map((record) => ({ record })),
     release_grant: ids.map((id) => ({ id, to: WRITER, key: key.keyPath })),
     release_revoke: ids.map((id) => ({ id, from: WRITER })),
     release_seal: ids.map((id) => ({ id, from: WRITER })),
@@ -421,9 +434,19 @@ describe.skipIf(!opensshAvailable)("an MCP server launched under a clearance", (
     expect(seen.uncalled).toEqual([]);
     const restsOn = station.names.restsOn;
     expect(answerTo(seen.answers, "resources/read case://rests")).toContain("- rests-on — open");
-    expect(answerTo(seen.answers, `tools/call brief_render ${JSON.stringify({ claim: restsOn })}`)).toMatch(
-      /^\{"content".*rests-on/,
-    );
+    const unnamed = answerTo(seen.answers, `tools/call brief_render ${JSON.stringify({ claim: restsOn })}`);
+    expect(unnamed).toMatch(/under different slugs/);
+    expect([unnamed.includes("(rests)"), unnamed.includes("(hides)"), unnamed.includes("sealed-case")]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(
+      answerTo(seen.answers, `tools/call brief_render ${JSON.stringify({ claim: restsOn, case: "rests" })}`),
+    ).toMatch(/^\{"content".*rests-on/);
+    expect(
+      answerTo(seen.answers, `tools/call brief_render ${JSON.stringify({ claim: restsOn, case: "sealed-case" })}`),
+    ).toContain("no case found named sealed-case");
     for (const tool of ["claim_why", "brief_render", "gate_ask"]) {
       for (const id of station.names.sealed) {
         const asked = seen.answers.filter((answer) => answer.request.startsWith(`tools/call ${tool} {"claim":"${id}"`));
@@ -691,5 +714,36 @@ describe.skipIf(!opensshAvailable)("an MCP server launched under a clearance", (
       expect(carrying(answers, withheld)).toEqual([]);
     }
     expect(carrying(answers, "rests-on")).not.toEqual([]);
+  }, 300_000);
+
+  test("reads a released successor's dossier listing none of the drafts of the sealed case it supersedes", async () => {
+    const world = await emptyWorld(key, scratch);
+    const [sealedCase] = await world.store.putMany([{ kind: "case", value: fixtureCase("succeeded", []) }]);
+    const [sealedDraft] = await world.store.putMany([
+      { kind: "artifact", value: fixtureArtifact(sealedCase!, CANARY) },
+    ]);
+    await seal(world, sealedCase!);
+    const [successor] = await world.store.putMany([
+      { kind: "case", value: fixtureCase("succeeded", [], { supersedes: [sealedCase!] }) },
+    ]);
+    await runHandler(releaseGrant, { id: successor!, to: WRITER, key: key.keyPath }, world.author);
+    const [successorDraft] = await world.store.putMany([
+      { kind: "artifact", value: fixtureArtifact(successor!, "the successor's own draft") },
+    ]);
+    const dossier = async (context: OperationContext): Promise<string> => {
+      const { client, close } = await connect(context, []);
+      try {
+        return JSON.stringify(await client.readResource({ uri: "case://succeeded" }));
+      } finally {
+        await close();
+      }
+    };
+
+    const station = await dossier(launched(world, WRITER));
+    const author = await dossier(launched(world));
+
+    expect(station).toContain(shortIdOf(successorDraft!));
+    expect(station).not.toContain(shortIdOf(sealedDraft!));
+    expect(author).toContain(shortIdOf(sealedDraft!));
   }, 300_000);
 });

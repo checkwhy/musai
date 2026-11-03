@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 async function opened(): Promise<Workspace> {
-  return openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+  return repo.keep(await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now }));
 }
 
 async function put(...claims: ClaimRecord[]): Promise<RecordId[]> {

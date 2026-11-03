@@ -10,14 +10,15 @@ import {
   recordId,
   referencesOf,
 } from "@musai/records";
+import { readTrustTip } from "@musai/store";
 import { type Audiences, covers } from "@musai/trust";
 import { checkReceiptsOf, evaluatedRecipesOf, namesModuleRule } from "./check-receipts.js";
 import { walkCitations } from "./citations.js";
-import { releaseStanding, sealStanding } from "./release.js";
+import { releaseStanding, sealStanding, withdrawalVerdicts } from "./release.js";
 import type { Workspace } from "./workspace.js";
 
 /** Named in the digest, so a cleared fold built under an earlier rule is refolded from nothing. */
-const CLEARANCE_RULE = 5;
+const CLEARANCE_RULE = 9;
 
 /** What `clearance` reads, judged up front against `author`, the fold holding every seal; the
  * digest names what stands, so a seal, release, revocation or trust change refolds the fold. */
@@ -26,6 +27,8 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
   const through = author.watermark();
   // Standing is judged as of `through`, so one position always judges to one digest.
   const landed = (id: RecordId) => through !== null && author.landedBy(id, through);
+  // A later version's attestation the fold refused still withdraws a release from where it lands.
+  const landedOrRefused = (id: RecordId) => landed(id) || (through !== null && author.laterLandedBy(id, through));
   // Each pair is judged from whichever of its two landed later, so neither withdraws what was held.
   const evaluated = new Map<RecordId, Pair[]>();
   const blinding: Pair[] = [];
@@ -47,7 +50,7 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
       for (const member of closure) {
         const record = author.recordById(member)?.record;
         if (record?.kind === "claim") {
-          for (const [recipe, evaluations] of evaluatedRecipesOf(author, record, landed)) {
+          for (const [recipe, evaluations] of evaluatedRecipesOf(author, member, record, landed)) {
             evaluated.set(recipe, [
               ...(evaluated.get(recipe) ?? []),
               ...evaluations.map((evaluation) => ({ by: evaluation, member })),
@@ -64,15 +67,56 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
   });
   // No window is read: a fold whose rows hung on a clock would differ by when it was built.
   const lowered = await subjectsStanding(author, "released", async (subject) =>
-    (await releaseStanding(opened, subject, author, landed)).standing.some((release) =>
+    (await releaseStanding(opened, subject, author, landedOrRefused)).standing.some((release) =>
       covers(opened.audiences, release.record.audience, clearance),
     )
       ? [subject]
       : [],
   );
+  // Each judged once per admission, since forks and merges of drafts reach one id by many paths.
+  const casesJudged = new Map<RecordId, boolean>();
+  const draftsJudged = new Map<RecordId, boolean>();
+  // Judged in no landing order, which can only find more withheld than the fold withholds.
+  const caseWithheld = (id: RecordId): boolean => {
+    if (!casesJudged.has(id)) {
+      const record = landed(id) ? author.recordById(id)?.record : undefined;
+      casesJudged.set(
+        id,
+        sealed.has(id) || (record?.kind === "case" && !lowered.has(id) && record.supersedes.some(caseWithheld)),
+      );
+    }
+    return casesJudged.get(id)!;
+  };
+  // A successor withheld for its case folds no succession there, so the draft it replaces goes too.
+  const retires = (id: RecordId): boolean => {
+    if (!draftsJudged.has(id)) {
+      draftsJudged.set(
+        id,
+        lowered.has(id) &&
+          author.successorsOf(id).some(({ successor }) => {
+            const record = landed(successor) ? author.recordById(successor)?.record : undefined;
+            return (
+              record?.kind === "artifact" &&
+              caseWithheld(record.case) &&
+              (!lowered.has(successor) || retires(successor))
+            );
+          }),
+      );
+    }
+    return draftsJudged.get(id)!;
+  };
+  // What a retired draft replaced would read live there in its place, so it goes with it.
+  const retired = new Set(
+    await walkCitations(
+      [...lowered].filter(retires),
+      (id) => id,
+      (id) => (landed(id) ? (author.recordById(id)?.record.supersedes ?? []) : []),
+    ),
+  );
+  const hidden = (id: RecordId) => sealed.has(id) || retired.has(id);
   // A sealed id withholds whenever it lands; one withheld by derivation only if it landed first.
   const withheld = (id: RecordId, commit: string, admitted: (id: RecordId) => boolean) =>
-    sealed.has(id) || (!admitted(id) && author.landedBy(id, commit));
+    hidden(id) || (!admitted(id) && author.landedBy(id, commit));
   const bothBy =
     (commit: string) =>
     ({ by, member }: Pair) =>
@@ -88,6 +132,8 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
     !author
       .readersOf(recipeReadKey(recordId(record.recipe)))
       .some(({ reader, consumed }) => consumed.sha256 === hexOfRecordId(id) && author.commitOf(reader) === commit);
+  // Judged here, where the bytes are read, since a station's store holds none it withholds.
+  const { verified, replacing } = await withdrawalVerdicts(opened, author, landedOrRefused);
   return {
     // Sorted, so the digest names the sets and not the order a walk reached them in.
     digest: rawId(
@@ -96,7 +142,11 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
         clearance,
         sealed: [...sealed].sort(),
         lowered: [...lowered].sort(),
+        retired: [...retired].sort(),
         blinding: blinding.map(({ by, member }) => `${by} ${member}`).sort(),
+        // Named, so a trust move that turns a verdict refolds what a station holds of it.
+        verified: [...verified].sort(),
+        replacing: [...replacing].sort(),
         members: [...new Set([...blinding, ...[...evaluated.values()].flat()].map(({ member }) => member))]
           .map((member) => `${member} ${author.commitOf(member)}`)
           .sort(),
@@ -104,26 +154,31 @@ export async function clearanceAdmission(opened: Workspace, author: IndexDb, cle
     ),
     through,
     trust: opened.matrix.commit,
+    trustTip: () => readTrustTip(opened.ctx),
     admits: ({ id, record, commit }, admitted) => {
       const withholds = (other: RecordId) => withheld(other, commit, admitted);
       if (
-        sealed.has(id) ||
+        hidden(id) ||
         readBy(record, commit) ||
         landedApart(id, record, commit) ||
         (record.kind === "attestation" && withholds(record.subject))
       ) {
         return false;
       }
-      const read =
+      const reached =
         record.kind === "run"
           ? record.observation.reads.flatMap(({ consumed }) =>
               consumed.sha256 === undefined ? [] : [`sha256:${consumed.sha256}` as const],
             )
-          : [];
-      return lowered.has(id) || ![...record.supersedes, ...read].some(withholds);
+          : record.kind === "artifact"
+            ? [record.case]
+            : [];
+      return lowered.has(id) || ![...record.supersedes, ...reached].some(withholds);
     },
     withholds: withheld,
-    judgedAgain: () => clearanceAdmission(opened, author, clearance),
+    verifies: (id) => verified.has(id),
+    replaces: (id) => replacing.has(id),
+    judgedAgain: async () => clearanceAdmission(await opened.atTrustTip(clearance), author, clearance),
   };
 }
 
@@ -151,7 +206,7 @@ function closureNext(
     return [];
   }
   const cited = referencesOf({ ...record }).citations.map((citation) => citation.id);
-  const receipts = record.kind === "claim" ? checkReceiptsOf(author, record, landed, evaluated) : [];
+  const receipts = record.kind === "claim" ? checkReceiptsOf(author, id, record, landed, evaluated) : [];
   return [...cited, ...receipts.map((receipt) => receipt.recordId)];
 }
 

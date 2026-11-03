@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -199,6 +199,74 @@ describe("a verb that mints an attestation signs it, from whichever place names 
     expect(stdout).toContain("holds");
     await rm(workspace.dir, { recursive: true, force: true });
   }, 60_000);
+
+  describe("a key registered for the caller's name whose private half is not under ~/.ssh", () => {
+    let halved: TestKey;
+    let home: string;
+
+    beforeAll(async () => {
+      halved = await generateTestKey(KEYLESS);
+      home = await mkdtemp(join(tmpdir(), "musai-signs-home-"));
+      await mkdir(join(home, ".ssh"));
+      await copyFile(`${halved.keyPath}.pub`, join(home, ".ssh", "id_ed25519.pub"));
+    }, 60_000);
+
+    afterAll(async () => {
+      await rm(halved.dir, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
+    });
+
+    async function ruleAsKeyless(level: string, slug: string) {
+      const workspace = await freshWorkspace(slug, level);
+      await writeTrustFile(
+        { gitDir: workspace.gitDir },
+        "allowed-signers",
+        `${allowedSignersLine(key)}${allowedSignersLine(halved)}`,
+      );
+      const { claim, brief, slot } = await bookAndBrief(workspace, slug);
+      const ruled = (await execa(
+        "node",
+        [
+          CLI_PATH,
+          "--workspace",
+          workspace.dir,
+          "lab",
+          "rule",
+          claim,
+          "--verdict",
+          "holds",
+          "--reason",
+          "only the public half is here",
+          "--brief",
+          brief,
+          "--json",
+        ],
+        { reject: false, env: { HOME: home, MUSAI_PRINCIPAL: KEYLESS } },
+      )) as ExecaError;
+      return { workspace, slot, ruled };
+    }
+
+    test("is refused where the level requires a signature, rather than failing inside the signer", async () => {
+      const { workspace, ruled } = await ruleAsKeyless("all", "halved-all");
+
+      expect(ruled.exitCode).not.toBe(0);
+      expect(`${ruled.stdout}${ruled.stderr}`).toContain("requires a signature");
+      expect(await sidecarCount(workspace)).toBe(0);
+      await rm(workspace.dir, { recursive: true, force: true });
+    }, 60_000);
+
+    test("attests under the caller's pseudonym, unsigned, where the level allows it", async () => {
+      const { workspace, slot, ruled } = await ruleAsKeyless("off", "halved-off");
+
+      expect(ruled.exitCode, `${ruled.stdout}${ruled.stderr}`).toBe(0);
+      expect(ruled.stdout).toContain(pseudonymOf(KEYLESS));
+      expect(ruled.stdout).not.toContain(halved.principal);
+      expect(await sidecarCount(workspace)).toBe(0);
+      const { stdout } = await execa("node", [CLI_PATH, "--workspace", workspace.dir, "status", slot]);
+      expect(stdout).toContain("holds");
+      await rm(workspace.dir, { recursive: true, force: true });
+    }, 60_000);
+  });
 
   test("a plan previews the same ruling without reaching for a key at all", async () => {
     const workspace = await freshWorkspace("planned", "person");

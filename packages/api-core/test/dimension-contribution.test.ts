@@ -43,7 +43,7 @@ function dimensionEntry(moduleName: string, id: string, input: unknown): Contrib
 
 async function install(repo: FixtureRepo, name: string, manifest: ModuleManifest): Promise<void> {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   await installModule(
     name,
@@ -58,13 +58,13 @@ async function install(repo: FixtureRepo, name: string, manifest: ModuleManifest
 }
 
 async function foldedDimensions(repo: FixtureRepo): Promise<ReturnType<typeof readDimensionDeclarations>> {
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   return readDimensionDeclarations(index);
 }
 
 async function openOver(repo: FixtureRepo): Promise<Workspace> {
-  return Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+  return repo.keep(await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) }));
 }
 
 describe("the five dimension types an installed module can declare", () => {

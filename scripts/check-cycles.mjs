@@ -9,6 +9,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const scanRoot = process.argv[2] ? resolve(process.argv[2]) : repoRoot;
 const SCANNED_ROLES = new Set(["kernel-side", "distribution", "surface"]);
 
+/** @param {string} dir @returns {Promise<string[]>} */
 async function tsFilesUnder(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -23,6 +24,7 @@ async function tsFilesUnder(dir) {
   return files;
 }
 
+/** @param {string} path */
 async function hasDirectory(path) {
   try {
     return (await stat(path)).isDirectory();

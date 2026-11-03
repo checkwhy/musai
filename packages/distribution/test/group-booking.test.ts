@@ -24,7 +24,7 @@ describe("a booking whose kind opens a menu offering one option twice", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-group-booking-"));
     const { gitDir } = await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir }, scope, now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index, now });
     await buildModule(TWIN_OPTIONS_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index, now });
@@ -39,7 +39,8 @@ describe("a booking whose kind opens a menu offering one option twice", () => {
   }
 
   async function tip(): Promise<string | null> {
-    return (await openWorkspace({ workspace, scope, now })).store.tip();
+    using opened = await openWorkspace({ workspace, scope, now });
+    return await opened.store.tip();
   }
 
   test("is refused in either mode, naming the option both members offer, and nothing is written", async () => {

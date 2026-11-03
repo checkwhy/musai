@@ -1295,9 +1295,9 @@ describe("the shapes each record kind honours", () => {
     expect(result).toMatchObject({ ok: true, record: { evaluatorVersion: "2.3.1" } });
   });
 
-  it("a manifest declaring a view, kind or operation contribution loads", () => {
+  it("a manifest declaring a parser, kind or operation contribution loads", () => {
     const module = wellFormedModule();
-    for (const kind of ["view", "kind", "operation"] as const) {
+    for (const kind of ["parser", "kind", "operation"] as const) {
       const entry =
         kind === "operation"
           ? {

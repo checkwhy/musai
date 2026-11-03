@@ -21,10 +21,14 @@ import { RUNNER_PERFORMER } from "@musai/run";
 import { BRIEF_BUDGET_SLOT_ID, briefRecipe } from "../brief/recipe.js";
 import { renderBrief } from "../brief/render.js";
 import { findCaseForClaim } from "../cases.js";
+import { briefedEvaluationMove } from "../claim.js";
+import { statusAdvice } from "../claim-ref.js";
 
 export interface BriefRenderInput {
   readonly claim: string;
   readonly budget?: number;
+  /** The case to read the claim under, which cases under other slugs citing it require. */
+  readonly case?: string;
 }
 
 export interface BriefRenderOutput extends WriteResult {
@@ -35,6 +39,12 @@ export interface BriefRenderOutput extends WriteResult {
 function renderBriefRenderText(output: BriefRenderOutput): string {
   return output.output;
 }
+
+export const CLAIM_CASE_SCHEMA = {
+  type: "string",
+  minLength: 1,
+  description: "the case to read the claim under: its slug, its id or a short id",
+} as const;
 
 /** The core module's default budget, so a bare workspace renders as one left at that default. */
 const FALLBACK_BRIEF_BUDGET_BYTES = 20000;
@@ -83,13 +93,22 @@ const briefRenderHandler: OperationHandler<BriefRenderInput, BriefRenderOutput> 
       });
     }
 
-    const found = await findCaseForClaim(opened, claimId);
+    const found = await findCaseForClaim(opened, claimId, input.case);
     const head = opened.index.watermark();
     if (head === null) {
       throw new OperationError({
         reason: "no-such-record",
         about: [claimId],
         detail: "the scope holds no records to render a brief against",
+      });
+    }
+
+    const moved = await briefedEvaluationMove(opened, claimCandidate, opened.clearance);
+    if (moved !== null) {
+      throw new OperationError({
+        reason: "stale",
+        about: [claimId],
+        detail: `refusing to render a brief for ${claimId}: ${moved}, so it would pack receipts that no longer stand; run ${statusAdvice(claimCandidate.slot, opened.clearance, opened.clearance)} first`,
       });
     }
 
@@ -134,6 +153,7 @@ export const briefRender = definedOperation<BriefRenderInput, BriefRenderOutput>
       properties: {
         claim: { type: "string" },
         budget: { type: "integer", minimum: 0 },
+        case: CLAIM_CASE_SCHEMA,
       },
     },
     output: {
@@ -148,13 +168,13 @@ export const briefRender = definedOperation<BriefRenderInput, BriefRenderOutput>
     },
     effect: "write",
     authority: null,
-    reasons: ["no-such-record", "over-budget", "head-moved"],
+    reasons: ["no-such-record", "over-budget", "head-moved", "stale", "invalid-input"],
     documentation:
       "Renders a brief run for a gate claim: a recipe a stranger could re-run, and an observation naming every record it packed.",
     cli: {
       verb: "brief",
       positional: ["claim"],
-      flags: ["budget"],
+      flags: ["budget", "case"],
       describe: "render the brief a person answers a gate claim from",
     },
     renderText: renderBriefRenderText,

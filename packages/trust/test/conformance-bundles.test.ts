@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { bundleDigest, isKeyPrincipal, recordId, recordPath, sidecarPath, validateRecord } from "@musai/records";
+import {
+  bundleDigest,
+  isKeyPrincipal,
+  recordId,
+  recordPath,
+  sidecarPath,
+  TrustFileError,
+  validateRecord,
+} from "@musai/records";
 import { describe, expect, it } from "vitest";
 import {
   ATTESTATION,
@@ -55,12 +63,14 @@ describe("the conformance bundles", () => {
     }
   });
 
-  it("name trust.key-mismatch exactly where the kernel refuses the allowed-signers a bundle holds", () => {
+  it("name a trust code exactly where the kernel refuses the allowed-signers a bundle holds", () => {
     const rows = JSON.parse(readFileSync(join(CONFORMANCE_DIR, "bundles.json"), "utf8")) as BundleCase[];
     for (const row of rows) {
       const signers = readFileSync(join(BUNDLES, row.name, "allowed-signers"), "utf8");
       if (row.codes.includes("trust.key-mismatch")) {
         expect(() => parseAllowedSigners(signers), row.name).toThrow(/one key never speaks as another/);
+      } else if (row.codes.includes("trust.line-invalid")) {
+        expect(() => parseAllowedSigners(signers), row.name).toThrow(TrustFileError);
       } else {
         expect(() => parseAllowedSigners(signers), row.name).not.toThrow();
       }

@@ -96,13 +96,13 @@ async function ruleAs(by: Caller, claim: RecordId, supersedes: readonly RecordId
 }
 
 async function weighed(slot: string, id: RecordId): Promise<WeighedRuling> {
-  const opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+  using opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
   return (await weighedRulingsFor(opened, slot)).find((ruling) => ruling.id === id)!;
 }
 
 async function predicted(name: RecordId, by: Caller, slot: string): Promise<Retirement> {
-  const opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
-  return retirementOf(opened, name, { principal: by.principal, tier: by.tier, slot });
+  using opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+  return await retirementOf(opened, name, { principal: by.principal, tier: by.tier, slot });
 }
 
 /** Rules as `nameBy`, then supersedes it as `successorBy`; answers both readings of the rule. */

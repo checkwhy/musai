@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const PACKAGES = new URL("../../", import.meta.url);
 const WORKSPACE_PACKAGE = /^@musai\/([a-z0-9-]+)$/;
 
+/** @param {string} specifier */
 export function workspaceSource(specifier) {
   const match = WORKSPACE_PACKAGE.exec(specifier);
   if (!match) {

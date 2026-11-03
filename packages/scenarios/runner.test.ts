@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import {
@@ -12,7 +12,6 @@ import {
   runScenarioInto,
   SCENARIO_INSTANT,
   scenarioPath,
-  scenarioWorkspace,
   stepEnvironment,
   stepInstant,
   withPlaceholderIds,
@@ -259,22 +258,35 @@ describe("a step's own instant", () => {
 });
 
 describe("where a scenario runs", () => {
-  test("a workspace path differs between two clones of the repository and between two scenarios, and repeats for the same pair", () => {
-    const scenario = "/r/packages/scenarios/first-use";
-    const path = scenarioWorkspace("/r", scenario);
+  test("two runs of one scenario at once each hold in a workspace of their own, gone afterwards", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scenario-concurrent-"));
+    try {
+      await writeFile(
+        join(root, "scenario.json"),
+        JSON.stringify({
+          steps: [
+            { id: "init", args: ["init", "$WORKSPACE"] },
+            { id: "note", edit: { path: "$WORKSPACE/note.txt", append: "hello" } },
+            { id: "status", args: ["status", "no-such-claim"], exit: 2 },
+          ],
+          replay: ["status"],
+          holds: [],
+        }),
+      );
+      vi.stubEnv("MUSAI_SCENARIO_RECORD", "1");
+      await runScenario(root);
+      vi.unstubAllEnvs();
+      const [one, two] = await Promise.all([runScenario(root), runScenario(root)]);
 
-    expect(scenarioWorkspace("/r", scenario)).toBe(path);
-    expect(scenarioWorkspace("/other", scenario)).not.toBe(path);
-    expect(scenarioWorkspace("/r", "/r/packages/scenarios/sealing")).not.toBe(path);
-    expect(dirname(path)).toBe(tmpdir());
-  });
-
-  test("two clones sharing a directory name get different workspaces for the same scenario", () => {
-    const scenario = "packages/scenarios/first-use";
-
-    expect(scenarioWorkspace("/a/musai", `/a/musai/${scenario}`)).not.toBe(
-      scenarioWorkspace("/b/musai", `/b/musai/${scenario}`),
-    );
+      expect(one.workspace).not.toBe(two.workspace);
+      expect(dirname(dirname(one.workspace))).toBe(tmpdir());
+      expect(one.outputs).toEqual(two.outputs);
+      await expect(stat(one.workspace)).rejects.toThrow("ENOENT");
+      await expect(stat(dirname(two.workspace))).rejects.toThrow("ENOENT");
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

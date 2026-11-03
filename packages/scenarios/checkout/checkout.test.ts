@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { derivationNodes, runScenario } from "@musai/test-support";
 import { expect, test } from "vitest";
@@ -75,7 +76,7 @@ test("checkout: a check names its commit and its tooling, is reused for its comm
   for (const [id, text] of run.outputs) {
     expect(text, id).not.toContain("<workspace>/checkout");
   }
-  const realWorkspace = join(await realpath(dirname(run.workspace)), basename(run.workspace));
+  const realWorkspace = join(await realpath(tmpdir()), relative(tmpdir(), run.workspace));
   for (const [id, text] of run.raw) {
     expect(text, id).not.toContain(join(realWorkspace, "checkout"));
     expect(text, id).not.toContain(join(run.workspace, "checkout"));

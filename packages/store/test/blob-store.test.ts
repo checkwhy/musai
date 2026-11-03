@@ -107,7 +107,7 @@ describe("a workspace's blob store", () => {
       const [sha] = await gitHashObjectBatch(ctx, [join(scratch, "altered")]);
       const tip = await gitRevParse(ctx, BLOBS_REF);
       const hex = hexOfRecordId(id);
-      const tree = await gitSpliceTree(ctx, tip, [{ path: `${hex.slice(0, 2)}/${hex}`, sha: sha! }]);
+      const { sha: tree } = await gitSpliceTree(ctx, tip, [{ path: `${hex.slice(0, 2)}/${hex}`, sha: sha! }]);
       await gitUpdateRefCas(ctx, BLOBS_REF, await gitCommitTree(ctx, tree, [tip!], "swap\n", NOW), tip);
     } finally {
       await rm(scratch, { recursive: true, force: true });

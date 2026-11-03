@@ -1,8 +1,9 @@
 # Conformance
 
 What a second implementation of musai's record form runs to stay the kernel's
-twin. The kernel's own suites hold every file here to what its generators write;
-the Go verifier in `verify/` reads them in its tests. Nothing here is edited by
+twin. The kernel's own suites hold every file here to what its generators write,
+and its release coverage answers each release case's entitlement as the row does;
+the Go verifier in `verify/` runs every one with `musai-verify conformance`. Nothing here is edited by
 hand. The signed bundles and the exports are signed by a key made for the run
 and deleted after it, so their signatures, and the digests of the bundles
 holding them, change each time their generator runs. An export's records
@@ -20,7 +21,10 @@ build receipt is the generating machine's.
 | `exports.json`, `exports/` | archives the kernel's own `musai export` wrote, each a gzipped tar of a released closure, with the verdict, the codes and the digest a verifier must give it | `pnpm --filter @musai/distribution conformance` |
 | `roles.json` | the actions each shipped role grants at scope `any`, and those an empty trust branch grants everyone | `pnpm --filter @musai/trust conformance` |
 | `audiences.json` | one `audiences` file and, for every ordered pair of the audiences it names plus `public` and a key and an identity outside it, whether a release to the first covers the second | the same |
-| `releases.json`, `releases/` | bundles carrying releases (one set relayed through a model), revocations, seals of either extent and one written with an extent the kernel never mints, a release and a seal at a version later than the kernel reads, a manifest and the three trust files, with the integrity verdict, the entitlement verdict (`covered`, `uncovered` or `unchecked`) and the exact codes a verifier must produce | the same |
+| `allowed-signers.json` | allowed-signers lines, each with what the kernel reads in it (its principals, `cert-authority`, `namespaces` and window, in seconds since the epoch) or the class of the reason it refuses it, which a verifier names alike | `pnpm --filter @musai/trust conformance` |
+| `releases.json`, `releases/` | bundles carrying releases (one set relayed through a model), revocations (two sets unsigned, one in a name the roles grant nothing), seals of either extent and one written with an extent the kernel never mints, a release and a seal at a version later than the kernel reads, a manifest and the three trust files, with the integrity verdict, the entitlement verdict (`covered`, `uncovered` or `unchecked`) and the exact codes a verifier must produce | the same |
+| `recipes.json` | receipts of runs, each with its command as the shell line the kernel prints and the engine line the kernel's runner builds for its recipe: the `docker run` argv with the checkout as `${MUSAI_CHECKOUT:?set it to your checkout}` and the working directory after it uncleaned, a fresh scratch as `$(mktemp -d)`, no container name, the literals in RFC 8785 key order and each declared name passed alone and once, and the line quoted for a POSIX shell, each argument bare where nothing in it splits, expands or assigns (`=` and `%` quoted), in POSIX.1-2024 `$'…'` with each byte a terminal would act on in three octal digits where it holds one, else in single quotes, and each mount's placeholder in double quotes for the shell to expand; the engine line and its shell line both `null` where the run was held outside a container | `pnpm --filter @musai/run conformance` |
+| `printable.json` | texts with what the kernel prints for each on a terminal: every C0 and C1 control, the line and paragraph separators and the bidirectional formatting characters (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) as `\uXXXX`, everything else, a backslash among it, kept; written with every character past `~` escaped, so the file holds none a terminal acts on | the same |
 
 A path in `references.json` is `$` followed by `.name` and `[*]` steps, every
 array index written as `[*]`. Paths are the union over every schema version a

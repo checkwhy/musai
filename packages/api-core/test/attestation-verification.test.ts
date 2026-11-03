@@ -1,5 +1,6 @@
-import { access, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { recordId, timestamp } from "@musai/records";
 import {
   allowedSignersLine,
@@ -39,6 +40,7 @@ async function pathWithoutSshKeygen(): Promise<string> {
 describe("attestation verification at signing level person", () => {
   let verifiedTwice: Attestation;
   let neverVerified: Attestation;
+  let unjudged: Attestation;
   let repo: FixtureRepo;
   let key: TestKey;
   let searchPath: string;
@@ -48,9 +50,10 @@ describe("attestation verification at signing level person", () => {
     key = await generateTestKey(NAME);
     verifiedTwice = personAttestation("a record verified once and asked for again", key.principal);
     neverVerified = personAttestation("a record whose attestation nobody has verified yet", key.principal);
+    unjudged = personAttestation("a record whose verifier gives no verdict", key.principal);
     searchPath = await pathWithoutSshKeygen();
     const items = [];
-    for (const attestation of [verifiedTwice, neverVerified]) {
+    for (const attestation of [verifiedTwice, neverVerified, unjudged]) {
       const signature = await signAttestation({ attestation, keyPath: key.keyPath });
       items.push({ kind: "attestation" as const, value: attestation.record, signature });
     }
@@ -69,7 +72,7 @@ describe("attestation verification at signing level person", () => {
   });
 
   test("an attestation nobody has verified is checked by the OpenSSH binary, and refused where the binary cannot run", async () => {
-    const opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+    using opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
     expect(opened.signingLevel).toBe("person");
 
     vi.stubEnv("PATH", searchPath);
@@ -79,11 +82,28 @@ describe("attestation verification at signing level person", () => {
     });
   });
 
+  test("an attestation whose verifier exits giving no verdict is refused as a tool fault, not as a bad signature", async () => {
+    using opened = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+    const bin = await mkdtemp(join(tmpdir(), "musai-faulting-ssh-keygen-"));
+    await writeFile(join(bin, "ssh-keygen"), "#!/bin/sh\nexit 255\n");
+    await chmod(join(bin, "ssh-keygen"), 0o755);
+    vi.stubEnv("PATH", `${bin}${delimiter}${process.env["PATH"] ?? ""}`);
+
+    try {
+      await expect(verifiedAttestationFor(opened, unjudged.record.subject)).rejects.toMatchObject({
+        reason: "tool-unavailable",
+        about: [unjudged.id],
+      });
+    } finally {
+      await rm(bin, { recursive: true, force: true });
+    }
+  });
+
   test("a second verification of the same attestation under the same allowed signers runs no OpenSSH binary", async () => {
-    const first = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+    using first = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
     expect(await verifiedAttestationFor(first, verifiedTwice.record.subject)).toEqual(verifiedTwice.record);
 
-    const second = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
+    using second = await openWorkspace({ workspace: repo.workspace, scope: repo.scope, now: repo.now });
     vi.stubEnv("PATH", searchPath);
 
     expect(await verifiedAttestationFor(second, verifiedTwice.record.subject)).toEqual(verifiedTwice.record);

@@ -1,12 +1,12 @@
 name: CI
 
-# Runs on a push to main, a pull request into main, on demand, or a push to a ci/ branch, which
-# it then deletes.
+# Runs on a push to main, a pull request into main, on demand, or a push to a ci/cut- branch,
+# which it then deletes; a private repository pays per minute, so a batch is gated locally.
 on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "ci/**"]
+    branches: [main, "ci/cut-**"]
   workflow_dispatch:
 
 concurrency:
@@ -19,8 +19,8 @@ jobs:
       # Each Node's verdict stands on its own: a failure on one never cancels the other.
       fail-fast: false
       matrix:
-        # The supported floor and the current release.
-        node-version: [24, 26]
+        # The supported floor and the current release; the current one only where minutes are free.
+        node-version: ${{ fromJSON(github.repository == 'checkwhy/musai' && '[24, 26]' || '[24]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

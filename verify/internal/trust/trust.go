@@ -47,7 +47,9 @@ type Anchor struct {
 	// Description says, for a person reading a verdict, whose keys these are.
 	Description string
 	Signers     []sig.Signer
-	// Problems are the lines of an allowed-signers file ssh-keygen would skip.
+	// Problems are the lines refused: of an allowed-signers file, by the
+	// kernel's rules and with a class, and of a GitHub account's keys, any
+	// not a key, with none.
 	Problems []sig.LineError
 	// ReadErr is an allowed-signers file present but unreadable.
 	ReadErr error
@@ -270,8 +272,8 @@ func fromDirectory(dir string, src *source.Source) (Anchor, error) {
 		return Anchor{}, fmt.Errorf("%s lies inside the source, where its sender could have put it: %w", dir, ErrSpec)
 	}
 	fsys := os.DirFS(dir)
-	if _, err := fs.Stat(fsys, "allowed-signers"); err != nil {
-		return Anchor{}, fmt.Errorf("%s holds no allowed-signers file: %w", dir, ErrSpec)
+	if err := holdsSigners(fsys, dir); err != nil {
+		return Anchor{}, err
 	}
 	digest, err := source.Digest(fsys)
 	if err != nil {
@@ -282,6 +284,19 @@ func fromDirectory(dir string, src *source.Source) (Anchor, error) {
 	anchor.Argument = "trust"
 	anchor.Substrate = &Substrate{Name: "trust", Digest: map[string]string{"sha256": digest}}
 	return anchor, nil
+}
+
+// holdsSigners refuses a trust tree with no allowed-signers file as the
+// invocation's fault, and answers any other failure to read it as it failed.
+func holdsSigners(fsys fs.FS, name string) error {
+	_, err := fs.Stat(fsys, "allowed-signers")
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("%s holds no allowed-signers file: %w", name, ErrSpec)
+	case err != nil:
+		return fmt.Errorf("reading the allowed-signers in %s: %w", name, err)
+	}
+	return nil
 }
 
 // inside reports whether dir is the source's directory or lies under it.
@@ -302,6 +317,9 @@ func fromCommit(name string, src *source.Source) (Anchor, error) {
 	fsys, commit, err := src.TrustAt(name)
 	if err != nil {
 		return Anchor{}, fmt.Errorf("%q is not a directory, a pin or a commit of this workspace (%w): %w", name, err, ErrSpec)
+	}
+	if err := holdsSigners(fsys, name+" ("+commit+")"); err != nil {
+		return Anchor{}, err
 	}
 	anchor := fromFile(fsys, commit+":allowed-signers")
 	anchor.Description = "the allowed-signers at " + name + " (" + commit + ")"

@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { appendFile, chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -356,18 +355,12 @@ function contextFieldsFor(scenarioDir: string): Pick<RunContext, "repo" | "scena
   };
 }
 
-/** Fixed per clone and scenario, so two clones running the suite at once share no directory. */
-export function scenarioWorkspace(repo: string, scenarioDir: string): string {
-  const clone = createHash("sha256").update(repo).digest("hex").slice(0, 12);
-  return join(tmpdir(), `musai-scenario-${clone}-${basename(scenarioDir)}`);
-}
-
-async function contextFor(scenarioDir: string): Promise<RunContext> {
-  const fields = contextFieldsFor(scenarioDir);
-  const workspace = scenarioWorkspace(fields.repo, scenarioDir);
+/** One path for both runs of a call, since an id may digest it; `root` is the call's own. */
+async function contextFor(scenarioDir: string, root: string): Promise<RunContext> {
+  const workspace = join(root, basename(scenarioDir));
   await rm(workspace, { recursive: true, force: true });
   await mkdir(workspace, { recursive: true });
-  return { ...fields, workspace };
+  return { ...contextFieldsFor(scenarioDir), workspace };
 }
 
 /** The steps alone, into a directory the caller owns; an id minted here may differ from `expected/`
@@ -415,8 +408,9 @@ export async function deleteFolds(localDir: string): Promise<void> {
  * against `expected/`, or records them under `MUSAI_SCENARIO_RECORD=1`. */
 export async function runScenario(scenarioDir: string): Promise<ScenarioRun> {
   const scenario = JSON.parse(await readFile(join(scenarioDir, "scenario.json"), "utf8")) as Scenario;
-  const first = await contextFor(scenarioDir);
+  const root = await mkdtemp(join(tmpdir(), "musai-scenario-"));
   try {
+    const first = await contextFor(scenarioDir, root);
     const { outputs, raw, printed } = await runSteps(scenario, first);
     await deleteFolds(join(first.workspace, MUSAI_DIR, LOCAL_DIR));
     const { outputs: replayed } = await runSteps(
@@ -438,7 +432,7 @@ export async function runScenario(scenarioDir: string): Promise<ScenarioRun> {
         throw new Error(`step ${id} does not reach an evidence hop`);
       }
     }
-    const second = await contextFor(scenarioDir);
+    const second = await contextFor(scenarioDir, root);
     const { outputs: again } = await runSteps(scenario, second);
     for (const [id, text] of outputs) {
       if (again.get(id) !== text) {
@@ -482,7 +476,6 @@ export async function runScenario(scenarioDir: string): Promise<ScenarioRun> {
     });
     return { outputs, raw, printed, workspace: first.workspace, receipts: new Set(await receiptIds(store)) };
   } finally {
-    await rm(first.workspace, { recursive: true, force: true });
-    await rm(keysDir(first), { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 }

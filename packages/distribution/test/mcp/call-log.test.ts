@@ -191,7 +191,7 @@ describe("appendCall", () => {
   });
 
   test("nothing here writes to the record store, and no stored record's bytes name the log's own path", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
     const before = await opened.store.list("case");
 
     const log = await openCallLog(workspace);
@@ -202,7 +202,7 @@ describe("appendCall", () => {
       { ok: true, output: {}, diagnostics: [] },
     );
 
-    const reopened = await openWorkspace({ workspace, scope: "default", now });
+    using reopened = await openWorkspace({ workspace, scope: "default", now });
     const after = await reopened.store.list("case");
     expect(after).toEqual(before);
 
@@ -223,7 +223,7 @@ describe("a real, genuinely esbuild-bundled contribution call, logged through ca
     context = { workspace, scope: "default", now };
     const sourceGitDir = await repoGitDir();
     const store = new Store({ ctx: { gitDir: join(workspace, MUSAI_DIR) }, scope: "default", now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(GREETER_FIXTURE_DIR, store, {
       blobs: blobStoreOf(workspace),
@@ -239,7 +239,7 @@ describe("a real, genuinely esbuild-bundled contribution call, logged through ca
 
   test("a successful call is logged with the contribution's own kind, id and version", async () => {
     const log = await openCallLog(workspace);
-    await callTool(MUSAI, context, "greeter_greets", { name: "world" }, log);
+    await callTool(MUSAI, context, "greeter_greets", { name: "world" }, async () => log);
 
     const [line] = await readLoggedLines(log.path);
     expect(line!.request).toEqual({
@@ -253,7 +253,9 @@ describe("a real, genuinely esbuild-bundled contribution call, logged through ca
 
   test("a refused call — arguments failing the tool's own schema — is still logged, with its refusal", async () => {
     const log = await openCallLog(workspace);
-    const error = await callTool(MUSAI, context, "greeter_greets", {}, log).catch((caught: unknown) => caught);
+    const error = await callTool(MUSAI, context, "greeter_greets", {}, async () => log).catch(
+      (caught: unknown) => caught,
+    );
     expect(isOperationError(error)).toBe(true);
 
     const [line] = await readLoggedLines(log.path);

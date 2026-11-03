@@ -36,7 +36,7 @@ describe("a contribution invocation admits a module's bundle only by the id its 
     workspace = await mkdtemp(join(tmpdir(), "musai-admission-bundle-"));
     await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir: join(workspace, ".musai") }, scope: "default", now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(SKILLFUL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(workspace),
@@ -58,7 +58,7 @@ describe("a contribution invocation admits a module's bundle only by the id its 
   }
 
   test("loads the bundle its module record names when the materialised copy was swapped", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
     const { record, entry } = await installedSkillful(opened);
 
     const answered = await invokeContribution(opened, MODULE_NAME, entry, {});
@@ -74,7 +74,7 @@ describe("a contribution invocation admits a module's bundle only by the id its 
   });
 
   test("refuses by name a bundle whose bytes were swapped in the store under its module record", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
     const { record, entry } = await installedSkillful(opened);
     const original = await readFile(await opened.blobs.materialise(record.bundle!), "utf8");
     await rewriteBlob(workspace, record.bundle!, new TextEncoder().encode(original.replace(RENDERED, SWAPPED)));
@@ -100,21 +100,21 @@ describe("the invocation limits an admission workspace hands the parsers it admi
     await rm(workspace, { recursive: true, force: true });
   });
 
-  async function admissionOf(): Promise<Awaited<ReturnType<typeof buildAdmissionWorkspace>>> {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
-    return buildAdmissionWorkspace(opened, await installedModules(opened));
+  async function invocationLimits(): Promise<Awaited<ReturnType<typeof buildAdmissionWorkspace>>["invocationLimits"]> {
+    using opened = await openWorkspace({ workspace, scope: "default", now });
+    return (await buildAdmissionWorkspace(opened, await installedModules(opened))).invocationLimits;
   }
 
   test("a fold declaring no invocation-limits slot hands none, so a host bounds a parser by its own fallback", async () => {
-    expect((await admissionOf()).invocationLimits).toBeUndefined();
+    expect(await invocationLimits()).toBeUndefined();
   });
 
   test("a fold holding the core module hands the limits the project layer assigns", async () => {
     const store = new Store({ ctx: { gitDir: join(workspace, ".musai") }, scope: "default", now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(await readDistributionArtefacts(), store, blobStoreOf(workspace), index);
-    expect((await admissionOf()).invocationLimits).toEqual({ timeLimitMs: 2000, memoryLimitMb: 64 });
+    expect(await invocationLimits()).toEqual({ timeLimitMs: 2000, memoryLimitMb: 64 });
 
     await writeTrustFile(
       { gitDir: join(workspace, ".musai") },
@@ -122,7 +122,7 @@ describe("the invocation limits an admission workspace hands the parsers it admi
       JSON.stringify({ [SLOTS_CONFIG_KEY]: { [INVOCATION_LIMITS_SLOT_ID]: { timeLimitMs: 300, memoryLimitMb: 16 } } }),
     );
 
-    expect((await admissionOf()).invocationLimits).toEqual({ timeLimitMs: 300, memoryLimitMb: 16 });
+    expect(await invocationLimits()).toEqual({ timeLimitMs: 300, memoryLimitMb: 16 });
   });
 });
 
@@ -181,7 +181,7 @@ describe("a contributed call and a case's draft template run under the invocatio
     workspace = await mkdtemp(join(tmpdir(), "musai-contribution-limits-"));
     await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir: join(workspace, ".musai") }, scope: "default", now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(await readDistributionArtefacts(), store, blobStoreOf(workspace), index);
     const bundle = await blobStoreOf(workspace).put(new TextEncoder().encode(allocatingTemplateSource()));
@@ -217,38 +217,30 @@ describe("a contributed call and a case's draft template run under the invocatio
   }
 
   test("a contributed call answers under the slot's default and is refused at the memory limit under a lowered project ceiling", async () => {
-    const unbounded = await invokeContribution(
-      await openWorkspace({ workspace, scope: "default", now }),
-      ALLOCATING_MODULE,
-      ALLOCATING_ENTRY,
-      { case: caseId, slug: caseRecord.slug },
-    );
+    using atDefault = await openWorkspace({ workspace, scope: "default", now });
+    const unbounded = await invokeContribution(atDefault, ALLOCATING_MODULE, ALLOCATING_ENTRY, {
+      case: caseId,
+      slug: caseRecord.slug,
+    });
     expect(unbounded).toMatchObject({ ok: true, output: { format: "markdown" } });
 
     await lowerMemoryCeiling();
-    const bounded = await invokeContribution(
-      await openWorkspace({ workspace, scope: "default", now }),
-      ALLOCATING_MODULE,
-      ALLOCATING_ENTRY,
-      { case: caseId, slug: caseRecord.slug },
-    );
+    using lowered = await openWorkspace({ workspace, scope: "default", now });
+    const bounded = await invokeContribution(lowered, ALLOCATING_MODULE, ALLOCATING_ENTRY, {
+      case: caseId,
+      slug: caseRecord.slug,
+    });
     expect(bounded).toMatchObject({ ok: false, error: { code: "memory-limit" } });
   }, 60_000);
 
   test("a case's draft template renders under the slot's default and renders no starter under a lowered project ceiling", async () => {
-    const unbounded = await resolveDraftTemplate(
-      await openWorkspace({ workspace, scope: "default", now }),
-      caseId,
-      caseRecord,
-    );
+    using atDefault = await openWorkspace({ workspace, scope: "default", now });
+    const unbounded = await resolveDraftTemplate(atDefault, caseId, caseRecord);
     expect(unbounded?.content).toContain(ALLOCATED_CONTENT);
 
     await lowerMemoryCeiling();
-    const bounded = await resolveDraftTemplate(
-      await openWorkspace({ workspace, scope: "default", now }),
-      caseId,
-      caseRecord,
-    );
+    using lowered = await openWorkspace({ workspace, scope: "default", now });
+    const bounded = await resolveDraftTemplate(lowered, caseId, caseRecord);
     expect(bounded).toBeNull();
   }, 60_000);
 });

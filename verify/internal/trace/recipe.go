@@ -3,8 +3,10 @@ package trace
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/checkwhy/musai/verify/internal/check"
 	"github.com/checkwhy/musai/verify/internal/printable"
@@ -28,6 +30,8 @@ type Recipe struct {
 	Substrates       []Substrate       `json:"substrates"`
 	Tooling          []string          `json:"tooling"`
 	Isolation        string            `json:"isolation"`
+	Engine           []string          `json:"engine,omitempty"`
+	EngineShell      string            `json:"engineShell,omitempty"`
 }
 
 // Declared is a name the recipe needs bound from outside its environment.
@@ -41,6 +45,7 @@ type Substrate struct {
 	Name        string            `json:"name"`
 	URI         string            `json:"uri,omitempty"`
 	Digest      map[string]string `json:"digest,omitempty"`
+	MediaType   string            `json:"mediaType,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
@@ -70,9 +75,14 @@ func RecipeOf(index *check.Index, id string) (Recipe, error) {
 	}
 	for _, entry := range objects(raw["substrates"]) {
 		r.Substrates = append(r.Substrates, Substrate{
-			Name: str(entry, "name"), URI: str(entry, "uri"),
-			Digest: stringMap(entry["digest"]), Annotations: stringMap(entry["annotations"]),
+			Name: str(entry, "name"), URI: str(entry, "uri"), Digest: stringMap(entry["digest"]),
+			MediaType: str(entry, "mediaType"), Annotations: stringMap(entry["annotations"]),
 		})
+	}
+	observation, _ := record.Value["observation"].(map[string]any)
+	var mounts []int
+	if r.Engine, mounts = engineLine(r, observation); r.Engine != nil {
+		r.EngineShell = engineShell(r.Engine, mounts)
 	}
 	return r, nil
 }
@@ -146,23 +156,37 @@ func (r Recipe) Text() string {
 		if s.URI != "" {
 			parts = append(parts, s.URI)
 		}
+		if s.MediaType != "" {
+			parts = append(parts, s.MediaType)
+		}
 		for _, key := range sortedKeys(s.Annotations) {
 			parts = append(parts, key+"="+s.Annotations[key])
 		}
 		line("  %-24s %s", s.Name, strings.Join(parts, "  "))
 	}
+	header := func(name string, args []string) {
+		if dollarQuoted(args) {
+			line("%-18s %s", name, dollarShells)
+		} else {
+			line("%s", name)
+		}
+	}
 	if computed {
-		line("command")
+		header("command", r.Command)
 		line("  %s", r.Shell)
 		return b.String()
 	}
 	line("tooling            %s", orNone(r.Tooling))
-	line("environment")
+	values := make([]string, 0, len(r.Environment))
+	for _, key := range sortedKeys(r.Environment) {
+		values = append(values, key+"="+r.Environment[key])
+	}
+	header("environment", values)
 	if len(r.Environment) == 0 {
 		line("  (empty)")
 	}
 	for _, key := range sortedKeys(r.Environment) {
-		line("  %s", ShellQuote([]string{key + "=" + r.Environment[key]}))
+		line("  %s", assignment(key, r.Environment[key]))
 	}
 	var declared []string
 	for _, d := range r.Declared {
@@ -173,9 +197,41 @@ func (r Recipe) Text() string {
 		}
 	}
 	line("declared           %s", orNone(declared))
-	line("command")
+	header("command", r.Command)
 	line("  %s", r.Shell)
+	if r.Engine != nil {
+		notes := []string{"podman takes the same arguments"}
+		if strings.Contains(r.EngineShell, checkoutPlaceholder) {
+			notes = append([]string{"set " + checkoutVariable + " to your checkout"}, notes...)
+		}
+		if len(r.Declared) > 0 {
+			notes = append(notes, "each declared name is passed from your environment")
+		}
+		if dollarQuoted(r.Engine) {
+			notes = append(notes, dollarShells)
+		}
+		line("engine line        %s", strings.Join(notes, "; "))
+		line("  %s", r.EngineShell)
+	}
 	return b.String()
+}
+
+// dollarShells names the shells that read a $'…' word, which an sh older than POSIX.1-2024 may not.
+const dollarShells = "run it in a shell reading $'…' (bash, zsh, ksh or a POSIX.1-2024 sh)"
+
+func dollarQuoted(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool { return printable.String(arg) != arg })
+}
+
+var shellName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// assignment writes a literal as a shell assignment where its name is one a shell assigns, else as
+// the one quoted word the engine line passes.
+func assignment(name, value string) string {
+	if shellName.MatchString(name) {
+		return name + "=" + quote(value)
+	}
+	return quote(name + "=" + value)
 }
 
 func orNone(list []string) string {
@@ -185,8 +241,8 @@ func orNone(list []string) string {
 	return strings.Join(list, ", ")
 }
 
-// ShellQuote writes arguments as one POSIX shell line, quoting an argument
-// only where a shell would split or expand it.
+// ShellQuote writes arguments as one POSIX shell line holding nothing a terminal acts on, quoting
+// an argument only where a shell would read it bare as other than itself.
 func ShellQuote(args []string) string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {
@@ -196,17 +252,46 @@ func ShellQuote(args []string) string {
 }
 
 func quote(arg string) string {
-	if arg != "" && strings.IndexFunc(arg, unsafe) == -1 {
+	switch {
+	case arg != "" && strings.IndexFunc(arg, unsafe) == -1:
 		return arg
+	case printable.String(arg) != arg:
+		return dollarQuote(arg)
 	}
 	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
-// unsafe reports a character a POSIX shell would split on or expand.
+var named = map[string]string{`\`: `\\`, `'`: `\'`, "\n": `\n`, "\t": `\t`, "\r": `\r`}
+
+// dollarQuote writes arg as a POSIX.1-2024 $'…' word, each byte printable escapes in three octal
+// digits, as \xHH followed by a hex digit is unspecified there.
+func dollarQuote(arg string) string {
+	var b strings.Builder
+	b.WriteString("$'")
+	for i := 0; i < len(arg); {
+		_, size := utf8.DecodeRuneInString(arg[i:])
+		character := arg[i : i+size]
+		switch escaped, ok := named[character]; {
+		case ok:
+			b.WriteString(escaped)
+		case printable.String(character) != character:
+			for _, c := range []byte(character) {
+				fmt.Fprintf(&b, `\%03o`, c)
+			}
+		default:
+			b.WriteString(character)
+		}
+		i += size
+	}
+	b.WriteString("'")
+	return b.String()
+}
+
+// unsafe reports a character that could make a shell read a bare word as other than itself.
 func unsafe(c rune) bool {
 	switch {
 	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
 		return false
 	}
-	return !strings.ContainsRune("_@%+=:,./-", c)
+	return !strings.ContainsRune("_@+:,./-", c)
 }

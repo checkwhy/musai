@@ -10,3 +10,8 @@ verify/internal/release/roles.json -text
 .musai/** -text
 # A committed key's bytes are what ssh-keygen reads and what it signs with.
 packages/scenarios/*/keys/** -text
+# Ajv's generated validators are compared byte for byte with what their generators write.
+packages/records/src/conditions/draft-07-meta.* -text
+packages/distribution/src/kernel-schemas.* -text
+# The verifier's tests read the release workflow's lines, on a Windows checkout too.
+.github/** text eol=lf

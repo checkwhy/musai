@@ -48,12 +48,24 @@ export interface OperationDescriptor<TInput = unknown, TOutput = unknown> {
   /** It works in what this machine keeps for its author, so no surface launched with a clearance
    * offers it. */
   readonly authorOnly?: boolean;
+  /** It makes the workspace it runs in, so a surface started where none stands offers it alone. */
+  readonly makesWorkspace?: boolean;
   readonly cli: CliProjection;
   renderText(output: TOutput): string;
   /** A failing report says so through its output, so an exit code stays a rendering concern. */
   exitCode(output: TOutput): number;
   handler(input: TInput, context: OperationContext): Promise<TOutput>;
 }
+
+/** Raised beneath every operation by a store, runner or fold and passed through as raised, so no
+ * operation need declare one. */
+export const KERNEL_LEVEL_REASONS: ReadonlySet<Reason> = new Set<Reason>([
+  "workspace-incomplete",
+  "tool-unavailable",
+  "undeclared-binary",
+  "record-corrupted",
+  "declaration-conflict",
+]);
 
 export class DuplicateOperationError extends Error {
   constructor(first: OperationDescriptor, second: OperationDescriptor) {

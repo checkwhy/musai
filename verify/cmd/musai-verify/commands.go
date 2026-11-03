@@ -200,7 +200,6 @@ func paint(w io.Writer, severity check.Severity, text string) string {
 
 // loaded is a source read and checked, for the commands that walk it.
 type loaded struct {
-	index  *check.Index
 	table  refs.Table
 	result check.Result
 	// signers are the trusted keys, which name a signer's alias.
@@ -216,16 +215,11 @@ func load(path string, flags sourceFlags) (*loaded, error) {
 	if err != nil {
 		return nil, err
 	}
-	tree, err := check.Load(src.Bundle)
-	if err != nil {
-		return nil, err
-	}
-	index, _ := check.Records(tree, table)
 	result, err := check.Run(src, table, trusted)
 	if err != nil {
 		return nil, err
 	}
-	return &loaded{index: index, table: table, result: result, signers: trusted.Signers()}, nil
+	return &loaded{table: table, result: result, signers: trusted.Signers()}, nil
 }
 
 func writeJSON(w io.Writer, value any) error {
@@ -252,11 +246,11 @@ func (c *traceCmd) Run(e *env) error {
 	if err != nil {
 		return err
 	}
-	id, err := trace.Resolve(l.index, c.ID)
+	id, err := trace.Resolve(l.result.Index, c.ID)
 	if err != nil {
 		return err
 	}
-	root, err := trace.Walk(l.index, l.table, id, trace.SignatureStates(l.result), l.signers)
+	root, err := trace.Walk(l.result.Index, l.table, id, trace.SignatureStates(l.result), l.signers)
 	if err != nil {
 		return err
 	}
@@ -282,11 +276,11 @@ func (c *recipeCmd) Run(e *env) error {
 	if err != nil {
 		return err
 	}
-	id, err := trace.Resolve(l.index, c.ID)
+	id, err := trace.Resolve(l.result.Index, c.ID)
 	if err != nil {
 		return err
 	}
-	recipe, err := trace.RecipeOf(l.index, id)
+	recipe, err := trace.RecipeOf(l.result.Index, id)
 	if err != nil {
 		return err
 	}

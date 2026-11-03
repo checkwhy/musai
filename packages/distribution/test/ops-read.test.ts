@@ -86,7 +86,7 @@ function claimRecord(id: string, evidence: ClaimRecord["evidence"]): ClaimRecord
   };
 }
 
-describe("the read operations, called directly through their own handlers", () => {
+describe("the read operations, run as the surfaces run them", () => {
   let workspace: string;
   let store: Store;
   const scope = "default";
@@ -107,7 +107,7 @@ describe("the read operations, called directly through their own handlers", () =
     const [runId] = await store.putMany([{ kind: "run", value: receiptRun("the receipt") }]);
     await store.putMany([{ kind: "claim", value: claimRecord("status-claim", [receiptEdge(runId!, "result")]) }]);
 
-    const output = await claimStatus.handler({ claim: slotOf("status-claim") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("status-claim") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
     expect(output.reason).toBeNull();
     expect(output.comparison.winner).toContain(runId!);
@@ -130,11 +130,11 @@ describe("the read operations, called directly through their own handlers", () =
     const corrected: ClaimRecord = { ...first, evidence: [receiptEdge(runId!, "result")], supersedes: [firstId!] };
     const [correctedId] = await store.putMany([{ kind: "claim", value: corrected }]);
 
-    await expect(claimStatus.handler({ claim: firstId! }, { workspace, scope, now })).rejects.toThrow(
+    await expect(runHandler(claimStatus, { claim: firstId! }, { workspace, scope, now })).rejects.toThrow(
       `superseded by ${correctedId} at slot ${slotOf("corrected-claim")}`,
     );
 
-    const output = await claimStatus.handler({ claim: slotOf("corrected-claim") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("corrected-claim") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
   });
 
@@ -166,19 +166,20 @@ describe("the read operations, called directly through their own handlers", () =
     };
     const [caseId] = await store.putMany([{ kind: "case", value: caseRecord }]);
 
-    const output = await caseSoundcheck.handler({ case: "ops-read-case" }, { workspace, scope, now });
+    const output = await runHandler(caseSoundcheck, { case: "ops-read-case" }, { workspace, scope, now });
     expect(output.claims).toEqual([
       { slot: slotOf("soundcheck-first"), label: "holds", reason: null },
       { slot: slotOf("soundcheck-second"), label: "holds", reason: null },
     ]);
-    expect(await caseSoundcheck.handler({ case: caseId! }, { workspace, scope, now })).toEqual(output);
+    expect(await runHandler(caseSoundcheck, { case: caseId! }, { workspace, scope, now })).toEqual(output);
   });
 
   test("claim.why walks a single-receipt claim down to its run", async () => {
     const [runId] = await store.putMany([{ kind: "run", value: receiptRun("the why receipt") }]);
     await store.putMany([{ kind: "claim", value: claimRecord("why-claim", [receiptEdge(runId!, "result")]) }]);
 
-    const { derivation } = await claimWhy.handler(
+    const { derivation } = await runHandler(
+      claimWhy,
       { claim: slotOf("why-claim"), full: true },
       { workspace, scope, now },
     );
@@ -193,7 +194,8 @@ describe("the read operations, called directly through their own handlers", () =
   test("claim.why reports the open-with-no-derivation shape for a claim with no evidence at all", async () => {
     await store.putMany([{ kind: "claim", value: claimRecord("no-evidence-claim", []) }]);
 
-    const output = await claimWhy.handler(
+    const output = await runHandler(
+      claimWhy,
       { claim: slotOf("no-evidence-claim"), full: true },
       { workspace, scope, now },
     );

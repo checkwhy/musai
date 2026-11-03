@@ -24,7 +24,8 @@ beside the code to keep them, and leave its `local/` directory ignored, as `init
 
 A claim is named by its sentence or by the short id `check` printed, and one sentence is one
 claim: checking it again by another command is refused unless `--replace` says so. `why --plan`
-answers from what already ran on the tree as it is now, running nothing. `status` exits 0 when the
+answers from the claim's last evaluation, running nothing; where the tree moved off it, even back
+to an earlier receipt, it reads stale until `status` or `check` reads it again. `status` exits 0 when the
 claim holds and 7 when it fails, is stale or is open, and `check` exits by the run it just made, so
 a CI step or a hook can gate on either; `musai doctor` prints every exit code.
 
@@ -41,7 +42,8 @@ a CI step or a hook can gate on either; `musai doctor` prints every exit code.
 
 The npm package is `checkwhy` and the command it installs is `musai`.
 `npm install --global checkwhy` needs Node 24 or later and git; an older Node is named and refused
-with exit code 6. The package carries everything it runs, and installs no dependency.
+with exit code 6. The package carries everything it runs but one: it installs esbuild, pinned
+exactly, which `musai lab module build` bundles a rule with.
 
 Before the first release reaches npm, build it from a clone, with pnpm:
 
@@ -87,7 +89,7 @@ A repository that commits `.musai/` gets one Check Run per push from the action 
 repository, in a job holding `checks: write`:
 
 ```yaml
-- uses: checkwhy/musai/action@v0.1.1
+- uses: checkwhy/musai/action@v0.1.3
 ```
 
 It re-checks each claim on the pushed commit, lists each with its `why`, and fails when one does
@@ -101,4 +103,5 @@ not hold.
 
 ## Licence
 
-Apache-2.0: see `LICENSE`.
+Apache-2.0: see `LICENSE`. The npm package and the verifier's release assets carry
+`THIRD_PARTY_NOTICES`, the licences of the code they bundle or compile in.

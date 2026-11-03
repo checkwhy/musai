@@ -1,9 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { recordId } from "@musai/records";
-import { scopeIndexPath, scopeVerificationCachePath } from "@musai/store";
-import { makeFixtureRepo } from "@musai/test-support";
+import { type Audience, rawId, recordId } from "@musai/records";
+import { readTrustBranch, scopeIndexPath, scopeVerificationCachePath, writeWhole } from "@musai/store";
+import { makeFixtureRepo, writeTrustFile } from "@musai/test-support";
 import { AttestationVerificationCache, type VerifyResult } from "@musai/trust";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { Workspace } from "../src/workspace.js";
@@ -30,45 +31,45 @@ describe("the attestation verification cache", () => {
 
   test("an id recorded under one signers digest is found again by a cache opened later over the same signers", async () => {
     const id = attestationId("verified good");
-    const cache = await AttestationVerificationCache.open(path, SIGNERS);
+    const cache = await AttestationVerificationCache.open(path, SIGNERS, writeWhole);
     expect(cache.has(id)).toBe(false);
 
     await cache.record(id, GOOD);
 
     expect(cache.has(id)).toBe(true);
-    expect((await AttestationVerificationCache.open(path, SIGNERS)).has(id)).toBe(true);
+    expect((await AttestationVerificationCache.open(path, SIGNERS, writeWhole)).has(id)).toBe(true);
   });
 
   test("the same id is not found once the signers file's bytes change, and returning to the old bytes does not bring it back", async () => {
     const id = attestationId("verified under the old signers");
-    await (await AttestationVerificationCache.open(path, SIGNERS)).record(id, GOOD);
+    await (await AttestationVerificationCache.open(path, SIGNERS, writeWhole)).record(id, GOOD);
 
-    const rotated = await AttestationVerificationCache.open(path, ROTATED_SIGNERS);
+    const rotated = await AttestationVerificationCache.open(path, ROTATED_SIGNERS, writeWhole);
     expect(rotated.has(id)).toBe(false);
 
     await rotated.record(attestationId("verified under the rotated signers"), GOOD);
-    expect((await AttestationVerificationCache.open(path, SIGNERS)).has(id)).toBe(false);
+    expect((await AttestationVerificationCache.open(path, SIGNERS, writeWhole)).has(id)).toBe(false);
   });
 
   test("a failed verification is not recorded, in memory or on disk", async () => {
     const id = attestationId("that failed to verify");
-    const cache = await AttestationVerificationCache.open(path, SIGNERS);
+    const cache = await AttestationVerificationCache.open(path, SIGNERS, writeWhole);
 
     await cache.record(id, FAILED);
 
     expect(cache.has(id)).toBe(false);
-    expect((await AttestationVerificationCache.open(path, SIGNERS)).has(id)).toBe(false);
+    expect((await AttestationVerificationCache.open(path, SIGNERS, writeWhole)).has(id)).toBe(false);
   });
 
   test("a file that does not parse as a cache is discarded rather than trusted or refused", async () => {
     await writeFile(path, '{"allowedSigners": "sha256:');
-    const cache = await AttestationVerificationCache.open(path, SIGNERS);
+    const cache = await AttestationVerificationCache.open(path, SIGNERS, writeWhole);
     expect(cache.has(attestationId("never recorded"))).toBe(false);
   });
 
   test("two caches recording at once over one file leave a whole file and nothing staged beside it", async () => {
-    const left = await AttestationVerificationCache.open(path, SIGNERS);
-    const right = await AttestationVerificationCache.open(path, SIGNERS);
+    const left = await AttestationVerificationCache.open(path, SIGNERS, writeWhole);
+    const right = await AttestationVerificationCache.open(path, SIGNERS, writeWhole);
     const ids = Array.from({ length: 24 }, (_, index) => attestationId(`recorded concurrently ${index}`));
 
     await Promise.all(ids.map((id, index) => (index % 2 === 0 ? left : right).record(id, GOOD)));
@@ -91,17 +92,40 @@ describe("a workspace's attestation verification cache", () => {
   test("sits in the scope's own local directory beside its index, and is not the index", async () => {
     const repo = await makeFixtureRepo("verification-cache-home");
     cleanup = repo.cleanup;
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
     const id = attestationId("recorded through a workspace");
 
     await opened.attestationVerification.record(id, GOOD);
 
-    const cachePath = scopeVerificationCachePath(repo.ctx.gitDir, repo.scope);
+    const signers = rawId(new TextEncoder().encode((await readTrustBranch(repo.ctx)).allowedSigners));
+    const cachePath = scopeVerificationCachePath(repo.ctx.gitDir, repo.scope, signers);
     const indexPath = scopeIndexPath(repo.ctx.gitDir, repo.scope);
     expect((await stat(cachePath)).isFile()).toBe(true);
     expect(dirname(cachePath)).toBe(dirname(indexPath));
     expect(cachePath).not.toBe(indexPath);
-    const reopened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    using reopened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
     expect(reopened.attestationVerification.has(id)).toBe(true);
+  });
+
+  test("what verified under one signers file and what verified under the next stand beside each other", async () => {
+    const repo = await makeFixtureRepo("verification-cache-rotated");
+    cleanup = repo.cleanup;
+    using author = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    await writeTrustFile(repo.ctx, "allowed-signers", "# rotated\n");
+    const adopted = await author.atTrustTip("public" as Audience);
+    const before = attestationId("verified under the signers the workspace opened at");
+    const after = attestationId("verified under the signers at the trust tip");
+
+    await author.attestationVerification.record(before, GOOD);
+    await adopted.attestationVerification.record(after, GOOD);
+    await author.attestationVerification.record(attestationId("verified again at the open"), GOOD);
+
+    using atTip = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    spawnSync("git", ["--git-dir", repo.ctx.gitDir, "update-ref", "refs/heads/main", author.matrix.commit]);
+    using atOpen = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    expect([atTip.attestationVerification.has(after), atOpen.attestationVerification.has(before)]).toEqual([
+      true,
+      true,
+    ]);
   });
 });

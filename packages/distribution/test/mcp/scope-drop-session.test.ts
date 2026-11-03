@@ -40,7 +40,8 @@ beforeEach(async () => {
   workspace = await mkdtemp(join(tmpdir(), "musai-mcp-scope-drop-"));
   await initWorkspace(workspace, { now });
   owner = { workspace, scope: "default", now, via: "tty", principalName: "a-person", mode: "perform" };
-  await (await openWorkspace(owner)).put([{ kind: "claim", value: claimDraft("held") }]);
+  using opened = await openWorkspace(owner);
+  await opened.put([{ kind: "claim", value: claimDraft("held") }]);
 });
 
 afterEach(async () => {
@@ -92,6 +93,8 @@ test("a session on a scope dropped under it answers a refusal naming the drop un
     }
     for (const read of [
       () => client.listTools(),
+      () => client.listResources(),
+      () => client.listResourceTemplates(),
       () => client.listPrompts(),
       () => client.readResource({ uri: "case://anything" }),
       () => client.getPrompt({ name: "anything" }),
@@ -147,6 +150,26 @@ test("a session on a scope that holds no ref yet is not refused as dropped", asy
     for (let call = 0; call < 2; call += 1) {
       expect(((await client.callTool({ name: "key_list", arguments: {} })) as CallToolResult).isError).not.toBe(true);
     }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("a workspace made again before the session's first log entry still gets a fresh session state", async () => {
+  await fork();
+  const server = createMcpServer(MUSAI_MCP, { workspace, scope: SANDBOX, now }, { lab: true });
+  const client = new Client({ name: "scope-drop-remade", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await client.listPrompts();
+
+    await rm(join(workspace, MUSAI_DIR), { recursive: true, force: true });
+    await initWorkspace(workspace, { now });
+
+    await expect(client.listPrompts()).resolves.toEqual({ prompts: [] });
   } finally {
     await client.close();
     await server.close();

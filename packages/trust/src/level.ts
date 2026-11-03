@@ -1,5 +1,5 @@
 import type { PrincipalClass } from "@musai/records";
-import { ANY_SCOPE, KernelError } from "@musai/records";
+import { ANY_SCOPE, KernelError, TrustFileError } from "@musai/records";
 import type { WorkspaceConfig } from "@musai/store";
 import { may, type RoleMatrix } from "./authority.js";
 
@@ -47,7 +47,8 @@ export function signingLevelOf(config: WorkspaceConfig): SigningLevel {
     return "off";
   }
   if (!isSigningLevel(declared)) {
-    throw new RangeError(
+    throw TrustFileError.atKey(
+      SIGNING_LEVEL_CONFIG_KEY,
       `refusing to read the signing level from ${SIGNING_LEVEL_CONFIG_KEY} at ${config.commit}: expected one of ${SIGNING_LEVELS.join(", ")}, got ${JSON.stringify(declared)}`,
     );
   }

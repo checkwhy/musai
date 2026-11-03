@@ -1,6 +1,9 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { type CallToolResult, ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   DECLARATIVE_RULE,
   type JsonSchema,
@@ -10,31 +13,35 @@ import {
   validateAgainstSchema,
   validateOperationOutput,
 } from "@musai/api-core";
+import { createMcpServer } from "@musai/mcp";
 import {
   type ClaimRecord,
   CURRENT_SCHEMA_VERSIONS,
   canonicalBytes,
   idFromPath,
   type KernelError,
+  type PerformedRunRecord,
   type RecordId,
   type RecordKind,
   recordId,
   recordPath,
 } from "@musai/records";
+import { commandLine } from "@musai/run";
 import { type Checkout, fixedClock, generateTestKey, makeCheckout, type TestKey } from "@musai/test-support";
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { tarGz } from "../src/export/tar.js";
 import { untarGz } from "../src/export/untar.js";
+import { MUSAI_MCP } from "../src/mcp/extension.js";
 import { RERUN_CONFIRMATION_TOOL, rerunWithConfirmation } from "../src/mcp/rerun-tool.js";
 import { REGISTRY } from "../src/musai.js";
 import { checkRun } from "../src/ops/check.js";
 import { bundleExport } from "../src/ops/export.js";
 import { bundleRerun } from "../src/ops/rerun.js";
 import { workspaceInit } from "../src/ops/workspace.js";
-import { commandText } from "../src/text.js";
 
 const scope = "default";
 const now = fixedClock("2026-10-05T00:00:00.000Z");
+const IMAGE_DIGEST = "3f".repeat(32);
 const TRACKED_IS_HELLO = ["node", "-e", "process.exit(require('fs').readFileSync('tracked.txt','utf8')==='hello'?0:1)"];
 
 /** An interpreter condition naming one recipe, given as raw JSON text, judged by its exit code. */
@@ -83,14 +90,19 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     return { dir: made.dir, context: { workspace: made.dir, scope, now, principalName: key.name, via: "signature" } };
   }
 
-  /** A sender's checked claim exported to the public, written where a receiver can read it. */
-  async function exported(name: string, to = "public", command = TRACKED_IS_HELLO): Promise<string> {
+  /** A sender's checked claim exported, with the sender and where its bundle is written. */
+  async function sent(name: string, to = "public", command = TRACKED_IS_HELLO) {
     const sender = await checkout();
     await runHandler(workspaceInit, { workspace: sender.dir, key: key.keyPath }, sender.context);
     const checked = await runHandler(checkRun, { statement: "the tracked file says hello", command }, sender.context);
     const out = join(scratch, `${name}.tar.gz`);
     await runHandler(bundleExport, { id: checked.claim, to, out, key: key.keyPath }, sender.context);
-    return out;
+    return { sender, claim: checked.claim as RecordId, out };
+  }
+
+  /** A sender's checked claim exported to the public, written where a receiver can read it. */
+  async function exported(name: string, to = "public", command = TRACKED_IS_HELLO): Promise<string> {
+    return (await sent(name, to, command)).out;
   }
 
   /** Lands `value` in the workspace `context` names, the kernel minting its id. */
@@ -107,19 +119,12 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
   /** A sender's checked claim succeeded at its slot by one whose interpreter condition holds
    * `parameters`, and the files of the checked claim's bundle with that successor beside them. */
   async function unreadable(name: string, parameters: string) {
-    const sender = await checkout();
-    await runHandler(workspaceInit, { workspace: sender.dir, key: key.keyPath }, sender.context);
-    const statement = "the tracked file says hello";
-    const checked = await runHandler(checkRun, { statement, command: TRACKED_IS_HELLO }, sender.context);
-    const out = join(scratch, `${name}.tar.gz`);
-    await runHandler(bundleExport, { id: checked.claim, to: "public", out, key: key.keyPath }, sender.context);
+    const { sender, claim: checked, out } = await sent(name);
     const opened = await openWorkspace(sender.context);
     try {
-      const claim = opened.read(checked.claim as RecordId) as ClaimRecord;
+      const claim = opened.read(checked) as ClaimRecord;
       const conditions = { ...claim.conditions, [DECLARATIVE_RULE]: parameters };
-      const [successor] = await opened.put([
-        { kind: "claim", value: { ...claim, conditions, supersedes: [checked.claim] } },
-      ]);
+      const [successor] = await opened.put([{ kind: "claim", value: { ...claim, conditions, supersedes: [checked] } }]);
       const files = untarGz(new Uint8Array(await readFile(out)));
       files.set(recordPath("claim", successor!), await opened.store.readBytes(successor!, "claim"));
       return { sender, claim, successor: successor!, files };
@@ -245,6 +250,105 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     expect(same).toContain("the tree the receipt read");
     expect(moved).toContain("another tree than the receipt read");
     expect(moved).toContain("output differs, which a check does not judge");
+  }, 180_000);
+
+  /** A checked claim's bundle carrying a successor judged by a container recipe's exit code, and a
+   * receipt of that recipe whose run was held as `held`, its image resolved to `IMAGE_DIGEST`. */
+  async function inContainer(name: string, held: "container" | "hygiene", command = ["sh", "-c", 'echo "$HOME"']) {
+    const { sender, claim: checked, out } = await sent(name);
+    const files = untarGz(new Uint8Array(await readFile(out)));
+    const receipt = [...files]
+      .filter(([path]) => path.startsWith("records/run/"))
+      .map(([, bytes]) => JSON.parse(new TextDecoder().decode(bytes)) as PerformedRunRecord)
+      .find((run) => run.runKind === "run")!;
+    const image = { uri: "example/image:v2", mediaType: "application/vnd.oci.image.manifest.v1+json" };
+    const recipe = {
+      ...receipt.recipe,
+      command,
+      substrates: [...receipt.recipe.substrates, { ...image, digest: {} }],
+      isolation: "container" as const,
+    };
+    const observation = {
+      ...receipt.observation,
+      resolved: [...receipt.observation.resolved, { ...image, digest: { sha256: IMAGE_DIGEST } }],
+      isolationHeld: held,
+    };
+    const opened = await openWorkspace(sender.context);
+    try {
+      const [run] = await opened.put([{ kind: "run", value: { ...receipt, recipe, observation } }]);
+      const claim = opened.read(checked) as ClaimRecord;
+      const conditions = { ...claim.conditions, [DECLARATIVE_RULE]: namingRecipe(JSON.stringify(recipe)) };
+      const [successor] = await opened.put([{ kind: "claim", value: { ...claim, conditions, supersedes: [checked] } }]);
+      const carrying = new Map(files)
+        .set(recordPath("run", run!), await opened.store.readBytes(run!, "run"))
+        .set(recordPath("claim", successor!), await opened.store.readBytes(successor!, "claim"));
+      return { run: run!, bundle: await written(`${name}-carrying`, carrying) };
+    } finally {
+      opened.close();
+    }
+  }
+
+  test("refuses a recipe declaring an image, naming the engine line its receipt's run took", async () => {
+    const { run, bundle } = await inContainer("in-container", "container");
+    const receiver = await checkout();
+
+    const refusal = await refusalOf(runHandler(bundleRerun, { bundle }, receiver.context));
+
+    expect(refusal).toMatchObject({ reason: "invalid-input", about: [run] });
+    expect(refusal.message).toContain(
+      `refusing to rerun ${run}: its recipe declares a container image, which rerun does not run; ` +
+        `the engine line its run took runs it by hand: docker run --rm --network none ` +
+        `-v "\${MUSAI_CHECKOUT:?set it to your checkout}":/musai/tree:ro -v "$(mktemp -d)":/musai/scratch:rw `,
+    );
+    expect(refusal.message).toMatch(
+      new RegExp(` --entrypoint sh example/image@sha256:${IMAGE_DIGEST} -c 'echo "\\$HOME"'$`),
+    );
+  }, 180_000);
+
+  test("names an engine line whose argument holds a control character as a $'…' word, and the shells reading it", async () => {
+    const { bundle } = await inContainer("escaped-argument", "container", ["printf", "a\u001bb"]);
+    const receiver = await checkout();
+
+    const { message } = await refusalOf(runHandler(bundleRerun, { bundle }, receiver.context));
+
+    expect(message).toContain(
+      "runs it by hand, in a shell reading $'…' (bash, zsh, ksh or a POSIX.1-2024 sh): docker run ",
+    );
+    expect(message).toMatch(/ --entrypoint printf example\/image@sha256:[0-9a-f]{64} \$'a\\033b'$/);
+  }, 180_000);
+
+  test("refuses a recipe declaring an image its run held under hygiene, naming no engine line", async () => {
+    const { run, bundle } = await inContainer("under-hygiene", "hygiene");
+    const receiver = await checkout();
+
+    expect(await refusalOf(runHandler(bundleRerun, { bundle }, receiver.context))).toEqual({
+      reason: "invalid-input",
+      about: [run],
+      message: `refusing to rerun ${run}: its recipe declares a container image, which rerun does not run`,
+    });
+  }, 180_000);
+
+  test("prints a bundle's statement with its control and bidirectional characters escaped", async () => {
+    const { sender, claim: checked, out } = await sent("escaped-statement");
+    const files = untarGz(new Uint8Array(await readFile(out)));
+    const opened = await openWorkspace(sender.context);
+    try {
+      const claim = opened.read(checked) as ClaimRecord;
+      const rendering = "the tracked file says hello\u001b[2J\u202eolleh";
+      const [successor] = await opened.put([{ kind: "claim", value: { ...claim, rendering, supersedes: [checked] } }]);
+      files.set(recordPath("claim", successor!), await opened.store.readBytes(successor!, "claim"));
+    } finally {
+      opened.close();
+    }
+    const receiver = await checkout();
+
+    const text = bundleRerun.renderText(
+      await runHandler(bundleRerun, { bundle: await written("escaped-statement-carrying", files) }, receiver.context),
+    );
+
+    expect(text).toContain("the tracked file says hello\\u001b[2J\\u202eolleh (");
+    expect(text).not.toContain("\u001b");
+    expect(text).not.toContain("\u202e");
   }, 180_000);
 
   test("without --yes it shows each recipe and the tree it would read, and runs nothing", async () => {
@@ -435,6 +539,30 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     });
   }, 180_000);
 
+  test("refuses a bundle as a tool fault, not as corrupted, where its signatures cannot be verified", async () => {
+    const bundle = await exported("verifier-faults");
+    const receiver = await checkout();
+    const bin = await mkdtemp(join(tmpdir(), "musai-faulting-ssh-keygen-"));
+    const path = process.env["PATH"] ?? "";
+    // Only a verification faults, so whatever else the receiver runs through ssh-keygen still runs.
+    await writeFile(
+      join(bin, "ssh-keygen"),
+      `#!/bin/sh\n[ "$2 $3" = "-Y verify" ] && exit 255\n` +
+        `PATH='${path.replaceAll("'", "'\\''")}' exec ssh-keygen "$@"\n`,
+    );
+    await chmod(join(bin, "ssh-keygen"), 0o755);
+    vi.stubEnv("PATH", `${bin}${delimiter}${path}`);
+
+    try {
+      expect(await refusalOf(runHandler(bundleRerun, { bundle }, receiver.context))).toMatchObject({
+        reason: "tool-unavailable",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(bin, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   test("refuses a bundle whose manifest names an audience nothing released stands for", async () => {
     const bundle = await exported("unreleased", "peer");
     const files = untarGz(new Uint8Array(await readFile(bundle)));
@@ -485,7 +613,7 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     const result = await rerunWithConfirmation(REGISTRY, server, receiver.context, { bundle, yes: true });
 
     expect(server.elicitInput).toHaveBeenCalledOnce();
-    expect(server.elicitInput.mock.calls[0]![0].message).toContain(`- ${commandText(TRACKED_IS_HELLO)}`);
+    expect(server.elicitInput.mock.calls[0]![0].message).toContain(`- ${commandLine(TRACKED_IS_HELLO)}`);
     expect((result.structuredContent as { performed: boolean }).performed).toBe(true);
   }, 180_000);
 
@@ -528,6 +656,33 @@ describe("rerun: a stranger's bundle checked, shown, and performed here only whe
     const result = await rerunWithConfirmation(REGISTRY, server, receiver.context, { bundle, yes: true });
 
     expect(result.structuredContent).toMatchObject({ performed: false, confirmation: "keep" });
+  }, 180_000);
+
+  test("over MCP outside lab, a declined confirmation answers within the output schema bundle_rerun lists", async () => {
+    const bundle = await exported("mcp-listed");
+    const receiver = await checkout();
+    await runHandler(workspaceInit, { workspace: receiver.dir }, receiver.context);
+    const server = createMcpServer(MUSAI_MCP, receiver.context, { lab: false });
+    const client = new Client({ name: "rerun-client", version: "1.0.0" }, { capabilities: { elicitation: {} } });
+    client.setRequestHandler(ElicitRequestSchema, () => ({ action: "decline" }));
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const { tools } = await client.listTools();
+      const result = (await client.callTool({
+        name: "bundle_rerun",
+        arguments: { bundle, yes: true },
+      })) as CallToolResult;
+      const listed = tools.find((tool) => tool.name === "bundle_rerun");
+
+      expect(listed).toEqual(RERUN_CONFIRMATION_TOOL);
+      expect(result.structuredContent).toMatchObject({ performed: false, confirmation: "decline" });
+      expect(validateAgainstSchema(listed!.outputSchema as JsonSchema, result.structuredContent)).toEqual({ ok: true });
+    } finally {
+      await client.close();
+      await server.close();
+    }
   }, 180_000);
 
   test("over MCP without yes, nothing is asked and nothing runs", async () => {

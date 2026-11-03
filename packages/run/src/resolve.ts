@@ -1,8 +1,7 @@
 import type { IndexDb } from "@musai/fold";
-import type { DigestSet, PerformedRunRecord, ResourceDescriptor, RunRecipe } from "@musai/records";
+import type { DigestSet, PerformedRunRecord, ResourceDescriptor } from "@musai/records";
 import {
   type Clock,
-  CURRENT_SCHEMA_VERSIONS,
   citationRecipeFor,
   type FetchRecipe,
   instantOf,
@@ -10,16 +9,13 @@ import {
   type RecordId,
   recordId,
   type Timestamp,
-  textOf,
 } from "@musai/records";
 import type { RecordWriter } from "@musai/store";
 import type { LayerDeclaration } from "./bindings.js";
 import { type FetchStore, performFetch } from "./fetch.js";
-import { RUNNER_PERFORMER } from "./performer.js";
-import { performRecipe } from "./spawn.js";
 import { resolveSubstrates, substrateReadId } from "./substrate.js";
 
-/** A moving reference with no method to resolve it, refused by name rather than answered empty. */
+/** A resolution whose fetch yields no digest, refused by name rather than answered empty. */
 export class ResolutionRefusedError extends KernelError {
   constructor(message: string) {
     super({ reason: "invalid-input", detail: message });
@@ -27,16 +23,10 @@ export class ResolutionRefusedError extends KernelError {
   }
 }
 
-/** A run whose trimmed output is the resolved digest's hex, or a fetch whose body's content
- * digest is the resolution. */
-export type ResolutionMethod =
-  | { readonly kind: "run"; readonly recipe: RunRecipe }
-  | { readonly kind: "fetch"; readonly recipe: FetchRecipe };
-
-/** A fetch method's id is taken over its `citationRecipeFor` form, as `needId` does, so a
- * resolution and a need naming one fetch share a receipt. */
-function resolutionRecipeId(method: ResolutionMethod): RecordId {
-  return method.kind === "run" ? recordId(method.recipe) : recordId(citationRecipeFor(method.recipe));
+/** Taken over the fetch's `citationRecipeFor` form, as `needId` does, so a resolution and a need
+ * naming one fetch share a receipt. */
+function resolutionRecipeId(fetch: FetchRecipe): RecordId {
+  return recordId(citationRecipeFor(fetch));
 }
 
 /** A reference as a recipe declared it: a locator, possibly already carrying a digest. */
@@ -54,13 +44,13 @@ export type ResolutionTable = Map<string, Promise<CachedResolution>>;
 export interface ResolveReferenceOptions {
   readonly index: IndexDb;
   readonly store: RecordWriter;
-  /** Required only when the reference is not resolvable from local bytes alone. */
-  readonly method?: ResolutionMethod;
+  /** The fetch whose body's content digest resolves a reference local bytes cannot. */
+  readonly fetch: FetchRecipe;
   /** How old a reused receipt may be; unbounded when unset. */
   readonly ageLimitMs?: number;
   readonly localDir?: string;
   readonly layerDeclarations?: ReadonlyMap<string, LayerDeclaration>;
-  /** Where a fetch method's body over the blob threshold is written, and its configuration. */
+  /** Where a fetched body over the blob threshold is written, and its configuration. */
   readonly fetchStore?: FetchStore;
   readonly now: Clock;
 }
@@ -83,18 +73,6 @@ function locallyResolvable(descriptor: ResourceDescriptor): boolean {
   return hasDigest(descriptor) || (descriptor.uri?.startsWith("file://") ?? false);
 }
 
-const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-
-function digestFromRunOutput(reference: string, output: string): DigestSet {
-  const trimmed = output.trim();
-  if (!HEX_DIGEST_PATTERN.test(trimmed)) {
-    throw new ResolutionRefusedError(
-      `refusing to resolve ${reference}: its run's output was not a bare sha256 hex digest`,
-    );
-  }
-  return { sha256: trimmed };
-}
-
 function digestFromFetchObservation(reference: string, record: PerformedRunRecord): DigestSet {
   const digest = record.observation.resolved[0]?.digest;
   if (digest === undefined || Object.keys(digest).length === 0) {
@@ -109,33 +87,12 @@ function withinAge(startedAt: Timestamp, ageLimitMs: number, now: Clock): boolea
 
 async function performResolution(
   reference: string,
-  method: ResolutionMethod,
+  fetch: FetchRecipe,
   options: ResolveReferenceOptions,
   now: Clock,
 ): Promise<{ readonly record: PerformedRunRecord; readonly digest: DigestSet }> {
-  if (method.kind === "run") {
-    const { recipe, observation } = await performRecipe(method.recipe, {
-      now,
-      localDir: options.localDir,
-      layerDeclarations: options.layerDeclarations,
-    });
-    const record: PerformedRunRecord = {
-      kind: "run",
-      schemaVersion: CURRENT_SCHEMA_VERSIONS.run,
-      runKind: "run",
-      performer: RUNNER_PERFORMER,
-      determinism: "nondeterministic",
-      recipe,
-      observation,
-      supersedes: [],
-    };
-    return {
-      record,
-      digest: digestFromRunOutput(reference, textOf(observation.output, `the output resolving ${reference}`)),
-    };
-  }
   const { record } = await performFetch(
-    method.recipe,
+    fetch,
     { localDir: options.localDir, layerDeclarations: options.layerDeclarations },
     options.fetchStore ?? {},
     { now },
@@ -148,7 +105,7 @@ async function resolveOnce(
   recipeId: RecordId,
   declared: ResourceDescriptor,
   referenceLabel: string,
-  method: ResolutionMethod,
+  fetch: FetchRecipe,
   options: ResolveReferenceOptions,
 ): Promise<CachedResolution> {
   const now = options.now;
@@ -156,14 +113,8 @@ async function resolveOnce(
 
   const existing = options.index.receiptByRecipe(recipeId);
   if (existing !== undefined && withinAge(existing.startedAt, ageLimitMs, now)) {
-    const storedDigest =
-      method.kind === "run"
-        ? digestFromRunOutput(
-            referenceLabel,
-            textOf(existing.record.observation.output, `the output resolving ${referenceLabel}`),
-          )
-        : // A resolution's recipe is performed, so the receipt answering it is.
-          digestFromFetchObservation(referenceLabel, existing.record as PerformedRunRecord);
+    // A resolution's recipe is performed, so the receipt answering it is.
+    const storedDigest = digestFromFetchObservation(referenceLabel, existing.record as PerformedRunRecord);
     return {
       descriptor: {
         ...declared,
@@ -174,7 +125,7 @@ async function resolveOnce(
     };
   }
 
-  const { record, digest } = await performResolution(referenceLabel, method, options, now);
+  const { record, digest } = await performResolution(referenceLabel, fetch, options, now);
   const resolutionReceipt = await options.store.put("run", record);
   return {
     descriptor: {
@@ -208,18 +159,13 @@ export async function resolveReference(
     return { descriptor: resolved!, resolutionReceipt: null, reads };
   }
 
-  if (options.method === undefined) {
-    throw new ResolutionRefusedError(
-      `refusing to resolve ${referenceLabel}: it names a moving reference, and no resolver was supplied for it`,
-    );
-  }
-  const method = options.method;
-  const recipeId = resolutionRecipeId(method);
+  const fetch = options.fetch;
+  const recipeId = resolutionRecipeId(fetch);
 
   // Set synchronously after the lookup, so racing calls for one recipe id share this promise.
   let pending = table.get(recipeId);
   if (pending === undefined) {
-    pending = resolveOnce(recipeId, declared, referenceLabel, method, options);
+    pending = resolveOnce(recipeId, declared, referenceLabel, fetch, options);
     table.set(recipeId, pending);
   }
   const cached = await pending;

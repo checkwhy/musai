@@ -67,6 +67,10 @@ export interface RecordStore {
   /** Whether `to` is `from` or reaches it through its parents. */
   descends(from: string, to: string): Promise<boolean>;
 
-  /** Every commit after `cursor`, oldest first, each diffed against its parent, unfiltered. */
-  changesSince(cursor: string | null): AsyncIterable<CommitChanges>;
+  /** Whether the repository holds `commit`, which a prune of history it left takes away. */
+  holdsCommit(commit: string): Promise<boolean>;
+
+  /** Every commit after `cursor` through `tip`, oldest first, each diffed against its parent,
+   * unfiltered. */
+  changesSince(cursor: string | null, tip: string): AsyncIterable<CommitChanges>;
 }

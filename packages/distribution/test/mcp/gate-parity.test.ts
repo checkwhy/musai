@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { isOperationError, type OperationError, runHandler } from "@musai/api-core";
-import { callTool, createMcpServer, toolsFromRegistry } from "@musai/mcp";
+import { callTool, createMcpServer, operationProjections } from "@musai/mcp";
 import {
   type CaseRecord,
   type ClaimRecord,
@@ -163,7 +163,7 @@ describe("gate.answer mints the same ruling whichever surface asks, attested und
   });
 
   test("ruling_make's advertised inputSchema carries supersedes as an array of strings", () => {
-    const tool = toolsFromRegistry(REGISTRY).find((candidate) => candidate.name === "ruling_make")!;
+    const { tool } = operationProjections(REGISTRY).get("ruling_make")!;
     const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
     expect(properties["supersedes"]).toEqual({ type: "array", items: { type: "string" }, uniqueItems: true });
   });

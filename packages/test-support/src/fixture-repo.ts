@@ -21,6 +21,8 @@ export interface FixtureRepo {
   claimTypes: ClaimTypes;
   /** Dates every commit the fixture's helpers mint, and any store a test builds over it. */
   now: Clock;
+  /** Disposed by `cleanup` ahead of the directory, since an open index holds its file. */
+  keep<T extends Disposable>(resource: T): T;
   cleanup(): Promise<void>;
 }
 
@@ -41,13 +43,16 @@ export async function makeFixtureRepo(
     await declareClaimTypes(store, declarations);
   }
 
+  const kept = new DisposableStack();
   return {
     workspace,
     ctx,
     scope,
     claimTypes,
     now,
+    keep: (resource) => kept.use(resource),
     async cleanup() {
+      kept.dispose();
       await rm(workspace, { recursive: true, force: true });
     },
   };

@@ -371,7 +371,7 @@ describe("the subscription dispatcher: one event, every registered subscription 
   test("two subscriptions for one event both naming one recipe cause exactly one spawn", async () => {
     repo = await makeFixtureRepo("envelope-dispatch-shared");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const scratchDir = await mkdtemp(join(tmpdir(), "musai-envelope-"));
     const counterFile = join(scratchDir, "counter");
     await writeFile(counterFile, "");
@@ -397,7 +397,7 @@ describe("the subscription dispatcher: one event, every registered subscription 
   test("the same event fired twice in one evaluation causes no second run for a recipe already satisfied", async () => {
     repo = await makeFixtureRepo("envelope-dispatch-twice");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const scratchDir = await mkdtemp(join(tmpdir(), "musai-envelope-"));
     const counterFile = join(scratchDir, "counter");
     await writeFile(counterFile, "");
@@ -437,7 +437,6 @@ describe("the kernel's own contribution points, resolved by name from a fixed ta
     "template",
     "subscription",
     "requirement",
-    "view",
     "kind",
     "operation",
     "point",
@@ -448,7 +447,7 @@ describe("the kernel's own contribution points, resolved by name from a fixed ta
     "expectation",
   ] as const;
 
-  test("every one of the sixteen names resolves to a point carrying both operands and a role from the closed pair", () => {
+  test("every one of the fifteen names resolves to a point carrying both operands and a role from the closed pair", () => {
     for (const name of KERNEL_POINT_NAMES) {
       const point = kernelPoint(name);
       expect(point?.name).toBe(name);
@@ -468,7 +467,7 @@ describe("the kernel's own contribution points, resolved by name from a fixed ta
     const dataNames = KERNEL_POINT_NAMES.filter((name) => kernelPoint(name)?.role === "data").sort();
     const invokeNames = KERNEL_POINT_NAMES.filter((name) => kernelPoint(name)?.role === "invoke").sort();
     expect(dataNames).toEqual(["claim-type", "dimension", "point", "preset", "query", "requirement", "slot"].sort());
-    expect(invokeNames).toHaveLength(9);
+    expect(invokeNames).toHaveLength(8);
     expect(dataNames.length + invokeNames.length).toBe(KERNEL_POINT_NAMES.length);
   });
 

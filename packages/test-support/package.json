@@ -6,6 +6,7 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
+    "./index-guard": "./src/index-guard.ts",
     "./ts-esm": "./src/ts-esm.mjs",
     "./workspace-sources": "./src/workspace-sources.mjs"
   },

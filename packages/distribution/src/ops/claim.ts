@@ -1,9 +1,10 @@
 import type { OperationDescriptor, Workspace } from "@musai/api-core";
 import { openWorkspace } from "@musai/api-core";
 import { exitCodeForLabel, versionString } from "@musai/records";
+import { commandLine } from "@musai/run";
 import { decidingRun, type LabelledClaim, labelledClaim } from "../claim.js";
 import { shortIdOf } from "../claim-ref.js";
-import { commandText, markOf } from "../text.js";
+import { markOf } from "../text.js";
 
 export interface ClaimStatusInput {
   readonly claim: string;
@@ -27,14 +28,15 @@ export interface ClaimStatusOutput {
     readonly via: string;
     readonly corroborated: readonly string[];
   };
-  /** Why the claim reads open, when its gate or its own check said why. */
+  /** Why the claim reads open, when its gate or its own check said why, or which sibling's
+   * unrun check the ruling deciding it waits on. */
   readonly detail?: string;
   readonly decidedOnStaleEvidence?: true;
 }
 
 function decidingRecordText(decidedBy: DecidingRecord): string {
   if (decidedBy.kind === "run") {
-    return `run ${shortIdOf(decidedBy.id)} · ${commandText(decidedBy.command)}`;
+    return `run ${shortIdOf(decidedBy.id)} · ${commandLine(decidedBy.command)}`;
   }
   return decidedBy.kind === "floor" ? "the workspace's floor" : `ruling ${shortIdOf(decidedBy.id)}`;
 }
@@ -50,7 +52,7 @@ function renderClaimStatusText(output: ClaimStatusOutput): string {
 }
 
 /** An open claim names none: nothing decided it, whatever its comparison would have chosen. */
-async function decidingRecordOf(opened: Workspace, labelled: LabelledClaim): Promise<DecidingRecord | null> {
+function decidingRecordOf(opened: Workspace, labelled: LabelledClaim): DecidingRecord | null {
   if (labelled.status.label === "open") {
     return null;
   }
@@ -61,7 +63,7 @@ async function decidingRecordOf(opened: Workspace, labelled: LabelledClaim): Pro
   if (winner === opened.floor?.id) {
     return { kind: "floor", id: winner };
   }
-  const run = await decidingRun(opened, labelled);
+  const run = decidingRun(labelled);
   return run === null ? null : { kind: "run", id: run.id, command: run.record.recipe.command };
 }
 
@@ -142,7 +144,7 @@ export const claimStatus: OperationDescriptor<ClaimStatusInput, ClaimStatusOutpu
       label: status.label,
       reason: status.label === "open" ? status.reason : null,
       short: shortIdOf(labelled.indexed.slot),
-      decidedBy: await decidingRecordOf(opened, labelled),
+      decidedBy: decidingRecordOf(opened, labelled),
       comparison: status.comparison,
       ...(detail !== undefined ? { detail } : {}),
       ...(status.label !== "open" && status.decidedOnStaleEvidence ? { decidedOnStaleEvidence: true } : {}),

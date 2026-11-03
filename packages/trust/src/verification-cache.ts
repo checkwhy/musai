@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { type RecordId, rawId } from "@musai/records";
 import type { VerifyResult } from "./verify.js";
 
@@ -8,6 +7,9 @@ interface StoredVerification {
   readonly allowedSigners: RecordId;
   readonly verified: readonly RecordId[];
 }
+
+/** Writes a file whole, so two processes recording at once leave one file, never a mix. */
+type WholeWriter = (path: string, text: string) => Promise<void>;
 
 /** The ids stored under this digest; a file written under any other digest yields none. */
 async function verifiedUnder(path: string, allowedSigners: RecordId): Promise<Set<RecordId>> {
@@ -38,17 +40,23 @@ export class AttestationVerificationCache {
   private readonly path: string;
   private readonly allowedSigners: RecordId;
   private readonly verified: Set<RecordId>;
+  private readonly writeWhole: WholeWriter;
 
-  private constructor(path: string, allowedSigners: RecordId, verified: Set<RecordId>) {
+  private constructor(path: string, allowedSigners: RecordId, verified: Set<RecordId>, writeWhole: WholeWriter) {
     this.path = path;
     this.allowedSigners = allowedSigners;
     this.verified = verified;
+    this.writeWhole = writeWhole;
   }
 
   /** Opens the cache at `path` under these allowed-signers bytes; the file need not exist. */
-  static async open(path: string, allowedSigners: Uint8Array): Promise<AttestationVerificationCache> {
+  static async open(
+    path: string,
+    allowedSigners: Uint8Array,
+    writeWhole: WholeWriter,
+  ): Promise<AttestationVerificationCache> {
     const digest = rawId(allowedSigners);
-    return new AttestationVerificationCache(path, digest, await verifiedUnder(path, digest));
+    return new AttestationVerificationCache(path, digest, await verifiedUnder(path, digest), writeWhole);
   }
 
   /** Whether `id` verified under this cache's allowed-signers bytes. */
@@ -63,14 +71,6 @@ export class AttestationVerificationCache {
     }
     this.verified.add(id);
     const stored: StoredVerification = { allowedSigners: this.allowedSigners, verified: [...this.verified].sort() };
-    // A staged rename leaves one whole file when two processes record at once.
-    const staging = await mkdtemp(join(dirname(this.path), ".attestation-verification-"));
-    try {
-      const staged = join(staging, "cache.json");
-      await writeFile(staged, `${JSON.stringify(stored)}\n`);
-      await rename(staged, this.path);
-    } finally {
-      await rm(staging, { recursive: true, force: true });
-    }
+    await this.writeWhole(this.path, `${JSON.stringify(stored)}\n`);
   }
 }

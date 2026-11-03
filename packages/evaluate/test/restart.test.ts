@@ -213,7 +213,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-one", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -238,7 +238,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-satisfied-shape", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -264,7 +264,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-readable", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
     const runId = result.receipts[0]!.id;
@@ -278,7 +278,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
     expect(readBack.determinism).toBe("nondeterministic");
     expect(readBack.observation.cost).toEqual({});
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(store);
     const runsListed = await store.list("run");
     expect(runsListed).toContain(runId);
@@ -298,7 +298,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-fields", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
     const receipt = (await store.read(result.receipts[0]!.id, "run")) as PerformedRunRecord;
@@ -324,7 +324,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
         invoker: invokerFromRule(rule),
         input: { claimId: "claim-env", conditions: {}, evidence: [] },
         store,
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
       });
       const receipt = (await store.read(result.receipts[0]!.id, "run")) as PerformedRunRecord;
@@ -349,7 +349,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(stubbornRule),
       input: { claimId: "claim-stalled", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -377,7 +377,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-two-runs", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -404,7 +404,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-bytes", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -432,7 +432,7 @@ describe("runRestartLoop: the kernel performs the run and invokes the rule again
         invoker: invokerFromRule(rule),
         input: { claimId: "claim-undeclared-concurrency", conditions: {}, evidence: [] },
         store: new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }),
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
         slotRegistry: new Map(),
         ageLimitMs: 60_000,
@@ -492,7 +492,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-three-needs", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -508,7 +508,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("two contributions requesting one recipe in one evaluation cause exactly one spawn", async () => {
     const repo = await freshRepo("restart-shared-need");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const counterFile = await scratchFile("counter");
     await writeFile(counterFile, "");
     const sharedRecipe = recipeFor(
@@ -545,7 +545,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt already in the store satisfies without spawning", async () => {
     const repo = await freshRepo("restart-reuse");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const counterFile = await scratchFile("counter");
     await writeFile(counterFile, "");
     const recipe = recipeFor(
@@ -582,7 +582,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt already in the store is refused rather than reused once no installed module declares its binary", async () => {
     const repo = await freshRepo("restart-reuse-unauthorised");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const counterFile = await scratchFile("counter");
     await writeFile(counterFile, "");
     const recipe = recipeFor(
@@ -621,7 +621,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt whose substrate moved does not satisfy", async () => {
     const repo = await freshRepo("restart-substrate-moved");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const substratePath = await scratchFile("substrate.txt");
     await writeFile(substratePath, "original");
     const recipe: RunRecipe = {
@@ -662,7 +662,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt whose bound secret was rotated to a new value does not satisfy", async () => {
     const repo = await freshRepo("restart-secret-rotated");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const localDir = join(repo.ctx.gitDir, "local");
     await mkdir(localDir, { recursive: true });
     const bindingsPath = join(localDir, "bindings.json");
@@ -720,7 +720,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt older than the supplied age limit does not satisfy", async () => {
     const repo = await freshRepo("restart-age-limit");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const recipe = recipeFor(["printf", "%s", "aging"], "/");
     const askOnce: Rule = (input) =>
       input.evidence.length === 0
@@ -766,7 +766,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
         invoker: invokerFromRule(rule),
         input: { claimId: "claim-refusal", conditions: {}, evidence: [] },
         store,
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
       });
     } catch {
@@ -794,7 +794,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
       evidence: [],
       exclusiveGroup: null,
     });
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(store);
     const rule: Rule = (input) =>
       input.evidence.length === 0
@@ -840,7 +840,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
       evidence: [],
       exclusiveGroup: null,
     });
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(store);
     const handed: unknown[] = [];
     const rule: Rule = (input) => {
@@ -882,7 +882,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
     };
     const named = await store.put("claim", first);
     const successor = await store.put("claim", { ...first, rendering: "as restated.", supersedes: [named] });
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(store);
     const rule: Rule = (input) => {
       const read = input.records?.[0]?.record as { rendering?: string } | undefined;
@@ -932,7 +932,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-own-receipt", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -946,7 +946,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
   test("a receipt a run need answered is read as a run whichever need named it first", async () => {
     const repo = await freshRepo("restart-record-then-run");
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     const recipe = recipeFor(["printf", "%s", "held"], "/");
     const seeded = await runRestartLoop({
       invoker: invokerFromRule((input) =>
@@ -1013,7 +1013,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
         invoker: invokerFromRule(rule),
         input: { claimId: `claim-order-${order}`, conditions: {}, evidence: [] },
         store,
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
       });
       return { verdict: result.verdict, receiptCount: result.receipts.length };
@@ -1031,7 +1031,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
 
     const outcomes = await satisfyNeeds({
       needs: [bogusNeed],
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       store,
       evaluationOutcomes: new Map(),
       ageLimitMs: Number.POSITIVE_INFINITY,
@@ -1059,7 +1059,7 @@ describe("a list of needs, satisfied once each, and a stall you can see coming",
       invoker: invokerFromRule(rule),
       input: { claimId: "claim-empty-needs", conditions: {}, evidence: [] },
       store,
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       now: repo.now,
     });
 
@@ -1100,7 +1100,7 @@ describe("a receipt for a named commit is reused by the commit's tree, and a pin
   async function workspace(scope: string) {
     const repo = await freshRepo(scope);
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    const index = repo.keep(new IndexDb());
     const localDir = join(repo.ctx.gitDir, "local");
     await mkdir(localDir, { recursive: true });
     const counterFile = join(await scratchDir(), "counter");

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { canonicalBytes, KernelError } from "@musai/records";
 import { execa } from "execa";
 import type { Attestation } from "./attestation.js";
+import { isFile, SigningKeyError } from "./signing-key.js";
 
 /** The namespace every attestation is signed and verified under, so a signature made for another
  * purpose cannot verify here. */
@@ -28,6 +29,9 @@ export interface SignAttestationInput {
 
 /** Signs an attestation's canonical bytes with ssh-keygen and returns the sidecar's text. */
 export async function signAttestation(input: SignAttestationInput): Promise<string> {
+  if (!(await isFile(input.keyPath))) {
+    throw new SigningKeyError(`the signing key ${input.keyPath} is not a file, so nothing here can sign with it`);
+  }
   const bytes = canonicalBytes(input.attestation.record);
   const tmpDir = await mkdtemp(join(tmpdir(), "musai-sign-"));
   try {

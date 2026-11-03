@@ -93,7 +93,7 @@ describe("a refused tool call answers as a tool result carrying its reason, abou
     await initWorkspace(workspace, { now });
     context = { workspace, scope, now };
     const { stdout } = await execa("git", ["rev-parse", "--absolute-git-dir"], { cwd: STAMPER_FIXTURE_DIR });
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     for (const dir of [CORE_MODULE_DIR, STAMPER_FIXTURE_DIR]) {
       await buildModule(dir, opened.store, {
         blobs: blobStoreOf(workspace),
@@ -109,7 +109,8 @@ describe("a refused tool call answers as a tool result carrying its reason, abou
   });
 
   async function tip(): Promise<string | null> {
-    return (await openWorkspace({ workspace, scope, now })).store.tip();
+    using opened = await openWorkspace({ workspace, scope, now });
+    return await opened.store.tip();
   }
 
   /** Calls one tool from a real client connected to a fresh server over this workspace. */
@@ -132,7 +133,7 @@ describe("a refused tool call answers as a tool result carrying its reason, abou
   }
 
   async function aClaimAndABrief(subject: string): Promise<{ readonly claim: RecordId; readonly brief: RecordId }> {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const [claim, brief] = await opened.put([
       { kind: "claim", value: claimDraft(subject) },
       { kind: "run", value: fixtureBrief("the brief a fixture ruling cites") },

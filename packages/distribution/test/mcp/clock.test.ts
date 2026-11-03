@@ -37,7 +37,7 @@ function storeAt(workspace: string): Store {
 async function bookAndSoundcheck(workspace: string): Promise<Booked> {
   const transport = new StdioClientTransport({
     command: "node",
-    args: [SERVER_PATH, "--workspace", workspace, "--scope", SCOPE],
+    args: [SERVER_PATH, "--workspace", workspace, "--scope", SCOPE, "--lab"],
     env: { ...getDefaultEnvironment(), MUSAI_NOW: INSTANT },
     stderr: "pipe",
   });

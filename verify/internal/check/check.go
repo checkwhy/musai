@@ -46,6 +46,8 @@ type Result struct {
 	Signatures int
 	// Released is whom the bundle was cut for and how much a release covers.
 	Released *Entitlement
+	// Index is the records the source holds, for a command that walks them.
+	Index *Index
 }
 
 // Failed reports whether any finding is an error.
@@ -71,5 +73,5 @@ func Run(src *source.Source, table refs.Table, trusted trust.Set) (Result, error
 	slices.SortStableFunc(findings, func(a, b Finding) int {
 		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Code, b.Code), cmp.Compare(a.At, b.At), cmp.Compare(a.Detail, b.Detail))
 	})
-	return Result{Findings: findings, Records: tree.recordFiles(), Signatures: verified, Released: released}, nil
+	return Result{Findings: findings, Records: tree.recordFiles(), Signatures: verified, Released: released, Index: index}, nil
 }

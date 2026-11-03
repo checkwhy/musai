@@ -15,6 +15,7 @@ export {
   workspaceToolsFromConfig,
 } from "./binaries.js";
 export {
+  BINDINGS_FILE_NAME,
   type BindDeclaredNamesResult,
   BindingError,
   type BindingSource,
@@ -25,8 +26,13 @@ export {
   DECLARED_NAMES_CONFIG_KEY,
   type LayerDeclaration,
   layerDeclarationsFromConfig,
+  type PathBinding,
+  pathBindings,
   type ResolvedBinding,
   readBindings,
+  readCheckoutBindings,
+  type StandingRoot,
+  UNRECORDABLE_BINDING_REMEDY,
 } from "./bindings.js";
 export {
   CANARY_CHANNELS,
@@ -37,7 +43,13 @@ export {
   type ChannelStatus,
   runCanary,
 } from "./canary.js";
-export { containerEngineAvailable, DEFAULT_CONTAINER_ENGINE, isContainerImageSubstrate } from "./container.js";
+export {
+  containerEngineAvailable,
+  DEFAULT_CONTAINER_ENGINE,
+  type EngineLine,
+  engineLineOfRun,
+  isContainerImageSubstrate,
+} from "./container.js";
 export {
   FetchRefusedError,
   type FetchResult,
@@ -50,16 +62,19 @@ export {
   AMBIENT_CHANNELS,
   type AmbientChannel,
   hygienicEnvironment,
+  onHost,
   RunRefusedError,
   type ScratchPaths,
+  type ScratchPlace,
   UndeclaredBinaryError,
   withScratch,
 } from "./hygiene.js";
 export { MACHINE_TOOLS_FILE, readMachineTools } from "./machine-tools.js";
 export { RUNNER_PERFORMER } from "./performer.js";
+export { printable } from "./printable.js";
+export { PROCESS_TABLE, ProcessTableError, readProcessTable } from "./process-table.js";
 export {
   type Reference,
-  type ResolutionMethod,
   ResolutionRefusedError,
   type ResolutionTable,
   type ResolveReferenceOptions,
@@ -74,6 +89,7 @@ export {
   secretObservation,
   secretReadId,
 } from "./secrets.js";
+export { commandLine, DOLLAR_QUOTE_SHELLS, holdsDollarWord } from "./shell.js";
 export {
   authorisedProgram,
   containerPolicyFromSlot,
@@ -104,6 +120,7 @@ export {
   namesRoot,
   namesTree,
   resolveSubstrates,
+  standingRoots,
   substrateReadId,
   TREE_SUBSTRATE_URI,
   treeSubstrate,

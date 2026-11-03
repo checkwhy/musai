@@ -7,6 +7,7 @@ import {
   type Workspace,
 } from "@musai/api-core";
 import { instantOf, isKernelError, isTimestamp, type Timestamp, versionString } from "@musai/records";
+import { commandLine, printable } from "@musai/run";
 import { resolveWorkTree } from "@musai/store";
 import { lastTurn, type Turn } from "../hook/transcript.js";
 import { checkRun, programsToAdmit, SentenceClaimedError } from "./check.js";
@@ -143,14 +144,15 @@ async function ranAtRoot(turn: Turn, command: string, workspace: string): Promis
   return false;
 }
 
+/** The `check` to type, the sentence one shell word and the command as the turn typed it. */
 function proposalOf(sentence: string, command: string): string {
-  return `musai check ${JSON.stringify(sentence)} -- ${command}`;
+  return `${commandLine(["musai", "check", sentence, "--"])} ${printable(command)}`;
 }
 
 function unreceipted(sentence: string, proposal: string, why = ""): HookStopOutput {
   return {
     decision: "block",
-    reason: `You said ${JSON.stringify(sentence)} with no receipt minted this turn${why}. Mint one, or say what was not run: ${proposal}`,
+    reason: `You said ${printable(JSON.stringify(sentence))} with no receipt minted this turn${why}. Mint one, or say what was not run: ${proposal}`,
   };
 }
 
@@ -161,7 +163,8 @@ async function minted(
   words: readonly string[],
   context: OperationContext,
 ): Promise<HookStopOutput> {
-  const said = JSON.stringify(sentence);
+  const said = printable(JSON.stringify(sentence));
+  const by = printable(command);
   try {
     const checked = await runHandler(
       checkRun,
@@ -169,12 +172,12 @@ async function minted(
       { ...context, runTimeoutMs: HOOK_RUN_TIMEOUT_MS },
     );
     if (checked.label === "holds") {
-      return { systemMessage: `musai checked ${said} by ${command}: it holds · ${checked.short}` };
+      return { systemMessage: `musai checked ${said} by ${by}: it holds · ${checked.short}` };
     }
     const verdict = checked.label === "fails" ? "it fails" : `it is open: ${checked.reason}`;
     return {
       decision: "block",
-      reason: `You said ${said}, and musai checked it by ${command}: ${verdict} · ${checked.short}. Say what does not pass, or fix it.`,
+      reason: `You said ${said}, and musai checked it by ${by}: ${verdict} · ${checked.short}. Say what does not pass, or fix it.`,
     };
   } catch (error) {
     if (!isKernelError(error)) {

@@ -4,9 +4,12 @@ import {
   OperationError,
   type OperationHandler,
   releaseStanding,
+  type StandingRelease,
+  type StandingSeal,
   sealStanding,
   type Workspace,
   type WriteResult,
+  withdrawnUnverified,
 } from "@musai/api-core";
 import {
   type Audience,
@@ -21,6 +24,7 @@ import {
   releaseTermsProblem,
   versionString,
 } from "@musai/records";
+import { heldMatch, idPrefixOf } from "../claim-ref.js";
 
 export interface ReleaseInput {
   readonly id: string;
@@ -122,22 +126,24 @@ function sameTerms(a: ReleaseTerms, b: ReleaseTerms): boolean {
   return bytes(a) === bytes(b);
 }
 
-function heldRecord(opened: Workspace, id: string): RecordId {
-  opened.read(id as RecordId);
-  return id as RecordId;
+/** The record a record id or eight or more of its hex digits names, of those the fold holds. */
+function heldRecord(opened: Workspace, named: string): RecordId {
+  const hex = idPrefixOf(named, "record");
+  return heldMatch(opened.index, named, hex, opened.index.recordsWithHexPrefix(hex), "record").id;
 }
 
 /** Granting what already stands writes nothing; new terms for the same audience and extent
- * supersede the release that stands. */
+ * supersede the release that stands, and any withdrawn by an unverified revocation alone. */
 const releaseGrantHandler: OperationHandler<ReleaseInput, ReleaseOutput> = {
   async plan(input, opened) {
     const subject = heldRecord(opened, input.id);
     const audience = audienceOf(opened, input.to);
     const terms = termsOf(input);
     const extent = input.closure === true ? "closure" : "record";
-    const same = (await releaseStanding(opened, subject)).standing.filter(
-      (release) => release.record.audience === audience && release.record.extent === extent,
-    );
+    const { standing, revoked } = await releaseStanding(opened, subject);
+    const alike = (release: StandingRelease) =>
+      release.record.audience === audience && release.record.extent === extent;
+    const same = standing.filter(alike);
     const unchanged = same.some((release) => sameTerms(release.record.terms, terms));
     return {
       plan: {
@@ -149,7 +155,9 @@ const releaseGrantHandler: OperationHandler<ReleaseInput, ReleaseOutput> = {
                 subject: { record: subject },
                 purpose: "released",
                 release: { audience, extent, terms },
-                supersedes: same.map((release) => release.id),
+                supersedes: [...same, ...revoked.filter(withdrawnUnverified).filter(alike)].map(
+                  (release) => release.id,
+                ),
               },
             ],
         needs: [],
@@ -160,8 +168,8 @@ const releaseGrantHandler: OperationHandler<ReleaseInput, ReleaseOutput> = {
   },
 };
 
-/** Writes nothing where a seal from the audience stands at the extent asked; at another extent, the
- * new seal supersedes those standing from it. */
+/** Writes nothing where the seals it would replace are verified, one at the extent asked; otherwise
+ * the new seal supersedes them, so sealing again signs an unverified one anew. */
 const releaseSealHandler: OperationHandler<SealInput, ReleaseOutput> = {
   async plan(input, opened) {
     const subject = heldRecord(opened, input.id);
@@ -170,7 +178,10 @@ const releaseSealHandler: OperationHandler<SealInput, ReleaseOutput> = {
     const from = (await sealStanding(opened, subject)).standing.filter(
       (seal) => seal.record.seal.audience === audience,
     );
-    const unchanged = from.some((seal) => (seal.record.seal.extent ?? "record") === extent);
+    const extentOf = (seal: StandingSeal) => seal.record.seal.extent ?? "record";
+    // A seal of the record alone replaces no closure seal, verified or not: a revocation lifts one.
+    const replaced = from.filter((seal) => extentOf(seal) === extent || extent === "closure");
+    const unchanged = replaced.every((seal) => seal.verified) && replaced.some((seal) => extentOf(seal) === extent);
     // A seal of the record alone names no extent, so it hashes as every v5 seal without one does.
     const seal = extent === "record" ? { audience } : { audience, extent };
     return {
@@ -183,7 +194,7 @@ const releaseSealHandler: OperationHandler<SealInput, ReleaseOutput> = {
                 subject: { record: subject },
                 purpose: "sealed",
                 seal,
-                ...(from.length === 0 ? {} : { supersedes: from.map((standing) => standing.id) }),
+                ...(replaced.length === 0 ? {} : { supersedes: replaced.map((standing) => standing.id) }),
               },
             ],
         needs: [],
@@ -194,13 +205,16 @@ const releaseSealHandler: OperationHandler<SealInput, ReleaseOutput> = {
   },
 };
 
-/** What a revocation names: the standing releases to `to`, or the standing seals from `from`. */
+/** What a revocation names: the releases to `to` standing or withdrawn unverified, or the standing
+ * seals from `from`. */
 async function withdrawnBy(input: RevokeInput, opened: Workspace, subject: RecordId): Promise<readonly RecordId[]> {
   const { to, from } = input;
   if (to !== undefined && from === undefined) {
     const audience = audienceOf(opened, to);
-    const { standing } = await releaseStanding(opened, subject);
-    return standing.filter((release) => release.record.audience === audience).map((release) => release.id);
+    const { standing, revoked } = await releaseStanding(opened, subject);
+    return [...standing, ...revoked.filter(withdrawnUnverified)]
+      .filter((release) => release.record.audience === audience)
+      .map((release) => release.id);
   }
   if (from !== undefined && to === undefined) {
     const audience = audienceOf(opened, from);
@@ -261,7 +275,7 @@ export const releaseGrant = definedOperation<ReleaseInput, ReleaseOutput>(
       additionalProperties: false,
       required: ["id", "to"],
       properties: {
-        id: { type: "string" },
+        id: { type: "string", description: "the record's id, or eight or more of its hex digits" },
         to: { type: "string", description: "public, key:SHA256:…, identity:<issuer>#<subject>, or a declared name" },
         for: { type: "string", description: "the uses granted, comma-separated: review, cite, republish" },
         from: { type: "string", description: "the instant the release takes effect" },
@@ -301,7 +315,7 @@ export const releaseSeal = definedOperation<SealInput, ReleaseOutput>(
       additionalProperties: false,
       required: ["id", "from"],
       properties: {
-        id: { type: "string" },
+        id: { type: "string", description: "the record's id, or eight or more of its hex digits" },
         from: {
           type: "string",
           description:
@@ -341,7 +355,7 @@ export const releaseRevoke = definedOperation<RevokeInput, ReleaseOutput>(
       additionalProperties: false,
       required: ["id"],
       properties: {
-        id: { type: "string" },
+        id: { type: "string", description: "the record's id, or eight or more of its hex digits" },
         to: { type: "string", description: "the audience whose releases are withdrawn; never with from" },
         from: { type: "string", description: "the audience whose seals are lifted; never with to" },
         key: { type: "string" },

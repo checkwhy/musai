@@ -1,16 +1,32 @@
 import { isOperationError } from "@musai/api-core";
 import { describe, expect, test } from "vitest";
-import { byteLengthUtf8, omissionLine, TRIM_ORDER, type TrimItem, trimToBudget } from "../src/brief/trim.js";
+import {
+  byteLengthUtf8,
+  omissionLine,
+  TRIM_ORDER,
+  type TrimItem,
+  type TrimResult,
+  trimToBudget,
+} from "../src/brief/trim.js";
 
-function item(overrides: Partial<TrimItem>): TrimItem {
-  return {
+const bytesOf = new Map<string, number>();
+
+/** An item standing for a line of `bytes` bytes, which `sized` counts for it. */
+function item({ bytes = 10, ...overrides }: Partial<TrimItem> & { readonly bytes?: number }): TrimItem {
+  const made: TrimItem = {
     id: `sha256:${"0".repeat(64)}`,
     evidenceKind: "receipt",
     setAside: false,
     pinned: false,
-    bytes: 10,
     ...overrides,
   };
+  bytesOf.set(made.id, bytes);
+  return made;
+}
+
+function sized(result: TrimResult): number {
+  const kept = result.kept.reduce((total, kept) => total + bytesOf.get(kept.id)!, 0);
+  return kept + result.omissions.reduce((total, omission) => total + byteLengthUtf8(omissionLine(omission)), 0);
 }
 
 describe("TRIM_ORDER is the evidence order reversed", () => {
@@ -24,9 +40,9 @@ describe("a pinned item is never trimmed", () => {
     const claim = item({ id: "sha256:claim", pinned: true, bytes: 500 });
     const direct = item({ id: "sha256:direct", pinned: true, bytes: 500 });
 
-    expect(() => trimToBudget([claim, direct], 100)).toThrow();
+    expect(() => trimToBudget([claim, direct], 100, sized)).toThrow();
     try {
-      trimToBudget([claim, direct], 100);
+      trimToBudget([claim, direct], 100, sized);
       throw new Error("expected trimToBudget to throw");
     } catch (error) {
       expect(isOperationError(error) && error.reason).toBe("over-budget");
@@ -39,6 +55,7 @@ describe("a pinned item is never trimmed", () => {
     const result = trimToBudget(
       [claim, trimmable],
       10 + byteLengthUtf8(omissionLine({ id: trimmable.id, reason: "over-budget" })),
+      sized,
     );
     expect(result.kept.map((kept) => kept.id)).toEqual([claim.id]);
     expect(result.omissions.map((omission) => omission.id)).toEqual([trimmable.id]);
@@ -57,14 +74,11 @@ describe("the omission list is sized inside the budget, never appended on top of
       (total, candidate) => total + byteLengthUtf8(omissionLine({ id: candidate.id, reason: "over-budget" })),
       0,
     );
-    const floor = pinned.bytes + worstCaseOmissionBytes;
+    const floor = 50 + worstCaseOmissionBytes;
 
     for (const budget of [floor, floor + 50, floor + 150, floor + 240]) {
-      const result = trimToBudget([pinned, ...trimmable], budget);
-      const totalBytes =
-        result.kept.reduce((total, kept) => total + kept.bytes, 0) +
-        result.omissions.reduce((total, omission) => total + byteLengthUtf8(omissionLine(omission)), 0);
-      expect(totalBytes).toBeLessThanOrEqual(budget);
+      const result = trimToBudget([pinned, ...trimmable], budget, sized);
+      expect(sized(result)).toBeLessThanOrEqual(budget);
     }
   });
 });
@@ -75,7 +89,7 @@ describe("the trim order removes the weakest evidence first", () => {
     const b = item({ id: "sha256:bbb", bytes: 100 });
     const budget = 100 + byteLengthUtf8(omissionLine({ id: a.id, reason: "over-budget" }));
 
-    const result = trimToBudget([a, b], budget);
+    const result = trimToBudget([a, b], budget, sized);
     expect(result.omissions.map((omission) => omission.id)).toEqual([a.id]);
     expect(result.kept.map((kept) => kept.id)).toEqual([b.id]);
   });
@@ -85,7 +99,7 @@ describe("the trim order removes the weakest evidence first", () => {
     const setAside = item({ id: "sha256:zzz-set-aside", setAside: true, bytes: 100 });
     const budget = 100 + byteLengthUtf8(omissionLine({ id: setAside.id, reason: "over-budget" }));
 
-    const result = trimToBudget([standing, setAside], budget);
+    const result = trimToBudget([standing, setAside], budget, sized);
     expect(result.omissions.map((omission) => omission.id)).toEqual([setAside.id]);
     expect(result.kept.map((kept) => kept.id)).toEqual([standing.id]);
   });
@@ -95,7 +109,7 @@ describe("the trim order removes the weakest evidence first", () => {
     const agentJudgment = item({ id: "sha256:agent-judgment", evidenceKind: "agent-judgment", bytes: 100 });
     const budget = 100 + byteLengthUtf8(omissionLine({ id: agentJudgment.id, reason: "over-budget" }));
 
-    const result = trimToBudget([receipt, agentJudgment], budget);
+    const result = trimToBudget([receipt, agentJudgment], budget, sized);
     expect(result.omissions.map((omission) => omission.id)).toEqual([agentJudgment.id]);
     expect(result.kept.map((kept) => kept.id)).toEqual([receipt.id]);
   });
@@ -104,27 +118,27 @@ describe("the trim order removes the weakest evidence first", () => {
 describe("defined results at the edges", () => {
   test("a budget of zero refuses rather than crashing", () => {
     const single = item({ id: "sha256:only", bytes: 10 });
-    expect(() => trimToBudget([single], 0)).not.toThrow(TypeError);
-    expect(() => trimToBudget([single], 0)).toThrow();
+    expect(() => trimToBudget([single], 0, sized)).not.toThrow(TypeError);
+    expect(() => trimToBudget([single], 0, sized)).toThrow();
   });
 
   test("a single trimmable item within budget is kept with no omissions", () => {
     const single = item({ id: "sha256:only", bytes: 10 });
-    const result = trimToBudget([single], 1000);
+    const result = trimToBudget([single], 1000, sized);
     expect(result.kept.map((kept) => kept.id)).toEqual([single.id]);
     expect(result.omissions).toEqual([]);
   });
 });
 
-describe("trimToBudget is a pure function of its two arguments", () => {
+describe("trimToBudget is a pure function of its arguments", () => {
   test("two calls with the same items and budget produce the same kept set and the same omissions", () => {
     const items = [
       item({ id: "sha256:pinned", pinned: true, bytes: 30 }),
       item({ id: "sha256:t1", evidenceKind: "agent-judgment", bytes: 80 }),
       item({ id: "sha256:t2", evidenceKind: "citation", bytes: 80 }),
     ];
-    const first = trimToBudget(items, 140);
-    const second = trimToBudget(items, 140);
+    const first = trimToBudget(items, 140, sized);
+    const second = trimToBudget(items, 140, sized);
     expect(second).toEqual(first);
   });
 });

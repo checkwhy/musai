@@ -4,7 +4,7 @@ import platformPath, { dirname, join, type PlatformPath, posix, resolve } from "
 import type { DigestSet, ResourceDescriptor } from "@musai/records";
 import { hexOfRecordId, rawId } from "@musai/records";
 import { type GitContext, gitRevParse, gitWorkingTreeTree, resolveGitDir, resolveWorkTree } from "@musai/store";
-import { type CheckoutBindings, readCheckoutBindings } from "./bindings.js";
+import { type CheckoutBindings, readCheckoutBindings, type StandingRoot } from "./bindings.js";
 import { RunRefusedError } from "./hygiene.js";
 
 const TREE_SUBSTRATE_NAME = "source";
@@ -95,6 +95,17 @@ export async function checkoutBindingsFor(
     return bound;
   }
   return { ...bound, ...Object.fromEntries(unbound.map((descriptor) => [descriptor.name!, { directory: root }])) };
+}
+
+/** Every directory a run here can stand on: each checkout bound, then the working tree holding
+ * the workspace. */
+export async function standingRoots(localDir: string): Promise<readonly StandingRoot[]> {
+  const bound = Object.entries(await readCheckoutBindings(localDir)).map(([checkout, { directory }]) => ({
+    checkout,
+    directory,
+  }));
+  const enclosing = await resolveWorkTree(dirname(dirname(localDir)));
+  return enclosing === null ? bound : [...bound, { checkout: null, directory: enclosing }];
 }
 
 export function boundDirectory(checkouts: CheckoutBindings, descriptor: ResourceDescriptor): string | undefined {

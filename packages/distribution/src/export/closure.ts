@@ -76,7 +76,7 @@ async function receiptsOf(opened: Workspace, cited: readonly ClosureMember[]): P
   const receipts: RecordId[] = [];
   for (const member of cited.filter((entry) => entry.kind === "claim")) {
     const claim = opened.read(member.id) as ClaimRecord;
-    const byRecipe = checkReceiptsOf(opened.index, claim);
+    const byRecipe = checkReceiptsOf(opened.index, member.id, claim);
     if (byRecipe.length === 0) {
       continue;
     }

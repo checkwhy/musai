@@ -16,14 +16,15 @@ import {
   slotFor,
   TRIPLE_CLAIM_TYPE,
   TRIPLE_DECLARATION,
+  TrustFileError,
   versionString,
 } from "@musai/records";
-import { BindingError } from "@musai/run";
-import { type CommitChanges, LOCAL_DIR, MUSAI_DIR, Store, scopeIndexPath } from "@musai/store";
+import { type CommitChanges, LOCAL_DIR, MUSAI_DIR, readTrustTip, Store, scopeIndexPath } from "@musai/store";
 import {
   blobStoreOf,
   type FixtureRepo,
   fixedClock,
+  foldClosed,
   makeFixtureRepo,
   manifestWithContributions,
   ownConfigValue,
@@ -74,7 +75,7 @@ describe("the claim types a workspace validates against", () => {
     const repo = await makeFixtureRepo("workspace-open");
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect([...opened.claimTypes.keys()]).toEqual([TRIPLE_CLAIM_TYPE]);
   });
@@ -88,7 +89,7 @@ describe("the claim types a workspace validates against", () => {
     const repo = await makeFixtureRepo("workspace-declared-type", [declaration]);
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.claimTypes.get(declaration.type)).toEqual(declaration);
     const read = readClaimTypeDeclarations(opened.index);
@@ -100,7 +101,7 @@ describe("the claim types a workspace validates against", () => {
     const repo = await makeFixtureRepo("workspace-no-declarations");
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.index.installedModuleRecords()).toEqual([]);
   });
@@ -119,7 +120,7 @@ describe("the project layer's slot assignments a workspace carries", () => {
     const assigned = { "fixture.module/count": 3, "fixture.module/flag": true };
     await writeTrustFile(repo.ctx, "config.json", JSON.stringify({ slots: assigned }));
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.projectSlots).toEqual(assigned);
   });
@@ -128,7 +129,7 @@ describe("the project layer's slot assignments a workspace carries", () => {
     const repo = await makeFixtureRepo("workspace-project-slots-none");
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.projectSlots).toEqual({});
   });
@@ -149,7 +150,7 @@ describe("the audiences a workspace reads from its trust branch", () => {
     const repo = await makeFixtureRepo("workspace-audiences");
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(covers(opened.audiences, "known", "peer")).toBe(true);
     expect(covers(opened.audiences, "peer", "known")).toBe(false);
@@ -160,7 +161,7 @@ describe("the audiences a workspace reads from its trust branch", () => {
     cleanups.push(repo.cleanup);
     await removeTrustFile(repo.ctx, "audiences");
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.audiences.names.size).toBe(0);
   });
@@ -176,7 +177,7 @@ describe("the project layer's declared names a workspace carries", () => {
       JSON.stringify({ declaredNames: { API_TOKEN: { secret: true }, LOG_LEVEL: { secret: false } } }),
     );
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.layerDeclarations).toEqual(
       new Map([
@@ -190,12 +191,12 @@ describe("the project layer's declared names a workspace carries", () => {
     const repo = await makeFixtureRepo("workspace-declared-names-none");
     cleanups.push(repo.cleanup);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.layerDeclarations).toEqual(new Map());
   });
 
-  test("a configuration declaring a name with no boolean secret flag refuses the open, naming declaredNames", async () => {
+  test("a configuration declaring a name with no boolean secret flag refuses the open as a trust file to fix", async () => {
     const repo = await makeFixtureRepo("workspace-declared-names-malformed");
     cleanups.push(repo.cleanup);
     await writeTrustFile(repo.ctx, "config.json", JSON.stringify({ declaredNames: { API_TOKEN: { secret: "yes" } } }));
@@ -206,8 +207,12 @@ describe("the project layer's declared names a workspace carries", () => {
       now: fixedClock(FIXED_INSTANT),
     }).catch((caught: unknown) => caught);
 
-    expect(refusal).toBeInstanceOf(BindingError);
-    expect((refusal as BindingError).message).toContain("declaredNames");
+    expect(refusal).toBeInstanceOf(TrustFileError);
+    expect(refusal).toMatchObject({ reason: "workspace-incomplete", file: "config.json", line: null });
+    expect((refusal as TrustFileError).message).toContain("API_TOKEN");
+    expect((refusal as TrustFileError).message).toContain(
+      "fix or remove declaredNames in config.json on the trust branch",
+    );
   });
 });
 
@@ -228,7 +233,7 @@ async function installPack(
   contributions: readonly ContributionEntry[],
 ): Promise<void> {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   await installModule(
     name,
@@ -292,12 +297,14 @@ async function openSubscribed(
   if (subscriptions.length > 0) {
     await installSubscriber(repo, subscriptions);
   }
-  const opened = await Workspace.open({
-    dir: repo.workspace,
-    scope: repo.scope,
-    now: fixedClock(instant),
-    subscriptionInvoker: invoker,
-  });
+  const opened = repo.keep(
+    await Workspace.open({
+      dir: repo.workspace,
+      scope: repo.scope,
+      now: fixedClock(instant),
+      subscriptionInvoker: invoker,
+    }),
+  );
   return { opened, repo };
 }
 
@@ -334,7 +341,7 @@ async function runsPutByWriteAt(
   instant: string,
   subject: string,
 ): Promise<number> {
-  const opened = await Workspace.open({
+  using opened = await Workspace.open({
     dir: repo.workspace,
     scope: repo.scope,
     now: fixedClock(instant),
@@ -378,7 +385,7 @@ describe("a write through the workspace dispatches the events of the records it 
 
     await opened.put([{ kind: "claim", value: tripleClaim("cascading") }]);
 
-    const fresh = new IndexDb();
+    using fresh = new IndexDb();
     await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(fresh.eventsAfter()!.filter((row) => row.kind === "run.recorded")).toHaveLength(1);
     expect(invocations.map((invocation) => invocation.subscription)).toEqual([`${SUBSCRIBER}/on-claim`]);
@@ -409,7 +416,7 @@ describe("a write through the workspace dispatches the events of the records it 
     const putMany = opened.store.putMany.bind(opened.store);
     vi.spyOn(opened.store, "putMany").mockImplementation(async (items, hooks) => {
       const ids = await putMany(items, hooks);
-      const other = new IndexDb(scopeIndexPath(repo.ctx.gitDir, repo.scope));
+      using other = new IndexDb(scopeIndexPath(repo.ctx.gitDir, repo.scope));
       await other.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       return ids;
     });
@@ -424,7 +431,7 @@ describe("a write through the workspace dispatches the events of the records it 
     const repo = await makeFixtureRepo("dispatch-first-write");
     cleanups.push(repo.cleanup);
     const { invocations, invoker } = recordingInvoker();
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -471,7 +478,7 @@ describe("a write through the workspace dispatches the events of the records it 
 
     await opened.put([{ kind: "claim", value: tripleClaim("receipted") }]);
 
-    const fresh = new IndexDb();
+    using fresh = new IndexDb();
     await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const [minted] = fresh.eventsAfter()!.filter((row) => row.kind === "run.recorded");
     expect(minted).toBeDefined();
@@ -491,7 +498,7 @@ describe("a write through the workspace dispatches the events of the records it 
 
     const [claimId] = await opened.put([{ kind: "claim", value: tripleClaim("undeclared") }]);
 
-    const fresh = new IndexDb();
+    using fresh = new IndexDb();
     await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(fresh.recordById(claimId!)).toBeDefined();
     expect(fresh.eventsAfter()!.filter((row) => row.kind === "run.recorded")).toEqual([]);
@@ -504,7 +511,7 @@ describe("a write through the workspace dispatches the events of the records it 
     const repo = await makeFixtureRepo("dispatch-error-trace");
     cleanups.push(repo.cleanup);
     await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -536,7 +543,7 @@ describe("a write through the workspace dispatches the events of the records it 
     const repo = await makeFixtureRepo("dispatch-refused-need-trace");
     cleanups.push(repo.cleanup);
     await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -568,7 +575,7 @@ describe("a write through the workspace dispatches the events of the records it 
       subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put"),
       subscriptionOn(`${SUBSCRIBER}/on-claim-too`, "claim.put"),
     ]);
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -600,7 +607,7 @@ describe("a write through the workspace dispatches the events of the records it 
       subscriptionOn(`${SUBSCRIBER}/on-claim-too`, "claim.put"),
     ]);
     const handed: string[] = [];
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -632,7 +639,7 @@ describe("a write through the workspace dispatches the events of the records it 
       subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put"),
       subscriptionOn(`${SUBSCRIBER}/on-claim-too`, "claim.put"),
     ]);
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -663,13 +670,14 @@ describe("a write through the workspace dispatches the events of the records it 
       const [claimId] = await opened.put([{ kind: "claim", value: tripleClaim("dated-write") }]);
 
       const walked: CommitChanges[] = [];
-      for await (const commit of new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }).changesSince(null)) {
+      const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
+      for await (const commit of store.changesSince(null, (await store.tip())!)) {
         walked.push(commit);
       }
       const own = walked.find((commit) => commit.changed.some(({ path }) => path === recordPath("claim", claimId!)));
       expect(own).toBeDefined();
 
-      const fresh = new IndexDb();
+      using fresh = new IndexDb();
       await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       const minted = fresh.eventsAfter()!.find((row) => row.kind === "run.recorded");
       expect(minted).toBeDefined();
@@ -700,7 +708,7 @@ describe("a write through the workspace dispatches the events of the records it 
     cleanups.push(repo.cleanup);
     await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
     await writeTrustFile(repo.ctx, "config.json", JSON.stringify({ declaredNames: { LAYER_TOKEN: { secret: true } } }));
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -714,7 +722,7 @@ describe("a write through the workspace dispatches the events of the records it 
 
     await opened.put([{ kind: "claim", value: tripleClaim("declared") }]);
 
-    const fresh = new IndexDb();
+    using fresh = new IndexDb();
     await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const [minted] = fresh.eventsAfter()!.filter((row) => row.kind === "run.recorded");
     const receipt = opened.read(minted!.recordId);
@@ -774,7 +782,7 @@ describe("a write through the workspace dispatches the events of the records it 
     };
     await new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }).put("module", broken);
     await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: fixedClock(FIXED_INSTANT),
@@ -785,7 +793,7 @@ describe("a write through the workspace dispatches the events of the records it 
 
     await expect(write).rejects.toBeInstanceOf(SlotRefusedError);
     await expect(write).rejects.toThrow("broken-pack/limit");
-    const fresh = new IndexDb();
+    using fresh = new IndexDb();
     await fresh.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const events = fresh.eventsAfter()!;
     expect(events.filter((row) => row.kind === "claim.put")).toHaveLength(1);
@@ -799,7 +807,7 @@ describe("a write through the workspace dispatches the events of the records it 
     await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
     const [held] = await writeFixtureRecords(repo, [{ kind: "claim", value: tripleClaim("already held") }]);
 
-    const opened = await Workspace.open({
+    using opened = await Workspace.open({
       dir: repo.workspace,
       scope: repo.scope,
       now: repo.now,
@@ -816,8 +824,11 @@ async function withholding(author: Workspace, hidden: ReadonlySet<RecordId>): Pr
     digest: JSON.stringify([...hidden].sort()),
     through: author.index.watermark(),
     trust: author.matrix.commit,
+    trustTip: () => readTrustTip(author.ctx),
     admits: ({ id }) => !hidden.has(id),
     withholds: (id) => hidden.has(id),
+    verifies: () => false,
+    replaces: () => false,
     judgedAgain: () => withholding(author, hidden),
   };
 }
@@ -832,13 +843,15 @@ async function openClearedSubscribed(
   cleanups.push(repo.cleanup);
   await installSubscriber(repo, [subscriptionOn(`${SUBSCRIBER}/on-claim`, "claim.put")]);
   await writeTrustFile(repo.ctx, "audiences", "writer\n");
-  return Workspace.open({
-    dir: repo.workspace,
-    scope: repo.scope,
-    now: fixedClock(FIXED_INSTANT),
-    subscriptionInvoker: invoker,
-    clearance: { audience: "writer" as Audience, admission: (author) => withholding(author, hidden) },
-  });
+  return repo.keep(
+    await Workspace.open({
+      dir: repo.workspace,
+      scope: repo.scope,
+      now: fixedClock(FIXED_INSTANT),
+      subscriptionInvoker: invoker,
+      clearance: { audience: "writer" as Audience, admission: (author) => withholding(author, hidden) },
+    }),
+  );
 }
 
 describe("a write through a cleared workspace dispatches only what its fold admits", () => {
@@ -897,7 +910,7 @@ describe("a write through the workspace folds itself", () => {
     const repo = await makeFixtureRepo("workspace-put-folds");
     cleanups.push(repo.cleanup);
     await installPack(repo, PACK, PACK_CONTRIBUTIONS);
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
     const claim = claimOf(opened.claimTypes.get(PACK_TYPE)!, { case: "put-then-read" }, "the finding put then read");
 
     const [id] = await opened.put([{ kind: "claim", value: claim }]);
@@ -912,7 +925,7 @@ describe("the claim types and dimensions an installed module contributes", () =>
     cleanups.push(repo.cleanup);
     await installPack(repo, PACK, PACK_CONTRIBUTIONS);
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     const declaration = opened.claimTypes.get(PACK_TYPE);
     expect(declaration?.identityDimensions).toEqual(["case"]);
@@ -933,10 +946,10 @@ describe("the claim types and dimensions an installed module contributes", () =>
     const repo = await makeFixtureRepo("contributed-read-at-open");
     cleanups.push(repo.cleanup);
     const options: WorkspaceOptions = { dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) };
-    const before = await Workspace.open(options);
+    using before = await Workspace.open(options);
 
     await installPack(repo, PACK, PACK_CONTRIBUTIONS);
-    const after = await Workspace.open(options);
+    using after = await Workspace.open(options);
 
     expect(before.claimTypes.has(PACK_TYPE)).toBe(false);
     expect(before.dimensions.has("severity")).toBe(false);
@@ -988,7 +1001,7 @@ describe("a scope's name cannot collide with what the workspace keeps", () => {
       }
       const before = await contentsOf(entry);
 
-      await Workspace.open({ dir: repo.workspace, scope: name, now: fixedClock(FIXED_INSTANT) });
+      (await Workspace.open({ dir: repo.workspace, scope: name, now: fixedClock(FIXED_INSTANT) })).close();
 
       expect((await stat(join(localDir, "scopes", name, "index.sqlite"))).isFile()).toBe(true);
       expect(await contentsOf(entry)).toEqual(before);
@@ -1000,7 +1013,7 @@ describe("a scope's name cannot collide with what the workspace keeps", () => {
     cleanups.push(repo.cleanup);
     const scopesDir = join(repo.ctx.gitDir, LOCAL_DIR, "scopes");
 
-    await Workspace.open({ dir: repo.workspace, scope: "scopes", now: fixedClock(FIXED_INSTANT) });
+    (await Workspace.open({ dir: repo.workspace, scope: "scopes", now: fixedClock(FIXED_INSTANT) })).close();
 
     expect(await readdir(scopesDir)).toEqual(["scopes"]);
     expect((await stat(join(scopesDir, "scopes", "index.sqlite"))).isFile()).toBe(true);
@@ -1013,13 +1026,11 @@ describe("a scope's name cannot collide with what the workspace keeps", () => {
     const [id] = await writeFixtureRecords(repo, [{ kind: "claim", value: tripleClaim("written before") }]);
     const besideDir = join(localDir, repo.scope);
     await mkdir(besideDir);
-    await new IndexDb(join(besideDir, "index.sqlite")).fold(
-      new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }),
-    );
+    await foldClosed(join(besideDir, "index.sqlite"), new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const beside = await readFile(join(besideDir, "index.sqlite"));
     expect(await readdir(localDir)).not.toContain("scopes");
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.read(id!)).toEqual(tripleClaim("written before"));
     expect((await stat(scopeIndexPath(repo.ctx.gitDir, repo.scope))).isFile()).toBe(true);
@@ -1051,7 +1062,7 @@ describe("a workspace that arrives without local/, and a directory holding none"
     expect(await readdir(gitDir)).not.toContain(LOCAL_DIR);
     expect(await ownConfigValue(gitDir, "gc.auto")).toBeNull();
 
-    const opened = await Workspace.open({ dir: clone, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    using opened = await Workspace.open({ dir: clone, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
 
     expect(opened.read(id!)).toEqual(tripleClaim("written before the clone"));
     expect((await stat(scopeIndexPath(gitDir, repo.scope))).isFile()).toBe(true);
@@ -1064,7 +1075,7 @@ describe("a workspace that arrives without local/, and a directory holding none"
     cleanups.push(repo.cleanup);
     await writeOwnConfig(repo.ctx.gitDir, ["--unset", "gc.auto"]);
 
-    await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+    (await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) })).close();
 
     expect(await ownConfigValue(repo.ctx.gitDir, "gc.auto")).toBeNull();
   });
@@ -1085,7 +1096,7 @@ describe("a workspace that arrives without local/, and a directory holding none"
     }
   });
 
-  test("a .musai holding content that is no workspace refuses workspace-incomplete, naming what is there and advising nothing", async () => {
+  test("a .musai holding content that is no workspace refuses workspace-incomplete, naming what is there and advising it be moved aside before an init", async () => {
     const root = await temporaryDirectory("musai-foreign-");
     await execa("git", ["init", "--quiet", join(root, "non-bare", MUSAI_DIR)]);
     await execa("git", ["init", "--quiet", "--bare", join(root, "bare-without-main", MUSAI_DIR)]);
@@ -1100,8 +1111,8 @@ describe("a workspace that arrives without local/, and a directory holding none"
 
       expect(refusal).toBeInstanceOf(KernelError);
       expect(refusal).toMatchObject({ reason: "workspace-incomplete", about: [dir] });
-      expect((refusal as KernelError).detail).toContain(join(dir, MUSAI_DIR));
-      expect((refusal as KernelError).detail).not.toContain("`init");
+      expect((refusal as KernelError).detail).toContain(`move ${join(dir, MUSAI_DIR)} aside`);
+      expect((refusal as KernelError).detail).toContain(`\`init ${dir}\``);
       expect(await contentsOf(root)).toEqual(before);
     }
   });

@@ -217,7 +217,7 @@ describe("a case for a currently open question about this project's own kernel",
       const [runAId] = await store.putMany([{ kind: "run", value: readBackRecord }]);
       await store.putMany([{ kind: "module", value: coreModuleRecord() }]);
 
-      const index = new IndexDb();
+      using index = new IndexDb();
       await index.fold(store);
 
       const workspace: AdmissionWorkspace = { index, store, modulePath: () => CORE_MODULE_PATH };

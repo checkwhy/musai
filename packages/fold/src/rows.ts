@@ -6,6 +6,7 @@ import type {
   ContributionEntry,
   DigestSet,
   EventKind,
+  FixedAttestation,
   ModuleRecord,
   MusaiRecord,
   RecordId,
@@ -100,6 +101,13 @@ export interface IndexedAttestation {
   record: AttestationRecord;
 }
 
+/** `verified` is judged where the bytes are read, or `null` where a reader still reads them. */
+export interface IndexedWithdrawing {
+  id: RecordId;
+  record: FixedAttestation;
+  verified: boolean | null;
+}
+
 export interface IndexedSuccessor {
   successor: RecordId;
   kind: RecordKind;
@@ -153,6 +161,8 @@ export interface RefusedRecordPath {
   id: RecordId | null;
   path: string;
   reason: string;
+  /** What every version fixes of an attestation refused for a version later than the kernel's. */
+  later: FixedAttestation | null;
 }
 
 /** `position` is the record's index among its commit's record paths in byte order. */

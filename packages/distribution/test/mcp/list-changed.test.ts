@@ -112,7 +112,7 @@ describe("checkForListChanges", () => {
     expect(server.sendPromptListChanged).toHaveBeenCalledTimes(1);
     expect(after).not.toBe(before);
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const manifests = await installedManifests(opened);
     expect(manifests.some((named) => named.moduleName === "list-changed-fixture")).toBe(true);
   });

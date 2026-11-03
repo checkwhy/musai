@@ -106,8 +106,7 @@ describe("the principal a call acts as is the key it signs with", () => {
     expect(refusal.reason).toBe("workspace-incomplete");
     expect(refusal.message).toContain(`florin,${key.principal} namespaces="musai" ${key.pubKeyLine}`);
     expect(await workspace.head()).toBe(before);
-    const opened = await openWorkspace(workspace.context());
+    using opened = await openWorkspace(workspace.context());
     expect(opened.allowedSigners.map((signer) => signer.principals)).toEqual(["florin"]);
-    opened.close();
   });
 });

@@ -4,9 +4,8 @@ import { type EvidenceEdge, isPlainObject, isSealedValue, KIND_CONTRACTS, type M
 import { RecordNotFoundError } from "@musai/store";
 import { buildAdmissionWorkspace } from "./admission.js";
 import type { OperationContext } from "./context.js";
-import { OperationError } from "./errors.js";
 import { installedModules } from "./events.js";
-import { verifiedEvidenceEdge } from "./evidence.js";
+import { admitCitedEdge } from "./evidence.js";
 import {
   type AdmittedDeclaration,
   type AppliedPlan,
@@ -90,21 +89,6 @@ function saltRefusal(entry: PlannedRecord): string | undefined {
 function citedEdges(draft: MintedRecord): readonly EvidenceEdge[] {
   const record = draft.record as MusaiRecord;
   return "evidence" in record ? record.evidence : [];
-}
-
-async function admitCitedEdge(
-  edge: EvidenceEdge,
-  opened: Workspace,
-  admissionWorkspace: AdmissionWorkspace,
-): Promise<void> {
-  const admitted = await verifiedEvidenceEdge(opened, admissionWorkspace, edge.run, edge.selector);
-  if (admitted.item !== edge.item) {
-    throw new OperationError({
-      reason: "invalid-input",
-      about: [edge.run, edge.item],
-      detail: `the edge on ${edge.run} names item ${edge.item}, and its selector admits ${admitted.item}`,
-    });
-  }
 }
 
 const REFUSED_BY_THE_KERNEL = "the kernel refuses of every draft";

@@ -42,10 +42,15 @@ const BARE_THROW_ALLOWLIST: ReadonlyMap<string, { readonly throws: number; reado
   [
     "fold/index-db.ts",
     {
-      throws: 1,
+      throws: 2,
       argument:
-        "a fold built under an admission, folded without it: a defect in how a workspace bound its index, class bug",
+        "a fold built under an admission, folded without it, and a query on an index already closed: " +
+        "defects in how a caller holds its index, class bug",
     },
+  ],
+  [
+    "records/conditions/schema-compiler.ts",
+    { throws: 1, argument: "an invalid schema, refused as Ajv's own meta-schema check refuses it" },
   ],
   [
     "store/paths.ts",

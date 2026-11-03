@@ -1,7 +1,10 @@
 import { buildRegistry, type Distribution } from "@musai/api-core";
-import { DEPRECATED_REASONS } from "@musai/records";
+import { admitPrecompiledValidators, DEPRECATED_REASONS } from "@musai/records";
 import { admitDrafts } from "./drafts.js";
+import { KERNEL_VALIDATORS } from "./kernel-schemas.js";
 import { ALL_OPERATIONS } from "./ops/index.js";
+
+admitPrecompiledValidators(KERNEL_VALIDATORS);
 
 /** Every operation the distribution declares, keyed by `id@version`. */
 export const REGISTRY = buildRegistry(ALL_OPERATIONS, DEPRECATED_REASONS);
@@ -10,14 +13,14 @@ export const REGISTRY = buildRegistry(ALL_OPERATIONS, DEPRECATED_REASONS);
 export const MUSAI: Distribution = {
   name: "musai",
   command: "musai",
-  version: "0.1.1",
+  version: "0.1.3",
   registry: REGISTRY,
   admitDrafts,
   publicOperations: new Set([
     "workspace.init@1",
     "check.run@1",
     "claim.status@3",
-    "claim.why@4",
+    "claim.why@5",
     "render.markdown@2",
     "bundle.export@2",
     "bundle.rerun@3",

@@ -14,7 +14,8 @@ const REGEX_MAY_FOLLOW_KEYWORDS = new Set([
   "yield",
 ]);
 
-/** A slash divides only after a value; anywhere else it opens a pattern. */
+/** A slash divides only after a value; anywhere else it opens a pattern.
+ * @param {string[]} chars @param {number} index */
 function opensPattern(chars, index) {
   let back = index - 1;
   while (back >= 0 && /\s/.test(chars[back])) {
@@ -38,18 +39,22 @@ function opensPattern(chars, index) {
 
 /** Comments and string text blanked character for character, so an index still points into the
  * source. A pattern is stepped over whole: a quote inside it would open a string. */
-export function codeOnly(text) {
+export function codeOnly(/** @type {string} */ text) {
   return scanText(text).code;
 }
 
-/** Every comment in the text, as `{ start, end, kind }` with `kind` "line" or "block". */
+/** Every comment in the text, as `{ start, end, kind }` with `kind` "line" or "block".
+ * @param {string} text */
 export function commentsIn(text) {
   return scanText(text).comments;
 }
 
+/** @param {string} text */
 function scanText(text) {
+  /** @type {{ start: number, end: number, kind: "line" | "block" }[]} */
   const comments = [];
   const out = text.split("");
+  /** @param {number} from @param {number} to */
   const blank = (from, to) => {
     for (let i = from; i < to; i += 1) {
       if (out[i] !== "\n") {
@@ -58,6 +63,7 @@ function scanText(text) {
     }
   };
   // A template and each `${` in it are frames: template text is blanked, a substitution is code.
+  /** @type {("template" | { braces: number })[]} */
   const frames = [];
   let index = 0;
   while (index < text.length) {
@@ -121,13 +127,14 @@ function scanText(text) {
       frames.push("template");
       index += 1;
     } else if (char === "{" && typeof frames.at(-1) === "object") {
-      frames.at(-1).braces += 1;
+      /** @type {{ braces: number }} */ (frames.at(-1)).braces += 1;
       index += 1;
     } else if (char === "}" && typeof frames.at(-1) === "object") {
-      if (frames.at(-1).braces === 0) {
+      const frame = /** @type {{ braces: number }} */ (frames.at(-1));
+      if (frame.braces === 0) {
         frames.pop();
       } else {
-        frames.at(-1).braces -= 1;
+        frame.braces -= 1;
       }
       index += 1;
     } else {
@@ -152,17 +159,19 @@ const FORMS = [
 const STATEMENT_HEAD = /(?<![\w$.])(?:import|export)(?![\w$])(?!\s*[.(])/g;
 const TYPE_ONLY_HEAD = /^(?:import|export)\s+type\s*[{*]/;
 
+/** @param {string} code @param {number} headIndex */
 function isTypeOnlyStatement(code, headIndex) {
   return TYPE_ONLY_HEAD.test(code.slice(headIndex));
 }
 
+/** @param {string} text @param {number} index */
 function lineAt(text, index) {
   return text.slice(0, index).split("\n").length;
 }
 
 /** Every module the text names in code, in order, at the line its statement or call starts.
  * A computed specifier and a `require` under another name are not read. */
-export function importsIn(text) {
+export function importsIn(/** @type {string} */ text) {
   const code = codeOnly(text);
   const heads = [...code.matchAll(STATEMENT_HEAD)].map((head) => head.index);
   const found = [];

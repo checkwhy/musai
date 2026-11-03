@@ -57,6 +57,11 @@ describe("an attestation and its signature land in one commit", () => {
     expect(await store.readSidecar(attestation.id)).toBeNull();
   });
 
+  test("a sidecar asked of a scope that holds no records yet answers null", async () => {
+    const store = new Store({ ctx: repo.ctx, scope: "never-written", now: repo.now });
+    expect(await store.readSidecar(recordId({ example: "an attestation never written" }))).toBeNull();
+  });
+
   test("a signature beside any record but an attestation is refused before anything is written", async () => {
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
     const before = await gitRevParse(repo.ctx, scopeRefName(repo.scope));

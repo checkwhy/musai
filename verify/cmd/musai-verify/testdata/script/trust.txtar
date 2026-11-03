@@ -31,3 +31,25 @@ stdout '^signatures checked against the allowed-signers in .*principal-absent; f
 ! exec musai-verify verify --trust github:florinutz $CONFORMANCE/bundles/passing
 stderr 'names no principal'
 ! stdout .
+
+mkdir empty
+! exec musai-verify verify --trust empty $CONFORMANCE/bundles/passing
+stderr 'empty holds no allowed-signers file'
+! stdout .
+
+# A time with no zone is refused whatever the host's zone, since ssh-keygen reads it in its own;
+# the same window in UTC holds the signing in either zone.
+env TZ=Asia/Tokyo
+! exec musai-verify verify --trust zoneless $CONFORMANCE/bundles/passing
+stdout '^error +trust\.line-invalid +trust/allowed-signers: line 1: .*\(option-time\)'
+exec musai-verify verify --trust bounded $CONFORMANCE/bundles/passing
+stdout '^verified: '
+env TZ=America/Los_Angeles
+exec musai-verify verify --trust bounded $CONFORMANCE/bundles/passing
+stdout '^verified: '
+env TZ=
+
+-- zoneless/allowed-signers --
+florin valid-after="202608311200",valid-before="202608311300" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC6REw4JnB0v8V4Or3AF4VQPyBD0W3kVNsEbxgrVMeNT
+-- bounded/allowed-signers --
+florin valid-after="202608311200Z",valid-before="202608311300Z" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC6REw4JnB0v8V4Or3AF4VQPyBD0W3kVNsEbxgrVMeNT

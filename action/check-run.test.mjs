@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -60,7 +61,9 @@ test("a workspace with no checked claim posts a neutral Check Run", () => {
 
 test("posts to the repository's check runs with the token as a header, and never prints the token", async () => {
   const token = "ghs_secretsecretsecret";
+  /** @type {{ url: string, init: { headers: Record<string, string> } }[]} */
   const sent = [];
+  /** @param {string} url @param {{ headers: Record<string, string> }} init */
   const fetcher = async (url, init) => {
     sent.push({ url, init });
     return new Response(JSON.stringify({ message: `Resource not accessible by integration ${token}` }), {
@@ -81,4 +84,44 @@ test("posts to the repository's check runs with the token as a header, and never
   assert.equal(sent[0].init.headers.authorization, `Bearer ${token}`);
   assert.match(refusal.message, /403/);
   assert.doesNotMatch(refusal.message, /ghs_secret/);
+});
+
+test("refuses before running anything when a GitHub variable is unset, naming each one", async () => {
+  const script = fileURLToPath(new URL("./check-run.mjs", import.meta.url));
+
+  const refusal = await run(process.execPath, [script], { env: { GITHUB_SHA: "c0ffee" } }).then(
+    () => assert.fail("a run without its token and repository resolved"),
+    (error) => error,
+  );
+
+  assert.equal(refusal.code, 1);
+  assert.equal(refusal.stderr, "refusing to post a Check Run: GITHUB_TOKEN, GITHUB_REPOSITORY unset\n");
+});
+
+test("prints a refused post as one line naming the status, and exits 1", async (t) => {
+  const bin = await mkdtemp(join(tmpdir(), "musai-check-run-bin-"));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const rendered = JSON.stringify({ markdown: "No checked claims here yet", claims: [] });
+  await writeFile(join(bin, "musai"), `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(rendered)});\n`);
+  await chmod(join(bin, "musai"), 0o755);
+  const api = createServer((_request, response) => response.writeHead(403).end("Bad credentials ghs_secret"));
+  await new Promise((listening) => api.listen(0, "127.0.0.1", () => listening(undefined)));
+  t.after(() => api.close());
+  const { port } = /** @type {import("node:net").AddressInfo} */ (api.address());
+  const script = fileURLToPath(new URL("./check-run.mjs", import.meta.url));
+  const env = {
+    PATH: `${bin}${delimiter}${dirname(process.execPath)}`,
+    GITHUB_TOKEN: "ghs_secret",
+    GITHUB_REPOSITORY: "owner/repo",
+    GITHUB_SHA: "c0ffee",
+    GITHUB_API_URL: `http://127.0.0.1:${port}`,
+  };
+
+  const refusal = await run(process.execPath, [script], { cwd: bin, env }).then(
+    () => assert.fail("a refused post resolved"),
+    (error) => error,
+  );
+
+  assert.equal(refusal.code, 1);
+  assert.equal(refusal.stderr, "posting the Check Run was refused with 403\n");
 });

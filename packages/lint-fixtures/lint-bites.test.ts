@@ -419,33 +419,72 @@ describe("the comment check", () => {
 });
 
 describe("the affected-package selection", () => {
-  const select = async (changed: string[]): Promise<string[] | null> => {
+  interface Selection {
+    readonly filters: readonly string[];
+    readonly checks: readonly (readonly string[])[];
+  }
+  const select = async (changed: string[]): Promise<Selection> => {
     const { selectionFor } = await import(pathToFileURL(join(repoRoot, "scripts/gate-selection.mjs")).href);
     return selectionFor(changed, "abc123");
   };
+  const named = (...names: string[]): string[] => [
+    ...names.flatMap((name) => ["--filter", name]),
+    "--filter",
+    "!musai-workspace",
+    "--fail-if-no-match",
+  ];
+  const everything = ["--filter", "!musai-workspace"];
+  const goCheck = ["node", "scripts/check-go.mjs"];
 
-  it("selects nothing for a diff of Markdown outside the packages", async () => {
-    expect(await select(["DESIGN.md", "docs/notes.md"])).toBeNull();
+  it("selects nothing for a diff of Markdown or workflows outside the packages", async () => {
+    expect(await select(["DESIGN.md", "docs/notes.md", ".github/workflows/ci.yml"])).toEqual({
+      filters: [],
+      checks: [],
+    });
   });
 
-  it("selects every package for the Markdown a package test reads", async () => {
-    const everything = ["--filter", "!musai-workspace"];
-
-    expect(await select(["README.md"])).toEqual(everything);
-    expect(await select(["corpus/report.md"])).toEqual(everything);
+  it("selects the package that reads a root file, not every package", async () => {
+    expect(await select(["README.md"])).toEqual({ filters: named("checkwhy"), checks: [] });
+    expect(await select(["corpus/report.md"])).toEqual({ filters: named("@musai/distribution"), checks: [] });
   });
 
-  it("selects every package for a non-Markdown path outside the packages", async () => {
-    expect(await select(["DESIGN.md", "tsconfig.base.json"])).toEqual(["--filter", "!musai-workspace"]);
+  it("selects the verifier's own checks and the one package reading its fixtures for a change under verify/", async () => {
+    const { filters, checks } = await select(["verify/internal/report/report.go"]);
+
+    expect(filters).toEqual(named("@musai/records"));
+    expect(checks).toContainEqual(goCheck);
   });
 
-  it("selects the changed packages when Markdown rides with a package change", async () => {
-    expect(await select(["DESIGN.md", "packages/mcp/src/server.ts"])).toEqual([
-      "--filter",
-      "...[abc123]",
-      "--filter",
-      "!musai-workspace",
-      "--fail-if-no-match",
+  it("runs a changed root gate script and the typecheck covering it, and nothing else", async () => {
+    const typecheck = named("@musai/lint-fixtures");
+    expect(await select(["scripts/check-go.mjs"])).toEqual({ filters: typecheck, checks: [goCheck] });
+    expect(await select(["scripts/test-unprivileged.mjs"])).toEqual({
+      filters: typecheck,
+      checks: [["node", "scripts/test-unprivileged.mjs"]],
+    });
+  });
+
+  it("runs the verify page's tests for a change to the conformance corpus they read", async () => {
+    expect((await select(["conformance/bundles/released/bundle.json"])).checks).toContainEqual([
+      "node",
+      "--test",
+      "verify/web/test/page.test.mjs",
     ]);
+  });
+
+  it("selects every package for a path no row names, such as a pin or a new top-level file", async () => {
+    expect((await select(["DESIGN.md", "tsconfig.base.json"])).filters).toEqual(everything);
+    expect((await select(["verify/go.mod", "a-new-file.txt"])).filters).toEqual(everything);
+  });
+
+  it("selects the changed packages and their dependents beside the packages a root file reaches", async () => {
+    expect((await select(["DESIGN.md", "packages/mcp/test/server.test.ts"])).filters).toEqual(named("...[abc123]"));
+    expect((await select(["corpus/report.md", "packages/mcp/test/server.test.ts"])).filters).toEqual(
+      named("...[abc123]", "@musai/distribution"),
+    );
+  });
+
+  it("selects the records suite for a change to any package's source, which that suite scans", async () => {
+    expect((await select(["packages/run/src/container.ts"])).filters).toEqual(named("...[abc123]", "@musai/records"));
   });
 });

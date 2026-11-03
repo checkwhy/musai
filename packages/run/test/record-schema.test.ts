@@ -76,7 +76,7 @@ describe("the shapes each record kind honours", () => {
         { kind: "claim", value: first },
         { kind: "claim", value: second },
       ]);
-      const index = new IndexDb();
+      using index = new IndexDb();
       await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       const members = index.claimsInGroup(group);
       expect(members.map((member) => member.slot).sort()).toEqual([first.slot, second.slot].sort());
@@ -103,7 +103,7 @@ describe("validateClaim recomputes a claim's slot from its own type and conditio
       ]);
       expect(firstId).not.toBe(secondId);
 
-      const index = new IndexDb();
+      using index = new IndexDb();
       await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       const contributors = index.contributorsAtSlot(first.slot);
       expect(contributors.map((contributor) => contributor.id).sort()).toEqual([firstId, secondId].sort());
@@ -121,7 +121,7 @@ describe("a hand-written claim cannot declare a genuine claim's slot", () => {
       const genuineClaim = wellFormedClaim();
       await store.putMany([{ kind: "claim", value: genuineClaim }]);
 
-      const index = new IndexDb();
+      using index = new IndexDb();
       await index.fold(store);
       const contributorsBefore = index.contributorsAtSlot(genuineClaim.slot);
       expect(contributorsBefore).toHaveLength(1);

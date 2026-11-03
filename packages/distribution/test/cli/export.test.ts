@@ -2,8 +2,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type RecordId, type RecordKind, recordPath } from "@musai/records";
-import { generateTestKey, pseudonymOf, type TestKey, writeTrustFile } from "@musai/test-support";
+import { type RecordId, type RecordKind, recordPath, timestamp } from "@musai/records";
+import { Store } from "@musai/store";
+import { fixedClock, generateTestKey, pseudonymOf, type TestKey, writeTrustFile } from "@musai/test-support";
+import { mintAttestation } from "@musai/trust";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   bookAndRule,
@@ -300,6 +302,53 @@ describe("an export releases a record and its closure to an audience and writes 
     expect(refused.exitCode).not.toBe(0);
     expect(refused.stderr).toContain("was revoked");
     expect(refused.stderr).toContain(`musai lab release ${ruling} --to public --closure`);
+    expect(await tip(workspace)).toBe(before);
+  }, 180_000);
+
+  test("an export withheld by a revocation whose signature does not verify says so", async () => {
+    const { workspace, ruling } = await ruled("export-revoked-unverified");
+    const exported = await musaiJson<Exported>(workspace, [
+      "export",
+      ruling,
+      "--to",
+      "public",
+      "--out",
+      out(),
+      "--key",
+      key.keyPath,
+    ]);
+    const { record } = mintAttestation({
+      subject: ruling as RecordId,
+      principal: key.principal,
+      principalClass: "person",
+      via: "tty",
+      purpose: "revoked",
+      at: timestamp(AT.now),
+      supersedes: [exported.released as RecordId],
+    });
+    const store = new Store({ ctx: { gitDir: workspace.gitDir }, scope: "default", now: fixedClock(AT.now) });
+    await store.putMany([{ kind: "attestation", value: record }]);
+
+    const refused = await musai(workspace, ["export", ruling, "--to", "public", "--out", out(), "--key", key.keyPath]);
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stderr).toContain("was revoked by an unverified revocation in your name");
+    expect(refused.stderr).toContain(`musai lab revoke ${ruling} --to public`);
+    expect(refused.stderr).not.toContain("musai lab release");
+  }, 180_000);
+
+  test("an export withheld by a member's own revoked release names releasing that member, not the root's closure", async () => {
+    const { workspace, ruling, claim } = await ruled("export-revoked-member");
+    await musaiJson(workspace, ["lab", "release", claim, "--to", "public", "--key", key.keyPath]);
+    await musaiJson(workspace, ["lab", "revoke", claim, "--to", "public", "--key", key.keyPath]);
+    const before = await tip(workspace);
+
+    const refused = await musai(workspace, ["export", ruling, "--to", "public", "--out", out(), "--key", key.keyPath]);
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stderr).toContain("was revoked");
+    expect(refused.stderr).toContain(
+      `\`musai lab release ${claim} --to public --for review,cite\` releases it again deliberately`,
+    );
+    expect(refused.stderr).not.toContain("--closure");
     expect(await tip(workspace)).toBe(before);
   }, 180_000);
 

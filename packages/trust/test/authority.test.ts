@@ -46,14 +46,14 @@ describe("parsing the allowed-signers file", () => {
     const content = [
       "# a comment line",
       "",
-      `alice@example.com valid-after="20250101000000",valid-before="20990101000000" ssh-ed25519 ${SAMPLE_PUBLIC_KEY}`,
+      `alice@example.com valid-after="20250101000000Z",valid-before="20990101000000Z" ssh-ed25519 ${SAMPLE_PUBLIC_KEY}`,
       "",
     ].join("\n");
     const signers = parseAllowedSigners(content);
     expect(signers).toHaveLength(1);
     expect(signers[0]!.principals).toBe("alice@example.com");
-    expect(signers[0]!.validAfter).toBe("20250101000000");
-    expect(signers[0]!.validBefore).toBe("20990101000000");
+    expect(signers[0]!.validAfter).toBe("20250101000000Z");
+    expect(signers[0]!.validBefore).toBe("20990101000000Z");
     expect(signers[0]!.keyType).toBe("ssh-ed25519");
     expect(signers[0]!.key).toBe(SAMPLE_PUBLIC_KEY);
   });

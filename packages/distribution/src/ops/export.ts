@@ -6,10 +6,14 @@ import {
   type OperationDescriptor,
   OperationError,
   openWorkspace,
+  type ReleaseStanding,
+  releaseCoverage,
   releaseStanding,
   runHandler,
   type StandingRelease,
+  type Withholding,
   type Workspace,
+  withdrawnUnverified,
 } from "@musai/api-core";
 import {
   type Audience,
@@ -20,6 +24,7 @@ import {
   type RecordId,
   recordPath,
   sidecarPath,
+  type Timestamp,
   versionString,
 } from "@musai/records";
 import { gitCatFile, isAbsentPathError } from "@musai/store";
@@ -35,6 +40,7 @@ import {
 } from "../export/closure.js";
 import { tarGz } from "../export/tar.js";
 import { cutTrustFile, type TrustFileName } from "../export/trust-cut.js";
+import { releaseAgain, revokeAgain, signingKeyPrincipals, withdrawnIn } from "../withdrawn-in.js";
 import { audienceOf, DEFAULT_USES, releaseGrant } from "./release.js";
 
 export interface BundleExportInput {
@@ -87,65 +93,52 @@ function rootOf(opened: Workspace, named: string): RecordId {
 interface Coverage {
   readonly covering: ReadonlyMap<RecordId, StandingRelease>;
   readonly uncovered: readonly RecordId[];
-  /** Uncovered members a revocation or a release's own window keeps home. */
-  readonly withheld: readonly { readonly id: RecordId; readonly because: string }[];
+  /** Uncovered members a revocation or a release's own window keeps home, each with the command
+   * that mints a release standing in for the one withholding it, none for a revocation of yours. */
+  readonly withheld: readonly { readonly id: RecordId; readonly because: string; readonly again: string | null }[];
 }
 
-/** The members of `cited` each member reaches through what it cites, itself included. */
-function reachOf(cited: readonly ClosureMember[]): ReadonlyMap<RecordId, ReadonlySet<RecordId>> {
-  const byId = new Map(cited.map((member) => [member.id, member]));
-  return new Map(
-    cited.map((member) => {
-      const reached = new Set<RecordId>();
-      const pending = [member.id];
-      for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-        if (!reached.has(next) && byId.has(next)) {
-          reached.add(next);
-          pending.push(...byId.get(next)!.cites);
-        }
-      }
-      return [member.id, reached];
-    }),
-  );
+function withholdingOf(
+  by: Withholding,
+  to: Audience,
+  now: Timestamp,
+  yours: ReadonlySet<string>,
+): { readonly because: string; readonly again: string | null } {
+  const { release } = by;
+  if (by.because === "window") {
+    return {
+      because: `its release ${release.id} is outside its window at ${now}`,
+      again: releaseAgain(release, to, false),
+    };
+  }
+  if (!withdrawnUnverified(by.release)) {
+    return { because: `its release ${release.id} was revoked`, again: releaseAgain(release, to, true) };
+  }
+  const name = withdrawnIn(by.release, yours);
+  const resign = `${revokeAgain(by.release)} signs it anew`;
+  return {
+    because: `its release ${release.id} was revoked by an unverified revocation ${name}, which ${resign}${name === "in your name" ? "" : " if it is yours"}`,
+    again: name === "in your name" ? null : releaseAgain(release, to, true),
+  };
 }
 
-/** A member is covered by a release of its own, or by a closure release of a member that reaches
- * it; a closure release on a root outside this export's closure waits for a fold index. */
-async function coverageOf(opened: Workspace, cited: readonly ClosureMember[], to: Audience): Promise<Coverage> {
-  const reach = reachOf(cited);
-  const standing = new Map<RecordId, Awaited<ReturnType<typeof releaseStanding>>>();
+/** A closure release on a root outside this export's closure waits for a fold index. */
+async function coverageOf(
+  opened: Workspace,
+  cited: readonly ClosureMember[],
+  to: Audience,
+  yours: ReadonlySet<string>,
+): Promise<Coverage> {
+  const standing = new Map<RecordId, ReleaseStanding>();
   for (const member of cited) {
     standing.set(member.id, await releaseStanding(opened, member.id));
   }
-  const reaching = (id: RecordId, pick: "standing" | "revoked"): StandingRelease[] =>
-    cited.flatMap((member) =>
-      standing
-        .get(member.id)!
-        [pick].filter(
-          (release) => member.id === id || (release.record.extent === "closure" && reach.get(member.id)!.has(id)),
-        ),
-    );
   const now = opened.now();
-  const covering = new Map<RecordId, StandingRelease>();
-  const uncovered: RecordId[] = [];
-  const withheld: { id: RecordId; because: string }[] = [];
-  for (const member of cited) {
-    const candidates = reaching(member.id, "standing");
-    const release = coveringRelease(candidates, to, opened.audiences, now);
-    if (release !== undefined) {
-      covering.set(member.id, release);
-      continue;
-    }
-    uncovered.push(member.id);
-    const revoked = reaching(member.id, "revoked").find((r) => covers(opened.audiences, r.record.audience, to));
-    const lapsed = candidates.find((r) => covers(opened.audiences, r.record.audience, to));
-    if (revoked !== undefined) {
-      withheld.push({ id: member.id, because: `its release ${revoked.id} was revoked` });
-    } else if (lapsed !== undefined) {
-      withheld.push({ id: member.id, because: `its release ${lapsed.id} is outside its window at ${now}` });
-    }
-  }
-  return { covering, uncovered, withheld };
+  const { covering, uncovered } = releaseCoverage(cited, standing, to, opened.audiences, now);
+  const withheld = uncovered.flatMap(({ id, withheld: by }) =>
+    by === null ? [] : [{ id, ...withholdingOf(by, to, now, yours) }],
+  );
+  return { covering, uncovered: uncovered.map(({ id }) => id), withheld };
 }
 
 /** A receipt or an attestation left home is not shown to the receiver, so neither ever stops the
@@ -205,18 +198,24 @@ async function releasedForExport(
   context: OperationContext,
 ): Promise<{ readonly opened: Workspace; readonly coverage: Coverage; readonly released: string | null }> {
   const closure = await closureOf(opened, root);
-  const coverage = await coverageOf(opened, closure.cited, to);
+  const yours = await signingKeyPrincipals(opened, input.key);
+  const coverage = await coverageOf(opened, closure.cited, to, yours);
   const unreleased = await unreleasedFor(opened, closure.receipts, to);
   if (coverage.uncovered.length === 0 && unreleased.length === 0) {
     return { opened, coverage, released: null };
   }
   if (coverage.withheld.length > 0) {
+    const releasable = coverage.withheld.flatMap((entry) => (entry.again === null ? [] : [entry.again]));
+    const again = [...new Set(releasable)];
     throw new OperationError({
       reason: "not-authorised",
       about: coverage.withheld.map((entry) => entry.id),
       detail:
-        `${coverage.withheld.map((entry) => `${entry.id}: ${entry.because}`).join("; ")}; an export never undoes that, ` +
-        `and \`musai lab release ${root} --to ${to} --closure\` releases them again deliberately`,
+        `${coverage.withheld.map((entry) => `${entry.id}: ${entry.because}`).join("; ")}; an export never undoes that` +
+        (again.length === 0
+          ? ""
+          : `, and ${again.join(" and ")} ${again.length === 1 ? "releases" : "release"} ` +
+            `${releasable.length === 1 ? "it" : "them"} again deliberately`),
     });
   }
   const grant = (id: RecordId, closure: boolean) =>
@@ -230,7 +229,7 @@ async function releasedForExport(
     await grant(member.id, false);
   }
   const reopened = await openWorkspace(context);
-  const recovered = await coverageOf(reopened, (await closureOf(reopened, root)).cited, to);
+  const recovered = await coverageOf(reopened, (await closureOf(reopened, root)).cited, to, yours);
   const released = granted?.minted[0]?.id ?? null;
   if (recovered.uncovered.length > 0) {
     throw new OperationError({

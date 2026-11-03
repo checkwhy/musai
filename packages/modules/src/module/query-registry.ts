@@ -9,8 +9,7 @@ import {
   QUERYABLE_KERNEL_TABLES,
 } from "@musai/fold";
 import type { ContributionEntry } from "@musai/records";
-import { isPlainObject, KernelError } from "@musai/records";
-import { Ajv } from "ajv";
+import { isPlainObject, KernelError, SchemaCompiler } from "@musai/records";
 import { kernelPoint } from "../rule/envelope.js";
 import { COLUMN_TYPES, readFoldDeclarations } from "./fold-registry.js";
 import { onFirstUse } from "./on-first-use.js";
@@ -23,11 +22,10 @@ export class QueryRefusedError extends KernelError {
   }
 }
 
-// Operands compile again on every fold read; registering them by `$id` would refuse that.
-const ajv = new Ajv({ strict: false, allErrors: true, addUsedSchema: false });
+const schemas = new SchemaCompiler();
 
 const parameterSchema = onFirstUse(() =>
-  ajv.compile<{
+  schemas.compile<{
     readonly statement: string;
     readonly tables: readonly string[];
     readonly properties: Record<string, unknown>;
@@ -35,7 +33,7 @@ const parameterSchema = onFirstUse(() =>
 );
 
 const rowSchema = onFirstUse(() =>
-  ajv.compile<{
+  schemas.compile<{
     readonly properties: { readonly rows: { readonly items: Record<string, unknown> } };
   }>(kernelPoint("query")!.output as Record<string, unknown> | boolean),
 );
@@ -301,13 +299,13 @@ export function queryDeclarationFromEntry(
   const validateRowSchema = rowSchema();
   if (!validateParameterSchema(entry.input)) {
     throw new QueryRefusedError(
-      `refusing to register ${entry.id}: a query's input must be the schema its own parameters satisfy, carrying the statement it runs and the tables that statement reads: ${ajv.errorsText(validateParameterSchema.errors ?? [])}`,
+      `refusing to register ${entry.id}: a query's input must be the schema its own parameters satisfy, carrying the statement it runs and the tables that statement reads: ${schemas.errorsText(validateParameterSchema.errors ?? [])}`,
       [entry.id],
     );
   }
   if (!validateRowSchema(entry.output)) {
     throw new QueryRefusedError(
-      `refusing to register ${entry.id}: a query's output must declare the row its answer's items take under rows: ${ajv.errorsText(validateRowSchema.errors ?? [])}`,
+      `refusing to register ${entry.id}: a query's output must declare the row its answer's items take under rows: ${schemas.errorsText(validateRowSchema.errors ?? [])}`,
       [entry.id],
     );
   }

@@ -172,7 +172,7 @@ async function foldedWorkspace(
   await writeFixtureRecords(repo, [{ kind: "module", value: moduleDeclaring(entries) }]);
   const dir = await mkdtemp(join(tmpdir(), "musai-query-contribution-"));
   dirs.push(dir);
-  const index = new IndexDb(join(dir, "index.sqlite"));
+  const index = repo.keep(new IndexDb(join(dir, "index.sqlite")));
   await index.fold(
     new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }),
     undefined,

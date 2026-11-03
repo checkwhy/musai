@@ -52,10 +52,10 @@ function slotEntry(
 
 async function install(repo: FixtureRepo, name: string, manifest: ModuleManifest) {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   const buildReceiptId = recordId({ marker: `build-for-${name}` });
-  return installModule(
+  return await installModule(
     name,
     versionString("1.0.0"),
     manifest,
@@ -95,7 +95,7 @@ async function writeModule(repo: FixtureRepo, name: string, contributions: reado
 }
 
 async function foldedRegistry(repo: FixtureRepo): Promise<Map<string, SlotDeclaration>> {
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   return new Map(readSlotDeclarations(index));
 }
@@ -122,7 +122,7 @@ describe("a slot declared by an installed module", () => {
     const repo = await trackedRepo();
     const moduleName = "malformed.module";
     await writeModule(repo, moduleName, [malformedSlot(moduleName)]);
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(() => readSlotDeclarations(index)).toThrow(SlotRefusedError);
     expect(() => readSlotDeclarations(index)).toThrow(/malformed\.module\/broken/);
@@ -148,7 +148,7 @@ describe("one slot id declared twice", () => {
     const repo = await trackedRepo();
     const first = slotEntry("twice.module", "limit", { type: "integer" }, ["project"], true, 1);
     await writeModule(repo, "twice.module", [first, { ...first, version: versionString("2") }]);
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readSlotDeclarations(index)).toThrow(
@@ -250,7 +250,7 @@ describe("a project-only slot", () => {
       await expect(installing).rejects.toThrow(naming);
 
       await writeModule(repo, moduleName, [reaching]);
-      const index = new IndexDb(":memory:");
+      using index = new IndexDb(":memory:");
       await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       expect(() => readSlotDeclarations(index)).toThrow(SlotRefusedError);
       expect(() => readSlotDeclarations(index)).toThrow(naming);
@@ -280,7 +280,7 @@ describe("a module installed twice under one name", () => {
     );
     expect(second.moduleRecordId).not.toBe(first.moduleRecordId);
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const listed = index.contributionsOf("slot");
     expect(listed.map((contribution) => contribution.entry.id)).toEqual([

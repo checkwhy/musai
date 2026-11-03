@@ -56,6 +56,7 @@ function declaring(authority: "rule" | null, effect: EffectClass = "write"): Adm
 describe("a plan realised and performed", () => {
   let workspace: string;
   let artefacts: ModuleArtefacts;
+  let held: DisposableStack;
 
   beforeAll(async () => {
     artefacts = await readDistributionArtefacts();
@@ -63,14 +64,16 @@ describe("a plan realised and performed", () => {
 
   beforeEach(async () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-plan-"));
+    held = new DisposableStack();
     await initWorkspace(workspace, { now: fixedClock(BOOKED_AT) });
     const store = storeAt();
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(artefacts, store, blobStoreOf(workspace), index);
   });
 
   afterEach(async () => {
+    held.dispose();
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -82,8 +85,8 @@ describe("a plan realised and performed", () => {
     return { workspace, scope, now: fixedClock(ATTESTED_AT), ...fields };
   }
 
-  function opened(): Promise<Workspace> {
-    return openWorkspace({ workspace, scope, now: fixedClock(ATTESTED_AT) });
+  async function opened(): Promise<Workspace> {
+    return held.use(await openWorkspace({ workspace, scope, now: fixedClock(ATTESTED_AT) }));
   }
 
   /** A real booking's records as drafts: a case with its claims, which any workspace can mint. */
@@ -402,9 +405,10 @@ describe("a plan realised and performed", () => {
   });
 
   test("a plan's invoke need runs under the invocation limits the workspace's configuration assigns at the project layer", async () => {
+    using folded = await foldedIndex(storeAt());
     await buildModule(ALLOCATES_MODULE_DIR, storeAt(), {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(storeAt()),
+      index: folded,
       now: fixedClock(BOOKED_AT),
     });
     const needs: OperationPlan["needs"] = [
@@ -609,7 +613,7 @@ describe("a plan realised and performed", () => {
     }
 
     test("records only: a case.book plan realised once and performed writes exactly the ids it showed", async () => {
-      const view = await openWorkspace({ workspace, scope, now: liveClock() });
+      using view = await openWorkspace({ workspace, scope, now: liveClock() });
       const context = contextFor({ via: "tty" });
       const plan: OperationPlan = { put: await draftsOfABooking("live-clock-records-only"), attest: [], needs: [] };
 
@@ -624,7 +628,7 @@ describe("a plan realised and performed", () => {
     });
 
     test("records and an attestation: a ruling.make plan realised once and performed writes exactly the ids and the instant it showed", async () => {
-      const view = await openWorkspace({ workspace, scope, now: liveClock() });
+      using view = await openWorkspace({ workspace, scope, now: liveClock() });
       const context = contextFor({ via: "tty" });
       const drafted = await draftsOfABooking("live-clock-ruling-claim");
       const written = await view.put(drafted);
@@ -632,15 +636,19 @@ describe("a plan realised and performed", () => {
       const claimId = written[claimIndex]!;
       const [briefId] = await view.put([{ kind: "run", value: fixtureBrief("brief for the structural ruling") }]);
 
-      const rulingPlan = await mintRuling(view, {
-        claim: claimId,
-        verdict: "holds",
-        reason: "the structural invariant, not the clock, decides this",
-        brief: briefId!,
-        supersedes: [],
-        via: "tty",
-        principal: SOMEONE,
-      });
+      const rulingPlan = await mintRuling(
+        view,
+        {
+          claim: claimId,
+          verdict: "holds",
+          reason: "the structural invariant, not the clock, decides this",
+          brief: briefId!,
+          supersedes: [],
+          via: "tty",
+          principal: SOMEONE,
+        },
+        context,
+      );
       const plan: OperationPlan = { put: rulingPlan.put, attest: rulingPlan.attest, needs: [] };
 
       const realised = await realisePlan(plan, view, context, REALISING, SOMEONE);
@@ -654,7 +662,7 @@ describe("a plan realised and performed", () => {
     });
 
     test("a plan whose need names a binary no installed module declares is refused undeclared-binary, naming the binary, and writes nothing", async () => {
-      const view = await openWorkspace({ workspace, scope, now: liveClock() });
+      using view = await openWorkspace({ workspace, scope, now: liveClock() });
       const context = contextFor({ via: "tty" });
       const undeclared = "definitely-not-a-real-binary-musai-test";
       const plan: OperationPlan = {
@@ -685,7 +693,7 @@ describe("a plan realised and performed", () => {
     });
 
     test("a plan carrying a need: the ids realise showed still equal what perform wrote, with the need's receipt performed in between", async () => {
-      const view = await openWorkspace({ workspace, scope, now: liveClock() });
+      using view = await openWorkspace({ workspace, scope, now: liveClock() });
       const context = contextFor({ via: "tty" });
       const plan: OperationPlan = {
         put: await draftsOfABooking("live-clock-needs"),

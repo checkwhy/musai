@@ -5,6 +5,7 @@
   "flipped-byte": "b716bbce80a2a6d02ba31c10c7a20925cd3c46f45d12c495bfb7059184e57a2b",
   "sidecar-over-other-bytes": "50d7ceafc5ce33acd67622e5ce449b47f1b04858d517f71f5863e0ea07fe9c9a",
   "principal-absent": "e2aed1e9aed0f213babcac56a257d442175cb3bd4d1ebe8e73dddafa87e2f16f",
+  "trust-line-refused": "84b65a6b13d2e0e7f879317c7cac22981a8ff8d95ce721053e1eae1d5eb35a90",
   "dangling-reference": "3c34d74feda9f66a8f9779b9ae7a3be4a91279444a4ce93288ec38faa3b11e86",
   "wrong-id-path": "51ab88febe84307a0e7c442ac7cb6c6bcff27e42716f79a16e2a5db46717a09b",
   "wrong-kind-directory": "d52956ce0cd38aa6b72d6f668c1cf96b0495674886375b94053ee4cbaab39d30",

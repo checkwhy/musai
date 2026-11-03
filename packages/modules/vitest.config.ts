@@ -8,5 +8,6 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     include: ["test/**/*.test.ts"],
+    setupFiles: ["@musai/test-support/index-guard"],
   },
 });

@@ -191,7 +191,7 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       { kind: "argument", value: argumentAgainst(claimId!, [edgeOn(challengeRun!, "result")], "the re-run disagrees") },
     ]);
 
-    const output = await claimStatus.handler({ claim: slotOf("beaten") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("beaten") }, { workspace, scope, now });
     expect(output.label).toBe("fails");
     expect(output.comparison.winner).toContain(challengeRun!);
   });
@@ -208,7 +208,11 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       { kind: "argument", value: argumentAgainst(claimId!, [edgeOn(challengeRun!, "result")], "walked") },
     ]);
 
-    const { derivation } = await claimWhy.handler({ claim: slotOf("walked"), full: true }, { workspace, scope, now });
+    const { derivation } = await runHandler(
+      claimWhy,
+      { claim: slotOf("walked"), full: true },
+      { workspace, scope, now },
+    );
     const root = derivation!;
     expect(root.beat).toBeNull();
     expect(root.children[0]!.beat).toBe(slotOf("walked"));
@@ -227,7 +231,7 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       },
     ]);
 
-    const output = await claimStatus.handler({ claim: slotOf("unmoved") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("unmoved") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
     expect(output.comparison.winner).toContain(heldBy!);
   });
@@ -247,7 +251,7 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       },
     ]);
 
-    const output = await claimStatus.handler({ claim: slotOf("unsupported") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("unsupported") }, { workspace, scope, now });
     expect(output.label).toBe("open");
     expect(output.reason).toBe("no-evidence");
   });
@@ -264,7 +268,7 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       },
     ]);
 
-    const output = await claimStatus.handler({ claim: slotOf("bare") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("bare") }, { workspace, scope, now });
     expect(output.label).toBe("fails");
     expect(output.comparison.winner).toContain(challengeRun!);
   });
@@ -290,7 +294,7 @@ describe("an argument attacking a claim reaches the verdict, weighed against wha
       },
     ]);
 
-    const output = await claimStatus.handler({ claim: slotOf("withdrawn") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("withdrawn") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
   });
 });
@@ -324,7 +328,7 @@ describe("a claim whose type the workspace does not declare applies nowhere, wha
     ]);
     await store.putMany([{ kind: "claim", value: claimRecord("declared", [edgeOn(heldBy!, "result")]) }]);
 
-    const output = await claimStatus.handler({ claim: slotOf("declared") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("declared") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
     expect(output.reason).toBeNull();
     expect(output.comparison.winner).toContain(heldBy!);
@@ -340,13 +344,13 @@ describe("a claim whose type the workspace does not declare applies nowhere, wha
     ]);
     const slot = slotFor(UNDECLARED_DECLARATION, { id: "undeclared" });
 
-    const status = await claimStatus.handler({ claim: slot }, { workspace, scope, now });
+    const status = await runHandler(claimStatus, { claim: slot }, { workspace, scope, now });
     expect(status.label).toBe("open");
     expect(status.reason).toBe("inapplicable");
     expect(status.detail).toContain(UNDECLARED_DECLARATION.type);
 
     // The receipt would decide the claim if it applied; the derivation gives the gate's reason.
-    const derivation = await claimWhy.handler({ claim: slot }, { workspace, scope, now });
+    const derivation = await runHandler(claimWhy, { claim: slot }, { workspace, scope, now });
     expect(derivation).toMatchObject({ reason: "inapplicable", via: status.comparison.via, detail: status.detail });
     expect(derivation.detail).toContain(UNDECLARED_DECLARATION.type);
   });
@@ -355,7 +359,7 @@ describe("a claim whose type the workspace does not declare applies nowhere, wha
     await undeclaredStore.putMany([{ kind: "claim", value: undeclaredClaimRecord("undeclared-bare", []) }]);
     const slot = slotFor(UNDECLARED_DECLARATION, { id: "undeclared-bare" });
 
-    const derivation = await claimWhy.handler({ claim: slot }, { workspace, scope, now });
+    const derivation = await runHandler(claimWhy, { claim: slot }, { workspace, scope, now });
     expect(derivation).toMatchObject({ reason: "inapplicable" });
     expect(derivation.detail).toContain(UNDECLARED_DECLARATION.type);
   });
@@ -378,7 +382,8 @@ describe("a claim whose type the workspace does not declare applies nowhere, wha
     };
     await store.putMany([{ kind: "ruling", value: unvouched }]);
 
-    const status = await claimStatus.handler(
+    const status = await runHandler(
+      claimStatus,
       { claim: slotFor(UNDECLARED_DECLARATION, { id: "unvouched" }) },
       { workspace, scope, now },
     );
@@ -398,7 +403,7 @@ describe("challenge.file@2, the verb that puts an argument into the graph", () =
     const { gitDir } = await initWorkspace(workspace, { now });
     store = await storeDeclaringClaimType({ gitDir }, scope);
     const { stdout } = await execa("git", ["rev-parse", "--absolute-git-dir"], { cwd: CORE_MODULE_DIR });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(CORE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
@@ -425,7 +430,7 @@ describe("challenge.file@2, the verb that puts an argument into the graph", () =
       { kind: "run", value: runOfKind("run", "the challenge's own re-run") },
     ]);
 
-    const before = await claimStatus.handler({ claim: slotOf("filed-against") }, ctx());
+    const before = await runHandler(claimStatus, { claim: slotOf("filed-against") }, ctx());
     expect(before.label).toBe("holds");
 
     const filedOutput = await runHandler(
@@ -440,7 +445,7 @@ describe("challenge.file@2, the verb that puts an argument into the graph", () =
     );
     expect(filedOutput.minted.map((item) => item.kind)).toEqual(["argument", "attestation"]);
 
-    const after = await claimStatus.handler({ claim: slotOf("filed-against") }, ctx());
+    const after = await runHandler(claimStatus, { claim: slotOf("filed-against") }, ctx());
     expect(after.label).toBe("fails");
     expect(after.comparison.winner).toContain(challengeRun!);
   });
@@ -489,7 +494,7 @@ describe("challenge.file@2, the verb that puts an argument into the graph", () =
 
     expect(isOperationError(error)).toBe(true);
     expect((error as { reason: string }).reason).toBe("invalid-input");
-    expect((await claimStatus.handler({ claim: slotOf("unadmitted") }, ctx())).label).toBe("holds");
+    expect((await runHandler(claimStatus, { claim: slotOf("unadmitted") }, ctx())).label).toBe("holds");
   });
 
   test("a challenge resting on a brief is refused, since a brief is what a decider was shown and not evidence", async () => {
@@ -601,7 +606,7 @@ describe("challenge.file refuses an edge under the reason the kernel met it with
   test("a parser whose bundle the rule scan refuses refuses invalid-input, naming the bundle's path", async () => {
     const workspace = await freshWorkspace();
     const store = storeOf(workspace);
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     const blobs = blobStoreOf(workspace);
     const { bundleId } = await installModule(
@@ -634,7 +639,7 @@ describe("challenge.file refuses an edge under the reason the kernel met it with
     await installParserFixture(workspace, scope, now);
     const withoutTheRun = await storeOf(workspace).tip();
     const run = await storedRun(workspace, runOfKind("run", "a run the scope's ref is moved back past"));
-    await openWorkspace({ workspace, scope, now });
+    (await openWorkspace({ workspace, scope, now })).close();
     await execa("git", [
       "--git-dir",
       join(workspace, MUSAI_DIR),
@@ -674,12 +679,12 @@ describe("a claim rests on the secrets its evidence read, and stops resting wher
     const [runId] = await store.putMany([{ kind: "run", value: secretRun("first", key) }]);
     await store.putMany([{ kind: "claim", value: claimRecord("secret-backed", [edgeOn(runId!, "result")]) }]);
 
-    const unmoved = await claimStatus.handler({ claim: slotOf("secret-backed") }, { workspace, scope, now });
+    const unmoved = await runHandler(claimStatus, { claim: slotOf("secret-backed") }, { workspace, scope, now });
     expect(unmoved.label).toBe("holds");
 
     await bindTokenTo(localDir, "second");
 
-    const rotated = await claimStatus.handler({ claim: slotOf("secret-backed") }, { workspace, scope, now });
+    const rotated = await runHandler(claimStatus, { claim: slotOf("secret-backed") }, { workspace, scope, now });
     expect(rotated.label).toBe("open");
     expect(rotated.reason).toBe("stale");
   });
@@ -688,7 +693,7 @@ describe("a claim rests on the secrets its evidence read, and stops resting wher
     const [runId] = await store.putMany([{ kind: "run", value: runOfKind("run", "a run that read nothing secret") }]);
     await store.putMany([{ kind: "claim", value: claimRecord("no-secret", [edgeOn(runId!, "result")]) }]);
 
-    const output = await claimStatus.handler({ claim: slotOf("no-secret") }, { workspace, scope, now });
+    const output = await runHandler(claimStatus, { claim: slotOf("no-secret") }, { workspace, scope, now });
     expect(output.label).toBe("holds");
   });
 });
@@ -783,6 +788,12 @@ describe("why names every open reason as status names it, and walks no derivatio
       await undeclaredStore.putMany([{ kind: "claim", value: claim }]);
       return claim.slot;
     },
+    "forked-slot": async () => {
+      await heldClaim("forked-slot");
+      const judgedOtherwise = { ...claimRecord("forked-slot", []), conditions: { id: "forked-slot", by: "another" } };
+      await store.putMany([{ kind: "claim", value: judgedOtherwise }]);
+      return slotOf("forked-slot");
+    },
   };
 
   test.each(STATUS_REASONS.filter((reason) => OPEN_FOR[reason] !== null))(
@@ -871,6 +882,27 @@ describe("why names every open reason as status names it, and walks no derivatio
     expect(text).not.toContain("decided by");
   });
 
+  test("a vouched ruling an unvouched one contests reads in why as deciding nothing, and names the contest", async () => {
+    const { claimId } = await heldClaim("outvouched");
+    const vouched = await rule(claimId, "holds", "gina@example.com");
+    const unvouched = await rule(claimId, "fails", null);
+
+    const why = await runHandler(claimWhy, { claim: slotOf("outvouched") }, context());
+    const text = claimWhy.renderText!(why);
+
+    expect(why).toMatchObject({ label: "open", reason: "contested-authority" });
+    expect(why.rulings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: vouched, authority: "person", uncounted: "contested-by-unvouched" }),
+        expect.objectContaining({ id: unvouched, uncounted: "unvouched" }),
+      ]),
+    );
+    expect(validateOperationOutput(claimWhy, why)).toEqual({ ok: true });
+    expect(text).toContain(
+      `  ruling ${vouched.slice(7, 19)} · holds, person ruling by ${pseudonymOf("gina@example.com")} · decided nothing: a ruling nothing within the matrix vouches for contests it`,
+    );
+  });
+
   test("why's answer is held to its closed output schema, which refuses a stray field at any hop", async () => {
     const { claimId } = await heldClaim("closed");
     const held = await runHandler(claimWhy, { claim: slotOf("closed"), full: true }, context());
@@ -881,7 +913,7 @@ describe("why names every open reason as status names it, and walks no derivatio
     const [run] = held.runs;
     const [ruling] = contested.rulings!;
 
-    expect(REGISTRY.get("claim.why@4")).toBe(claimWhy);
+    expect(REGISTRY.get("claim.why@5")).toBe(claimWhy);
     expect(derivation.children.length).toBeGreaterThan(0);
     for (const output of [held, contested]) {
       expect(validateOperationOutput(claimWhy, output)).toEqual({ ok: true });

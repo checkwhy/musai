@@ -203,14 +203,14 @@ func TestARunsReadSetIsFollowedByTheDigestsItConsumed(t *testing.T) {
 	}
 }
 
-func TestAnAllowedSignersTimeWithoutAZoneIsWarnedAbout(t *testing.T) {
+func TestAnAllowedSignersLineTheKernelRefusesFailsTheVerification(t *testing.T) {
 	fsys := fstest.MapFS{"allowed-signers": &fstest.MapFile{Data: []byte(`florin valid-after="20260101" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5` + "\n")}}
 	put(t, fsys, "rule", `{"kind":"rule","name":"r","schemaVersion":1,"scope":{},"weight":"1"}`)
 	result := run(t, fsys)
 	found := slices.ContainsFunc(result.Findings, func(f check.Finding) bool {
-		return f.Code == "trust.zoneless-time" && f.Severity == check.Warning && f.Path == "allowed-signers"
+		return f.Code == "trust.line-invalid" && f.Severity == check.Error && f.Path == "allowed-signers" && strings.Contains(f.Detail, "option-time")
 	})
-	if !found || result.Failed() {
+	if !found || !result.Failed() {
 		t.Fatalf("findings %+v", result.Findings)
 	}
 }

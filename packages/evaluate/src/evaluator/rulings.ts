@@ -1,5 +1,13 @@
 import type { MadeAttestationRecord, PrincipalClass, Scope } from "@musai/records";
-import { instantOf, isPlainObject, isRelayedChannel, KernelError, type Timestamp, timestamp } from "@musai/records";
+import {
+  instantOf,
+  isPlainObject,
+  isRelayedChannel,
+  KernelError,
+  type Timestamp,
+  TrustFileError,
+  timestamp,
+} from "@musai/records";
 import type { WorkspaceConfig } from "@musai/store";
 import { may, type RoleMatrix } from "@musai/trust";
 
@@ -68,7 +76,8 @@ export function floorFrom(config: WorkspaceConfig): FloorRuling | null {
     return null;
   }
   if (!isFloorDeclaration(declared)) {
-    throw new RangeError(
+    throw TrustFileError.atKey(
+      FLOOR_CONFIG_KEY,
       `refusing to read the workspace floor from ${FLOOR_CONFIG_KEY} at ${config.commit}: expected {"verdict": "holds" | "fails"}`,
     );
   }

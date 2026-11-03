@@ -6,8 +6,12 @@ export const ANCHOR_LABEL_WIDTH = 12;
 /** The heading an artifact's trailing receipts section starts at. */
 export const RECEIPTS_HEADING = "## Receipts";
 
-const LABEL_PATTERN = `[0-9a-f]{${ANCHOR_LABEL_WIDTH}}(?::[^\\]]+)?`;
-const DEFINITION_PATTERN = new RegExp(`^\\[\\^(${LABEL_PATTERN})\\]:\\s*(\\S+)\\s*$`, "gm");
+/** An anchor label's record-id prefix as regex source. */
+export const ANCHOR_ID_PREFIX_PATTERN = `[0-9a-f]{${ANCHOR_LABEL_WIDTH}}`;
+
+/** An anchor label as regex source: the id prefix, then an optional `:selector`. */
+export const ANCHOR_LABEL_PATTERN = `${ANCHOR_ID_PREFIX_PATTERN}(?::[^\\]]+)?`;
+const DEFINITION_PATTERN = new RegExp(`^\\[\\^(${ANCHOR_LABEL_PATTERN})\\]:\\s*(\\S+)\\s*$`, "gm");
 const HEADING_PATTERN = new RegExp(`^${RECEIPTS_HEADING.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
 
 /** Splits an artifact into its body and its trailing receipts section, empty when absent. */

@@ -203,6 +203,9 @@ export class Store implements RecordStore, RecordWriter {
   /** Read back before any fold holds them, as an evaluation reads the receipts it mints. */
   private readonly written = new Set<RecordId>();
   private configPromise: Promise<WorkspaceConfig> | null;
+  /** The loose objects this store last counted, plus every object it could have written since;
+   * `null` until it counts. */
+  private looseBound: number | null = null;
 
   constructor(options: StoreOptions) {
     this.ctx = options.ctx;
@@ -238,6 +241,10 @@ export class Store implements RecordStore, RecordWriter {
 
   async descends(from: string, to: string): Promise<boolean> {
     return gitIsAncestor(this.ctx, from, to);
+  }
+
+  async holdsCommit(commit: string): Promise<boolean> {
+    return (await gitRevParse(this.ctx, `${commit}^{commit}`)) !== null;
   }
 
   async put(kind: RecordKind, value: unknown): Promise<RecordId> {
@@ -522,16 +529,29 @@ export class Store implements RecordStore, RecordWriter {
   /** The tip itself where every path already holds this content, so no commit is minted. */
   private async splice(tip: string | null, files: readonly ScopeFile[], message: string): Promise<string> {
     // A path the tip already holds is replaced rather than sat beside.
-    const newTreeSha = await gitSpliceTree(this.ctx, tip, [...files]);
-    if (tip !== null && (await gitRevParse(this.ctx, `${tip}^{tree}`)) === newTreeSha) {
+    const spliced = await gitSpliceTree(this.ctx, tip, [...files]);
+    // Each file is a blob and a tree per directory on its path, and the commit one more object.
+    if (this.looseBound !== null) {
+      this.looseBound += files.reduce((objects, file) => objects + file.path.split("/").length, 2);
+    }
+    if (tip !== null && !spliced.changed && (await gitRevParse(this.ctx, `${tip}^{tree}`)) === spliced.sha) {
       return tip;
     }
-    return gitCommitTree(this.ctx, newTreeSha, tip ? [tip] : [], message, this.now);
+    return gitCommitTree(this.ctx, spliced.sha, tip ? [tip] : [], message, this.now);
   }
 
+  /** Counts again only once this store's own writes could have reached the threshold; what
+   * another process writes, that process counts at its own write. */
   private async packPastThreshold(): Promise<void> {
-    if ((await gitLooseObjectCount(this.ctx)) >= this.packThreshold) {
+    if (this.looseBound !== null && this.looseBound < this.packThreshold) {
+      return;
+    }
+    const loose = await gitLooseObjectCount(this.ctx);
+    if (loose >= this.packThreshold) {
       await gitPackWithoutPruning(this.ctx);
+      this.looseBound = null;
+    } else {
+      this.looseBound = loose;
     }
   }
 
@@ -549,15 +569,14 @@ export class Store implements RecordStore, RecordWriter {
     if (!this.reads(id)) {
       throw new RecordNotFoundError(id, this.scope);
     }
-    const tip = await this.tip();
-    if (!tip) {
-      throw new RecordNotFoundError(id, this.scope, "the scope holds no records yet");
-    }
     try {
-      return await gitCatFile(this.ctx, `${tip}:${recordPath(kind, id)}`);
+      return await gitCatFile(this.ctx, `${this.refName}:${recordPath(kind, id)}`);
     } catch (error) {
       if (isAbsentPathError(error)) {
         throw new RecordNotFoundError(id, this.scope);
+      }
+      if ((await this.tip()) === null) {
+        throw new RecordNotFoundError(id, this.scope, "the scope holds no records yet");
       }
       throw error;
     }
@@ -568,14 +587,10 @@ export class Store implements RecordStore, RecordWriter {
     if (!this.reads(attestationId)) {
       throw new RecordNotFoundError(attestationId, this.scope);
     }
-    const tip = await this.tip();
-    if (!tip) {
-      return null;
-    }
     try {
-      return (await gitCatFile(this.ctx, `${tip}:${sidecarPath(attestationId)}`)).toString("utf8");
+      return (await gitCatFile(this.ctx, `${this.refName}:${sidecarPath(attestationId)}`)).toString("utf8");
     } catch (error) {
-      if (isAbsentPathError(error)) {
+      if (isAbsentPathError(error) || (await this.tip()) === null) {
         return null;
       }
       throw error;
@@ -604,11 +619,7 @@ export class Store implements RecordStore, RecordWriter {
 
   /** Two processes for the whole walk: `git log` names each changed blob and one `cat-file
    * --batch` answers them by object id, so the walk pays per record rather than per tree level. */
-  async *changesSince(cursor: string | null): AsyncIterable<CommitChanges> {
-    const tip = await this.tip();
-    if (!tip) {
-      return;
-    }
+  async *changesSince(cursor: string | null, tip: string): AsyncIterable<CommitChanges> {
     const log = await gitLogChanges(this.ctx, cursor, tip);
     const answers = gitCatFileBatch(
       this.ctx,

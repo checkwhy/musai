@@ -2,6 +2,7 @@ import type { IndexDb, IndexedContribution, IndexedReceipt } from "@musai/fold";
 import {
   type ClaimRecord,
   type Conditions,
+  hexOfRecordId,
   isPlainObject,
   type RecordId,
   type RunRecipe,
@@ -113,15 +114,20 @@ export function expectationsNamedBy(index: IndexDb, parameters: DeclarativeParam
     .filter((found): found is IndexedContribution => found !== undefined && found.entry.kind === "expectation");
 }
 
-/** Each recipe an evaluation of the claim at `slot` by a rule its conditions name has read, with
- * every such evaluation that read it. */
+/** Each recipe an evaluation of the claim `id`, as it read its slot, by a rule its conditions name
+ * has read, with every such evaluation that read it. */
 function evaluationsReading(
   index: IndexDb,
+  id: RecordId,
   { slot, conditions }: Pick<ClaimRecord, "slot" | "conditions">,
   landed: (id: RecordId) => boolean,
 ): Map<RecordId, RecordId[]> {
   const recipes = new Map<RecordId, RecordId[]>();
-  for (const { reader } of index.readersOf(slotReadKey(slot)).filter((read) => landed(read.reader))) {
+  const evaluatedId = hexOfRecordId(id);
+  const readers = index
+    .readersOf(slotReadKey(slot))
+    .filter(({ reader, consumed }) => consumed.sha256 === evaluatedId && landed(reader));
+  for (const { reader } of readers) {
     const run = index.recordById(reader)?.record;
     if (run?.kind !== "run" || run.runKind !== "evaluation") {
       continue;
@@ -188,6 +194,7 @@ function namesEveryRecipe(declared: { readonly ids: readonly RecordId[]; readonl
  * the interpreter's from its conditions and a module rule's from what its `evaluated` runs read. */
 export function checkReceiptsOf(
   index: IndexDb,
+  id: RecordId,
   claim: Pick<ClaimRecord, "slot" | "conditions" | "evidence">,
   landed: (id: RecordId) => boolean = () => true,
   evaluated: (id: RecordId) => boolean = landed,
@@ -197,8 +204,8 @@ export function checkReceiptsOf(
   const cited = declared.whole ? [] : citedRecipes(index, claim, landed);
   const recipes = namesEveryRecipe(declared)
     ? declared.ids
-    : [...new Set([...declared.ids, ...cited, ...evaluationsReading(index, claim, evaluated).keys()])];
-  return recipes.flatMap((id) => index.receiptsByRecipe(id)).filter((receipt) => landed(receipt.recordId));
+    : [...new Set([...declared.ids, ...cited, ...evaluationsReading(index, id, claim, evaluated).keys()])];
+  return recipes.flatMap((recipe) => index.receiptsByRecipe(recipe)).filter((receipt) => landed(receipt.recordId));
 }
 
 /** Whether a claim names a rule beside the interpreter, whose loop can fail after paid runs. */
@@ -210,8 +217,9 @@ export function namesModuleRule(claim: Pick<ClaimRecord, "conditions">): boolean
  * read it; none where its condition names every recipe. */
 export function evaluatedRecipesOf(
   index: IndexDb,
+  id: RecordId,
   claim: Pick<ClaimRecord, "slot" | "conditions">,
   landed: (id: RecordId) => boolean,
 ): ReadonlyMap<RecordId, readonly RecordId[]> {
-  return namesEveryRecipe(declaredRecipes(claim.conditions)) ? new Map() : evaluationsReading(index, claim, landed);
+  return namesEveryRecipe(declaredRecipes(claim.conditions)) ? new Map() : evaluationsReading(index, id, claim, landed);
 }

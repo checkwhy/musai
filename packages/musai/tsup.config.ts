@@ -1,6 +1,6 @@
 import { defineConfig } from "tsup";
 
-/** Built workspace output, bundled whole: the package installs with no dependency of its own. */
+/** Workspace output, bundled whole: the package installs only the esbuild a module builds with. */
 const BUILT = "node_modules/@musai";
 
 export default defineConfig({
@@ -16,6 +16,8 @@ export default defineConfig({
   dts: false,
   sourcemap: false,
   clean: true,
+  // The assemble reads from it which third-party packages the bundle carries, for their notices.
+  metafile: true,
   // A bundled CommonJS dependency calls `require`, which an ES module has only through this.
   banner: {
     js: "import { createRequire as __musaiRequire } from 'node:module'; const require = __musaiRequire(import.meta.url);",

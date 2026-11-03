@@ -66,7 +66,7 @@ function markingRecipe(marker: string): RunRecipe {
 }
 
 describe("a station's container argument array", () => {
-  const scratch = { root: "/host/scratch" };
+  const host = { tree: "/host/tree", scratch: "/host/scratch", name: "run-name" };
   const declared = hostRecipe({
     command: ["find", "."],
     substrates: [{ uri: "example/image:latest", digest: {}, mediaType: CONTAINER_IMAGE_MEDIA_TYPE }],
@@ -74,7 +74,7 @@ describe("a station's container argument array", () => {
   });
 
   test("masks each named directory of the tree with an empty read-only mount, networking still off", () => {
-    const argv = containerArgv(declared, DECLARED_DIGEST, scratch, "/host/tree", CONTAINER_MOUNT_ROOT, {}, [".musai"]);
+    const argv = containerArgv(declared, DECLARED_DIGEST, host, [".musai"]);
 
     const mask = argv.indexOf("--mount");
     expect(argv[mask + 1]).toBe(`type=tmpfs,destination=${CONTAINER_MOUNT_ROOT}/.musai,readonly`);
@@ -83,9 +83,11 @@ describe("a station's container argument array", () => {
   });
 
   test("with nothing masked it is the author's, byte for byte", () => {
-    expect(containerArgv(declared, DECLARED_DIGEST, scratch, "/host/tree", CONTAINER_MOUNT_ROOT, { A: "b" })).toEqual([
+    expect(containerArgv({ ...declared, environment: { A: "b" } }, DECLARED_DIGEST, host)).toEqual([
       "run",
       "--rm",
+      "--name",
+      "run-name",
       "--network",
       "none",
       "-v",
@@ -106,8 +108,20 @@ describe("a station's container argument array", () => {
       "/musai/private/xdg-state:exec,mode=1777",
       "-w",
       CONTAINER_MOUNT_ROOT,
-      "-e",
-      "A=b",
+      ...[
+        "HOME=/musai/private/home",
+        "TMPDIR=/musai/private/tmp",
+        "TEMP=/musai/private/tmp",
+        "TMP=/musai/private/tmp",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "SSH_AUTH_SOCK=",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "A=b",
+      ].flatMap((entry) => ["-e", entry]),
       "--entrypoint",
       "find",
       `example/image@sha256:${DECLARED_DIGEST}`,

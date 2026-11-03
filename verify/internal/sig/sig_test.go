@@ -123,8 +123,8 @@ func TestAMalformedLineIsReportedAndSkipped(t *testing.T) {
 	if len(parsed) != 1 || parsed[0].Line != 4 {
 		t.Fatalf("parsed %+v, want only line 4", parsed)
 	}
-	if len(problems) != 1 || problems[0].Line != 3 {
-		t.Fatalf("problems %+v, want line 3", problems)
+	if len(problems) != 1 || problems[0].Line != 3 || problems[0].Class != sig.RefusedOptionUnquoted {
+		t.Fatalf("problems %+v, want line 3 refused for its unquoted value", problems)
 	}
 }
 
@@ -141,18 +141,32 @@ func TestADayOfZeroIsNotATime(t *testing.T) {
 	}
 }
 
-// A time with no zone is read as UTC wherever the verifier runs, so one
-// bundle gets one verdict on every machine; ssh-keygen reads it in its own
-// local time, and the line is marked so a verifier can say so.
-func TestATimeWithoutAZoneIsReadAsUTCAndMarked(t *testing.T) {
+func TestATimeWithoutAZoneIsRefusedAndOneInUTCIsReadAsUTC(t *testing.T) {
 	a := newKey(t)
-	for when, zoneless := range map[string]bool{"20260831": true, "202608311200": true, "20260831Z": false, "20260831120000UTC": false} {
+	for when, refused := range map[string]bool{"20260831": true, "202608311200": true, "20260831Z": false, "20260831120000UTC": false} {
 		parsed, problems := sig.ParseAllowedSigners([]byte(`florin valid-after="` + when + `" ` + a.line))
-		if len(parsed) != 1 || len(problems) != 0 {
-			t.Fatalf("%s: parsed %d, problems %v", when, len(parsed), problems)
+		if refused {
+			if len(parsed) != 0 || len(problems) != 1 || problems[0].Class != sig.RefusedTime {
+				t.Errorf("%s: parsed %d, problems %v; want the line refused for its time", when, len(parsed), problems)
+			}
+			continue
 		}
-		if parsed[0].ValidAfter.Location() != time.UTC || parsed[0].Zoneless != zoneless {
-			t.Errorf("%s: at %v, zoneless %v; want UTC and %v", when, parsed[0].ValidAfter, parsed[0].Zoneless, zoneless)
+		if len(parsed) != 1 || len(problems) != 0 || parsed[0].ValidAfter.Location() != time.UTC {
+			t.Errorf("%s: parsed %+v, problems %v; want one line valid after a time in UTC", when, parsed, problems)
+		}
+	}
+}
+
+func TestARefusedLineNamesItsNumberAndTheLinesAfterItAreStillRead(t *testing.T) {
+	a := newKey(t)
+	parsed, problems := sig.ParseAllowedSigners([]byte("fl*n " + a.line + "\nflorin bogus " + a.line + "\nflorin " + a.line + "\n"))
+	want := []sig.LineError{{Line: 1, Class: sig.RefusedPrincipalPattern}, {Line: 2, Class: sig.RefusedOptionUnknown}}
+	if len(problems) != len(want) || len(parsed) != 1 || parsed[0].Line != 3 {
+		t.Fatalf("parsed %+v, problems %+v", parsed, problems)
+	}
+	for i, problem := range problems {
+		if problem.Line != want[i].Line || problem.Class != want[i].Class || problem.Reason == "" {
+			t.Errorf("problem %+v, want line %d refused as %s", problem, want[i].Line, want[i].Class)
 		}
 	}
 }

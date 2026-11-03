@@ -10,6 +10,7 @@ import {
   gitCheckIgnored,
   gitHashObjectBatch,
   gitInitWorkTree,
+  gitIsAncestor,
   gitMkTree,
   gitRevParse,
   gitWorkingTreeTree,
@@ -213,5 +214,49 @@ describe("a git dir named relative to the process's working directory", () => {
       process.chdir(before);
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+});
+
+describe("whether one commit descends from another", () => {
+  async function history(): Promise<{ readonly gitDir: string; readonly first: string; readonly second: string }> {
+    const checkout = await temporaryDirectory();
+    await execa("git", ["init", "--quiet", checkout]);
+    const commit = async (message: string) => {
+      await execa("git", [
+        "-C",
+        checkout,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "--allow-empty",
+        "--quiet",
+        "-m",
+        message,
+      ]);
+      return (await execa("git", ["-C", checkout, "rev-parse", "HEAD"])).stdout;
+    };
+    const first = await commit("first");
+    return { gitDir: join(checkout, ".git"), first, second: await commit("second") };
+  }
+
+  test("answers yes for an ancestor and no for a descendant asked the other way round", async () => {
+    const { gitDir, first, second } = await history();
+
+    expect(await gitIsAncestor({ gitDir }, first, second)).toBe(true);
+    expect(await gitIsAncestor({ gitDir }, second, first)).toBe(false);
+  });
+
+  test("answers no for an ancestor the repository does not hold", async () => {
+    const { gitDir, second } = await history();
+
+    expect(await gitIsAncestor({ gitDir }, "1".repeat(40), second)).toBe(false);
+  });
+
+  test("refuses a descendant the repository does not hold", async () => {
+    const { gitDir, first } = await history();
+
+    await expect(gitIsAncestor({ gitDir }, first, "1".repeat(40))).rejects.toThrow();
   });
 });

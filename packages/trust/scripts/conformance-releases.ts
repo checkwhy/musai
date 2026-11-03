@@ -24,7 +24,7 @@ import { mintAttestation } from "../src/attestation.js";
 import { covers, parseAudiences } from "../src/audiences.js";
 import { EMPTY_TRUST_DEFAULT, may, roleMatrix } from "../src/authority.js";
 import { ROLES } from "../src/roles.js";
-import { type Bundle, CONFORMANCE_DIR, fixtureBundle, RULING } from "./conformance-bundles.js";
+import { type Bundle, CONFORMANCE_DIR, fixtureBundle, RULING, SOME_KEY } from "./conformance-bundles.js";
 
 const LATER_ATTESTATION_VERSION = CURRENT_SCHEMA_VERSIONS.attestation + 1;
 
@@ -39,9 +39,6 @@ export interface ReleaseCase {
 }
 
 const PIN = "ref.pin-absent";
-
-/** A signer only for the role table, which reads no signature. */
-const SOME_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5";
 
 const AT = "2026-09-01T00:00:00.000Z";
 
@@ -148,9 +145,22 @@ interface Shape {
   /** How every release arrived; a release relayed through a model stands for no audience. */
   readonly via?: "model";
   readonly terms?: ReleaseTerms;
-  /** Written by hand over every release or over the seal: a version later than the kernel reads. */
-  readonly laterVersion?: { readonly of: "released" | "sealed"; readonly schemaVersion: number };
+  /** Written by hand over every release, every revocation or the seal: a version later than the
+   * kernel reads. */
+  readonly laterVersion?: { readonly of: "released" | "revoked" | "sealed"; readonly schemaVersion: number };
+  /** Each release superseded by one of its subject written by hand at a version later than the
+   * kernel reads, in the name and under the key of the release's own signer. */
+  readonly supersedeLater?: number;
+  /** One release of the first root's subject, to peer, superseding every release of another. */
+  readonly supersedeAcross?: true;
+  /** Every revocation written by hand with no time, a channel no version names and a non-id
+   * entry in `supersedes`, beside the release it withdraws. */
+  readonly revokeMalformed?: true;
   readonly revokeAll?: boolean;
+  /** Every revocation lands with no signature beside it, as one whose sidecar was stripped. */
+  readonly revokeUnsigned?: boolean;
+  /** Who every revocation names, florin where unset. */
+  readonly revokeAs?: "florin" | "mallory";
   /** The audience the ruling is sealed from by florin, before anything is released. */
   readonly sealFrom?: string;
   /** `record` is written by hand: the kernel names a seal of the record alone by no extent. */
@@ -162,14 +172,16 @@ interface Shape {
 function releaseBundle(dir: string, signers: Record<string, Signer>, shape: Shape): Bundle {
   const bundle = fixtureBundle();
   const signer = signers[shape.signer]!;
-  const put = (record: Record<string, unknown>, by: Signer): RecordId => {
+  const put = (record: Record<string, unknown>, by: Signer | null): RecordId => {
     const id = recordId(record);
     const bytes = canonicalBytes(record);
     bundle.set(recordPath("attestation", id), bytes);
-    bundle.set(sidecarPath(id), sign(dir, by, bytes));
+    if (by !== null) {
+      bundle.set(sidecarPath(id), sign(dir, by, bytes));
+    }
     return id;
   };
-  const later = (purpose: "released" | "sealed") =>
+  const later = (purpose: "released" | "revoked" | "sealed") =>
     shape.laterVersion?.of === purpose ? { schemaVersion: shape.laterVersion.schemaVersion } : {};
   const release = (subject: RecordId, extent: ReleaseExtent): RecordId => {
     const { record } = mintAttestation({
@@ -205,18 +217,53 @@ function releaseBundle(dir: string, signers: Record<string, Signer>, shape: Shap
     ...roots(bundle).map((root) => [root, release(root, "closure")] as const),
     ...made.map((attestation) => [attestation, release(attestation, "record")] as const),
   ];
+  if (shape.supersedeLater !== undefined) {
+    for (const [subject, id] of released) {
+      const { record } = mintAttestation({
+        subject,
+        principal: signer.principal,
+        principalClass: "person",
+        via: "signature",
+        purpose: "released",
+        at: timestamp(AT),
+        release: { audience: "peer" as Audience, extent: "record", terms: TERMS },
+        supersedes: [id],
+      });
+      put({ ...record, schemaVersion: shape.supersedeLater }, signer);
+    }
+  }
+  if (shape.supersedeAcross === true) {
+    const [[subject], ...others] = released;
+    const { record } = mintAttestation({
+      subject: subject!,
+      principal: signer.principal,
+      principalClass: "person",
+      via: "signature",
+      purpose: "released",
+      at: timestamp(AT),
+      release: { audience: "peer" as Audience, extent: "record", terms: TERMS },
+      supersedes: others.map(([, id]) => id),
+    });
+    put({ ...record }, signer);
+  }
   if (shape.revokeAll === true) {
     for (const [subject, id] of released) {
       const { record } = mintAttestation({
         subject,
-        principal: signers["florin"]!.principal,
+        principal: signers[shape.revokeAs ?? "florin"]!.principal,
         principalClass: "person",
         via: "signature",
         purpose: "revoked",
         at: timestamp(AT),
         supersedes: [id],
       });
-      put({ ...record }, signers["florin"]!);
+      const { at: _at, ...untimed } = record;
+      const written =
+        shape.revokeMalformed === true ? { ...untimed, via: 7, supersedes: [id, "not a record id"] } : record;
+      put(
+        { ...written, ...later("revoked") },
+        shape.revokeUnsigned === true ? null : signers[shape.revokeAs ?? "florin"]!,
+      );
     }
   }
   bundle.set(
@@ -275,6 +322,29 @@ export const RELEASE_CASES: readonly (ReleaseCase & { readonly shape: Shape })[]
     codes: [PIN, "release.uncovered"],
     what: "as released, with a revocation superseding each release",
     shape: { audience: "known", signer: "florin", revokeAll: true, manifest: "peer" },
+  },
+  {
+    name: "revoked-unsigned",
+    verdict: "verified",
+    entitlement: "uncovered",
+    codes: [PIN, "release.uncovered"],
+    what: "as revoked, every revocation landing with no signature beside it: a revocation in the name of a holder of publish withdraws its release whether or not it verifies, so a stripped one lets nothing leave again",
+    shape: { audience: "known", signer: "florin", revokeAll: true, revokeUnsigned: true, manifest: "peer" },
+  },
+  {
+    name: "revoked-unsigned-unauthorised",
+    verdict: "verified",
+    entitlement: "covered",
+    codes: [PIN],
+    what: "as revoked-unsigned, every revocation in the name of a signer the roles file grants nothing and who wrote no release: an unverified revocation in such a name withdraws nothing",
+    shape: {
+      audience: "known",
+      signer: "florin",
+      revokeAll: true,
+      revokeUnsigned: true,
+      revokeAs: "mallory",
+      manifest: "peer",
+    },
   },
   {
     name: "unauthorised",
@@ -339,6 +409,57 @@ export const RELEASE_CASES: readonly (ReleaseCase & { readonly shape: Shape })[]
       laterVersion: { of: "sealed", schemaVersion: LATER_ATTESTATION_VERSION },
       manifest: "known",
     },
+  },
+  {
+    name: "later-version-superseding",
+    verdict: "verified",
+    entitlement: "uncovered",
+    codes: [PIN, "attestation.version-unknown", "release.uncovered"],
+    what: "as released, each release superseded by its signer's release written by hand at a schema version later than the kernel reads: each later one is skipped and covers nothing, yet withdraws the release it supersedes, so skipping it never widens what stands",
+    shape: {
+      audience: "maintainers",
+      signer: "florin",
+      supersedeLater: LATER_ATTESTATION_VERSION,
+      manifest: "known",
+    },
+  },
+  {
+    name: "later-version-revocation",
+    verdict: "verified",
+    entitlement: "uncovered",
+    codes: [PIN, "release.uncovered"],
+    what: "as revoked, every revocation written by hand at a schema version later than the kernel reads: a withdrawal only narrows what leaves, so each still withdraws the release it supersedes",
+    shape: {
+      audience: "known",
+      signer: "florin",
+      revokeAll: true,
+      laterVersion: { of: "revoked", schemaVersion: LATER_ATTESTATION_VERSION },
+      manifest: "peer",
+    },
+  },
+  {
+    name: "later-version-revocation-malformed",
+    verdict: "verified",
+    entitlement: "uncovered",
+    codes: [PIN, "release.uncovered"],
+    what: "as revoked-unsigned, every revocation written by hand at a fractional schema version later than the kernel reads, with no time, a channel no version names and an entry in supersedes that is no record id: a withdrawal needs only its subject and the ids it supersedes, so each still withdraws its release",
+    shape: {
+      audience: "known",
+      signer: "florin",
+      revokeAll: true,
+      revokeUnsigned: true,
+      revokeMalformed: true,
+      laterVersion: { of: "revoked", schemaVersion: LATER_ATTESTATION_VERSION + 0.5 },
+      manifest: "peer",
+    },
+  },
+  {
+    name: "superseded-across-subjects",
+    verdict: "verified",
+    entitlement: "uncovered",
+    codes: [PIN, "release.uncovered"],
+    what: "as released, with one release of the first root, to peer, superseding every release of another record: a release that counts withdraws what it supersedes whatever its subject",
+    shape: { audience: "maintainers", signer: "florin", supersedeAcross: true, manifest: "known" },
   },
   {
     name: "no-manifest",

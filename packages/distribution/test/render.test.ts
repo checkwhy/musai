@@ -48,10 +48,10 @@ describe("render: what the receipts say, marked, never performed", () => {
     const after = await runHandler(renderMarkdown, {}, context);
 
     expect(before.markdown).toMatch(
-      /^- \[x\] ✓ the tracked file says hello · `node -e ".+"` — `musai why [0-9a-f]{12}`$/,
+      /^- \[x\] ✓ the tracked file says hello · `node -e '.+'` — `musai why [0-9a-f]{12}`$/,
     );
     expect(after.markdown).toMatch(
-      /^- \[ \] ◌ the tracked file says hello \(stale\) · `node -e ".+"` — `musai why [0-9a-f]{12}`$/,
+      /^- \[ \] ◌ the tracked file says hello \(stale\) · `node -e '.+'` — `musai why [0-9a-f]{12}`$/,
     );
     expect(await runCount(dir)).toBe(runs);
   }, 120_000);
@@ -84,7 +84,7 @@ describe("render: what the receipts say, marked, never performed", () => {
     const rendered = await runHandler(renderMarkdown, {}, context);
 
     expect(rendered.markdown.split("\n")).toHaveLength(1);
-    expect(rendered.markdown).toContain("two\\nlines, \\*\\*bold\\*\\* and \\<b\\>");
+    expect(rendered.markdown).toContain("two\\u000alines, \\*\\*bold\\*\\* and \\<b\\>");
   }, 120_000);
 
   test("a checklist line shows beside a check's verdict the command its deciding run ran", async () => {
@@ -103,7 +103,7 @@ describe("render: what the receipts say, marked, never performed", () => {
 
     const rendered = await runHandler(renderMarkdown, {}, context);
 
-    expect(rendered.markdown).toContain("✓ it prints · ``node -e \"console.log('`**not bold**` <b>')\"`` — ");
+    expect(rendered.markdown).toContain("✓ it prints · ``node -e 'console.log('\\''`**not bold**` <b>'\\'')'`` — ");
   }, 120_000);
 
   test("a markdown file's footnote resolving to a checked claim is marked, and the rest is left as written", async () => {
@@ -123,6 +123,20 @@ describe("render: what the receipts say, marked, never performed", () => {
       `The tracked file says hello.✓[^${label}] Nothing else is claimed.[^ffffffffffff]\n${receipts}`,
     );
     expect(rendered.claims).toBeUndefined();
+  }, 120_000);
+
+  test("a footnote is marked wherever the grammar reads it, even after an unclosed bracket", async () => {
+    const { context, claim } = await checkedRepository("the tracked file says hello");
+    const label = claim.slice("sha256:".length, "sha256:".length + 12);
+    const notes = await mkdtemp(join(tmpdir(), "musai-render-notes-"));
+    onTestFinished(() => rm(notes, { recursive: true, force: true }));
+    const file = join(notes, "NOTES.md");
+    const receipts = `\n## Receipts\n\n[^${label}]: ${claim}\n`;
+    await writeFile(file, `A stray [^ opens here; the tracked file says hello.[^${label}]\n${receipts}`);
+
+    const rendered = await runHandler(renderMarkdown, { file }, context);
+
+    expect(rendered.markdown).toBe(`A stray [^ opens here; the tracked file says hello.✓[^${label}]\n${receipts}`);
   }, 120_000);
 });
 
@@ -148,7 +162,7 @@ describe("the dossier: each claim's verdict beside what decided it", () => {
     try {
       const dossier = await renderDossier(opened, caseId!, caseRecord, []);
 
-      expect(dossier).toMatch(/^- the tracked file says hello — holds · `node -e ".+"`$/m);
+      expect(dossier).toMatch(/^- the tracked file says hello — holds · `node -e '.+'`$/m);
       expect(await runCount(dir)).toBe(runs);
     } finally {
       opened.close();

@@ -24,7 +24,7 @@ describe("a claim type whose canonical schema does not compile", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-claim-type-refused-"));
     const { gitDir } = await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir }, scope, now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(MISDECLARED_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index, now });
   }, 180_000);
@@ -38,7 +38,7 @@ describe("a claim type whose canonical schema does not compile", () => {
   }
 
   test("is a refused row the workspace opens with, naming the type", async () => {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
 
     const refused = opened.foldRefusals.filter((refusal) => refusal.contributionId === CLAIM_TYPE);
     expect(refused).toHaveLength(1);

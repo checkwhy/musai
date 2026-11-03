@@ -1,4 +1,4 @@
-import { type Audience, type AudienceForm, KernelError, parseAudience } from "@musai/records";
+import { AUDIENCES_FILE, type Audience, type AudienceForm, parseAudience, TrustFileError } from "@musai/records";
 
 export interface DeclaredAudience {
   readonly members: ReadonlySet<string>;
@@ -13,50 +13,68 @@ export interface Audiences {
 export function parseAudiences(content: string): Audiences {
   const members = new Map<string, Set<string>>();
   const includes = new Map<string, Set<string>>();
-  const declare = (name: string, rawLine: string): void => {
+  const unread = (why: string, index: number, rawLine: string) =>
+    TrustFileError.atLine(AUDIENCES_FILE, index, why, rawLine);
+  const declare = (name: string, index: number, rawLine: string): void => {
     if (formOf(name) !== "name") {
-      throw new RangeError(`declares something other than a name: ${rawLine}`);
+      throw unread("a declaration of something other than a name", index, rawLine);
     }
     if (!members.has(name)) {
       members.set(name, new Set());
       includes.set(name, new Set());
     }
   };
-  const included: { name: string; target: string; rawLine: string }[] = [];
-  for (const rawLine of content.split("\n")) {
+  const included: { name: string; target: string; index: number; rawLine: string }[] = [];
+  for (const [index, rawLine] of content.split("\n").entries()) {
     const line = rawLine.trim();
     if (line.length === 0 || line.startsWith("#")) {
       continue;
     }
     const fields = line.split(/\s+/);
     if (fields.length === 1) {
-      declare(fields[0]!, rawLine);
+      declare(fields[0]!, index, rawLine);
     } else if (fields.length === 3 && fields[1] === "member") {
-      declare(fields[0]!, rawLine);
+      declare(fields[0]!, index, rawLine);
       const form = formOf(fields[2]!);
       if (form !== "key" && form !== "identity") {
-        throw new RangeError(`a member is a key or an identity: ${rawLine}`);
+        throw unread("a member that is neither a key nor an identity", index, rawLine);
       }
       members.get(fields[0]!)!.add(fields[2]!);
     } else if (fields.length === 3 && fields[1] === "includes") {
-      declare(fields[0]!, rawLine);
-      included.push({ name: fields[0]!, target: fields[2]!, rawLine });
+      declare(fields[0]!, index, rawLine);
+      included.push({ name: fields[0]!, target: fields[2]!, index, rawLine });
     } else {
-      throw new RangeError(`not an audiences file line: ${rawLine}`);
+      throw unread("no declaration, member or includes", index, rawLine);
     }
   }
-  for (const { name, target, rawLine } of included) {
+  const includedAt = new Map<string, { index: number; rawLine: string }>();
+  for (const { name, target, index, rawLine } of included) {
     if (!members.has(target)) {
-      throw new RangeError(`includes an audience this file does not declare: ${rawLine}`);
+      throw unread("an includes naming an audience it does not declare", index, rawLine);
     }
     includes.get(name)!.add(target);
+    const edge = includeEdge(name, target);
+    if (!includedAt.has(edge)) {
+      includedAt.set(edge, { index, rawLine });
+    }
   }
-  refuseCycles(includes);
+  const cycle = cycleOf(includes);
+  if (cycle !== null) {
+    const { index, rawLine } = includedAt.get(includeEdge(cycle.at(-2)!, cycle.at(-1)!))!;
+    throw unread(`an includes closing the cycle ${cycle.join(" includes ")}`, index, rawLine);
+  }
   return {
     names: new Map(
       [...members.keys()].map((name) => [name, { members: members.get(name)!, includes: includes.get(name)! }]),
     ),
   };
+}
+
+/** What a refused line still declares, so a line naming that audience is not refused for it. */
+export function setAsideAudiencesLine(rawLine: string): string {
+  const fields = rawLine.trim().split(/\s+/);
+  const declares = fields.length === 3 && (fields[1] === "member" || fields[1] === "includes");
+  return declares && formOf(fields[0]!) === "name" ? fields[0]! : "";
 }
 
 function formOf(text: string): AudienceForm["form"] | undefined {
@@ -67,28 +85,36 @@ function formOf(text: string): AudienceForm["form"] | undefined {
   }
 }
 
-function refuseCycles(includes: ReadonlyMap<string, ReadonlySet<string>>): void {
+function includeEdge(name: string, target: string): string {
+  return `${name} includes ${target}`;
+}
+
+/** The first cycle a walk in name order meets, ending on the name it starts from; null for none. */
+function cycleOf(includes: ReadonlyMap<string, ReadonlySet<string>>): readonly string[] | null {
   const done = new Set<string>();
-  const visit = (name: string, path: readonly string[]): void => {
+  const visit = (name: string, path: readonly string[]): readonly string[] | null => {
     if (path.includes(name)) {
-      const cycle = [...path.slice(path.indexOf(name)), name];
-      throw new KernelError({
-        reason: "declaration-conflict",
-        detail: `the audiences file declares a cycle: ${cycle.join(" includes ")}`,
-        about: cycle,
-      });
+      return [...path.slice(path.indexOf(name)), name];
     }
     if (done.has(name)) {
-      return;
+      return null;
     }
     for (const target of includes.get(name) ?? []) {
-      visit(target, [...path, name]);
+      const cycle = visit(target, [...path, name]);
+      if (cycle !== null) {
+        return cycle;
+      }
     }
     done.add(name);
+    return null;
   };
   for (const name of [...includes.keys()].sort()) {
-    visit(name, []);
+    const cycle = visit(name, []);
+    if (cycle !== null) {
+      return cycle;
+    }
   }
+  return null;
 }
 
 /** Every name a release to `name` reaches through what each name includes, `name` among them. */

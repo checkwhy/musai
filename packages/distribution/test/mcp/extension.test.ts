@@ -18,7 +18,13 @@ import {
   runHandler,
   validateAgainstSchema,
 } from "@musai/api-core";
-import { createMcpServer, type McpDistribution, toolsFromRegistry } from "@musai/mcp";
+import {
+  type CallToolResult,
+  createMcpServer,
+  type McpDistribution,
+  operationProjections,
+  toolNameFor,
+} from "@musai/mcp";
 import {
   type CaseRecord,
   type ClaimRecord,
@@ -69,8 +75,9 @@ describe("musai's MCP server, built from MUSAI_MCP", () => {
   async function connect(
     distribution: McpDistribution = MUSAI_MCP,
     capabilities: ClientCapabilities = {},
+    lab = true,
   ): Promise<void> {
-    server = createMcpServer(distribution, context, { lab: true });
+    server = createMcpServer(distribution, context, { lab });
     client = new Client({ name: "musai-extension-client", version: "1.0.0" }, { capabilities });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
@@ -166,7 +173,7 @@ describe("musai's MCP server, built from MUSAI_MCP", () => {
 
     const names = tools.map((tool) => tool.name);
     expect(names.filter((name) => name === "gate_answer")).toHaveLength(1);
-    const projectedAt = toolsFromRegistry(REGISTRY).findIndex((tool) => tool.name === "gate_answer");
+    const projectedAt = [...operationProjections(REGISTRY).keys()].indexOf("gate_answer");
     expect(projectedAt).toBeGreaterThanOrEqual(0);
     expect(names.indexOf("gate_answer")).toBe(projectedAt);
     const gateAnswer = tools[projectedAt]!;
@@ -252,6 +259,25 @@ describe("musai's MCP server, built from MUSAI_MCP", () => {
         confirmation: { enum: ["keep", "decline", "cancel", "expired"] },
       },
     });
+  });
+
+  test("outside lab, refuses a call by the name of each operation it does not list, and reaches each it lists", async () => {
+    await connect(MUSAI_MCP, {}, false);
+
+    const listed = (await client.listTools()).tools.map((tool) => tool.name);
+    const reasons = new Map<string, unknown>();
+    for (const name of [...REGISTRY.values()].map(toolNameFor)) {
+      const result = (await client.callTool({ name, arguments: {} })) as CallToolResult;
+      const text = (result.content[0] as { text: string }).text;
+      reasons.set(name, result.isError === true ? (JSON.parse(text) as { reason: string }).reason : "answered");
+    }
+
+    expect(listed.length).toBeGreaterThan(0);
+    for (const [name, reason] of reasons) {
+      expect([name, reason === "unknown-operation"]).toEqual([name, !listed.includes(name)]);
+    }
+    expect(reasons.get("scope_drop")).toBe("unknown-operation");
+    expect(reasons.get("gate_answer")).toBe("unknown-operation");
   });
 
   test("after an install, sends the tools, resources and prompts list-changed notifications", async () => {

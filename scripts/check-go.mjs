@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const verify = join(root, "verify");
 
-/** The verifier's own CI checks but its linter, which CI pins and downloads. */
+/** The verifier's own CI checks but its linter, which CI pins and downloads.
+ * @type {[string, string[]][]} */
 const STEPS = [
   ["go", ["vet", "./..."]],
   ["go", ["test", "-count=1", "./..."]],

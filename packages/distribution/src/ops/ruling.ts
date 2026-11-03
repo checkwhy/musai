@@ -30,16 +30,20 @@ function renderRulingMakeText(output: RulingMakeOutput): string {
 const rulingMakeHandler: OperationHandler<RulingMakeInput, RulingMakeOutput> = {
   async plan(input, opened, context) {
     const { via, principal } = await establishedChannel(context, opened, input.key);
-    const planned = await mintRuling(opened, {
-      claim: input.claim as RecordId,
-      verdict: input.verdict,
-      reason: input.reason,
-      brief: input.brief as RecordId,
-      supersedes: (input.supersedes ?? []) as readonly RecordId[],
-      via,
-      principal,
-      salt: input.salt,
-    });
+    const planned = await mintRuling(
+      opened,
+      {
+        claim: input.claim as RecordId,
+        verdict: input.verdict,
+        reason: input.reason,
+        brief: input.brief as RecordId,
+        supersedes: (input.supersedes ?? []) as readonly RecordId[],
+        via,
+        principal,
+        salt: input.salt,
+      },
+      context,
+    );
     return {
       plan: { put: planned.put, attest: planned.attest, needs: [] },
       output: (applied) => ({ minted: applied.minted }),
@@ -86,6 +90,7 @@ export const rulingMake = definedOperation<RulingMakeInput, RulingMakeOutput>(
       "no-such-record",
       "declaration-conflict",
       "invalid-input",
+      "stale",
     ],
     documentation: "Mints a ruling and its attestation directly, against a claim and the brief it was decided against.",
     paths: ["key"],

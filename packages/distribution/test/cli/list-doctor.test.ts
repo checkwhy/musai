@@ -230,6 +230,46 @@ describe("list and doctor — against the built binary", () => {
     }
   });
 
+  test("a machine without ssh-keygen is a failed machine row naming what it costs, and doctor still exits 0", async () => {
+    const pathDirectory = await gitOnlyPath();
+    try {
+      const { exitCode, stdout } = await execa(
+        process.execPath,
+        [CLI_PATH, "doctor", "--workspace", workspace, "--json"],
+        { env: { PATH: [pathDirectory, dirname(process.execPath)].join(delimiter) } },
+      );
+      expect(exitCode).toBe(0);
+
+      const report = JSON.parse(stdout) as { local: Array<{ name: string; ok: boolean; detail: string }> };
+      const row = report.local.find((check) => check.name === "ssh-keygen");
+      expect(row?.ok).toBe(false);
+      expect(row?.detail).toContain("did not start");
+      expect(row?.detail).toContain("whatever the signing level");
+    } finally {
+      await rm(pathDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("an ssh-keygen that resolves but does not sign is a failed machine row saying what it answered", async () => {
+    const pathDirectory = await gitOnlyPath();
+    try {
+      await symlink(join(pathDirectory, "git"), join(pathDirectory, "ssh-keygen"));
+      const { exitCode, stdout } = await execa(
+        process.execPath,
+        [CLI_PATH, "doctor", "--workspace", workspace, "--json"],
+        { env: { PATH: [pathDirectory, dirname(process.execPath)].join(delimiter) } },
+      );
+      expect(exitCode).toBe(0);
+
+      const report = JSON.parse(stdout) as { local: Array<{ name: string; ok: boolean; detail: string }> };
+      const row = report.local.find((check) => check.name === "ssh-keygen");
+      expect(row?.ok).toBe(false);
+      expect(row?.detail).toMatch(/exited \d+/);
+    } finally {
+      await rm(pathDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("doctor's text form prints the exit-code table", async () => {
     const { stdout } = await execa("node", [CLI_PATH, "doctor", "--workspace", workspace]);
     expect(stdout).toContain("Exit codes");

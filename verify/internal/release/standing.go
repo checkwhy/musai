@@ -81,7 +81,8 @@ func (a Attestation) Holds(at time.Time) bool {
 
 // Standing answers the releases that stand: each signed by a holder of
 // publish, relayed through no model, and neither revoked nor replaced by an
-// attestation that counts. No attestation's own time is read.
+// attestation that counts. A revocation counts whether or not it verifies, so
+// a stripped one lets nothing leave again. No attestation's own time is read.
 func Standing(attestations []Attestation, roles Roles) []Attestation {
 	var releases []Attestation
 	for _, a := range attestations {
@@ -91,7 +92,7 @@ func Standing(attestations []Attestation, roles Roles) []Attestation {
 	}
 	withdrawn := map[string]bool{}
 	for _, a := range attestations {
-		if a.Purpose != "revoked" || !a.Signed || !revocationCounts(a, attestations, roles) {
+		if a.Purpose != "revoked" || !revocationCounts(a, attestations, roles) {
 			continue
 		}
 		for _, id := range a.Supersedes {

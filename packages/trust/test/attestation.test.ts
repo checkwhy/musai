@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   ATTESTATION_PURPOSES,
   type AttestationPurpose,
@@ -14,9 +14,10 @@ import {
 } from "@musai/records";
 import { allowedSignersLine, generateTestKey, type TestKey, writeAllowedSigners } from "@musai/test-support";
 import { execa } from "execa";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { type Attestation, mintAttestation } from "../src/attestation.js";
 import { SIGNATURE_NAMESPACE, type SignAttestationInput, signAttestation } from "../src/sign.js";
+import { SigningKeyError } from "../src/signing-key.js";
 import { type VerifyAttestationInput, verifyAttestation } from "../src/verify.js";
 
 const ALICE = `key:SHA256:${"a".repeat(43)}`;
@@ -174,6 +175,32 @@ describe("the namespace is the kernel's own, never a call site's", () => {
   });
 });
 
+describe("signing with a key that is not there", () => {
+  test("a signing key path that is not a file is refused workspace-incomplete by its path, never as a missing tool", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "musai-sign-missing-"));
+    const attestation = mintAttestation({
+      subject: recordId({ example: "signed by nothing" }),
+      principal: ALICE,
+      principalClass: "person",
+      via: "signature",
+      purpose: "asserted",
+      at: timestamp("2026-01-01T00:00:00Z"),
+    });
+    try {
+      for (const keyPath of [join(dir, "no-such-key"), dir]) {
+        const signing = signAttestation({ attestation, keyPath });
+        await expect(signing).rejects.toThrow(SigningKeyError);
+        await expect(signAttestation({ attestation, keyPath })).rejects.toMatchObject({
+          reason: "workspace-incomplete",
+          detail: expect.stringContaining(keyPath),
+        });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("no key material reaches a result or a message", () => {
   test("signing and verifying name no private key material, so a refusal can be pasted anywhere", async () => {
     const signSource = await readFile(new URL("../src/sign.ts", import.meta.url), "utf8");
@@ -326,5 +353,81 @@ describe("signing and verifying with the system OpenSSH binary", () => {
     });
     expect(result.good).toBe(false);
     expect(result.failureReason).toBe("signature-invalid");
+  });
+
+  test("an allowed-signers file naming no key for the principal is a signature-invalid result", async () => {
+    const result = await verifyAttestation({
+      attestation,
+      signedBytes: canonicalBytes(attestation.record),
+      signature,
+      allowedSignersPath: await writeAllowedSigners(key.dir, ""),
+    });
+    expect(result.good).toBe(false);
+    expect(result.failureReason).toBe("signature-invalid");
+  });
+
+  test("a verification finding no allowed-signers file refuses rather than judge the signature", async () => {
+    const input: VerifyAttestationInput = {
+      attestation,
+      signedBytes: canonicalBytes(attestation.record),
+      signature,
+      allowedSignersPath: join(key.dir, "no-such-allowed-signers"),
+    };
+    await expect(verifyAttestation(input)).rejects.toMatchObject({
+      reason: "workspace-incomplete",
+      about: [attestation.id],
+    });
+    const directory = join(key.dir, "allowed-signers-directory");
+    await mkdir(directory, { recursive: true });
+    await expect(verifyAttestation({ ...input, allowedSignersPath: directory })).rejects.toMatchObject({
+      reason: "workspace-incomplete",
+    });
+  });
+
+  describe("an ssh-keygen that cannot give a verdict", () => {
+    let bin: string;
+
+    beforeAll(async () => {
+      bin = await mkdtemp(join(tmpdir(), "musai-verify-stub-"));
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    afterAll(async () => {
+      await rm(bin, { recursive: true, force: true });
+    });
+
+    test.each([
+      ["exits 0 printing no good signature", "exit 0"],
+      [
+        "exits 0 vouching for another namespace",
+        // `$7` is the principal the kernel passes after `-I`, so only the namespace is wrong.
+        'echo "Good \\"git\\" signature for $7 with ED25519 key SHA256:x"; exit 0',
+      ],
+      ["exits with its usage code", "exit 1"],
+      ["exits as a fatal error does, printing no verdict", "echo 'out of memory' >&2; exit 255"],
+      ["exits with a code ssh-keygen never gives a verdict under", "echo 'Could not verify signature.'; exit 2"],
+      ["is ended by a signal", "kill -SEGV $$"],
+      [
+        "cannot read the signature it was handed",
+        "echo \"Couldn't read signature file: I/O error\" >&2; echo 'Could not verify signature.'; exit 255",
+      ],
+    ])("refuses, never judging the signature, when ssh-keygen %s", async (_, body) => {
+      await writeFile(join(bin, "ssh-keygen"), `#!/bin/sh\n${body}\n`);
+      await chmod(join(bin, "ssh-keygen"), 0o755);
+      const allowedSignersPath = await writeAllowedSigners(key.dir, allowedSignersLine(key));
+      vi.stubEnv("PATH", `${bin}${delimiter}${process.env["PATH"] ?? ""}`);
+
+      await expect(
+        verifyAttestation({
+          attestation,
+          signedBytes: canonicalBytes(attestation.record),
+          signature,
+          allowedSignersPath,
+        }),
+      ).rejects.toMatchObject({ reason: "tool-unavailable", about: [attestation.id] });
+    });
   });
 });

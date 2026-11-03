@@ -1,4 +1,3 @@
-import { recordId } from "../canonical/canonicalize.js";
 import { KernelError } from "../reason/error.js";
 import {
   type AssignableSlotLayer,
@@ -23,7 +22,6 @@ export interface SlotResolution {
   readonly id: string;
   readonly value: unknown;
   readonly layer: Layer;
-  readonly readId: string;
 }
 
 export class LayerRefusedError extends KernelError {
@@ -31,12 +29,6 @@ export class LayerRefusedError extends KernelError {
     super({ reason: "workspace-incomplete", detail: message, about: [slotId] });
     this.name = "LayerRefusedError";
   }
-}
-
-/** The read id a slot resolution contributes, so a changed preset stales exactly the claims that
- * read the slot. */
-export function slotReadId(id: string, valueContentId: string): string {
-  return `slot:${id}=${valueContentId}`;
 }
 
 const ASSIGNABLE_LAYER_ORDER: readonly AssignableSlotLayer[] = ["project", "preset", "booking"];
@@ -53,8 +45,7 @@ function layerAssignment(
   return { present: true, value: map[id] };
 }
 
-/** The last permitted layer to assign the slot wins, else its default. The read id digests the
- * winning value, so it changes only when the value does. */
+/** The last permitted layer to assign the slot wins, else its default. */
 export function resolveSlot(id: string, registry: SlotRegistry, layers: SlotLayers): SlotResolution {
   const declaration: SlotDeclaration | undefined = registry.get(id);
   if (declaration === undefined) {
@@ -91,6 +82,5 @@ export function resolveSlot(id: string, registry: SlotRegistry, layers: SlotLaye
     throw new LayerRefusedError(`refusing ${id} at the ${winner.layer} layer: ${reason}`, id);
   }
 
-  const readId = slotReadId(id, recordId(winner.value));
-  return { id, value: winner.value, layer: winner.layer, readId };
+  return { id, value: winner.value, layer: winner.layer };
 }

@@ -5,5 +5,6 @@ export default defineConfig({
   resolve: { alias: workspaceSourceAliases() },
   test: {
     include: ["test/**/*.test.ts"],
+    setupFiles: ["@musai/test-support/index-guard"],
   },
 });

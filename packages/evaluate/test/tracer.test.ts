@@ -196,7 +196,7 @@ describe("one claim, end to end against a real fixture repository", () => {
   });
 
   test("the index answers the claim at its slot and its evidence edges, with a watermark equal to the tip", async () => {
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     const indexed = index.claimAtSlot(slot);

@@ -10,7 +10,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { closingWorkspaces, type Distribution, type OperationContext } from "@musai/api-core";
-import { refusalCrossingAsRpcError } from "./refusal.js";
+import { noWorkspaceRefusal, type ReadGuard, refusalCrossingAsRpcError } from "./refusal.js";
 
 /** Frozen, each read a copy: an extension cannot register over the generic dispatch or change the
  * principal a later projected call runs under. */
@@ -50,26 +50,37 @@ export interface McpDistribution extends Distribution {
   readonly extensions?: { readonly mcp?: McpExtension };
 }
 
-/** The server must declare the `resources` capability first, or the SDK refuses the handlers.
- * `beforeRead` runs ahead of every read, and its refusal is the read's. */
+/** The server must declare the `resources` capability first, or the SDK refuses the handlers;
+ * where no workspace stands, none is listed and a read is refused before `read` runs. */
 export function registerResourceHandlers(
   server: Server,
   resources: McpResources,
   session: McpResourceSession,
-  beforeRead: () => Promise<void> = async () => {},
+  guard: ReadGuard,
 ): void {
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [...resources.resources] }));
+  server.setRequestHandler(ListResourcesRequestSchema, () =>
+    refusalCrossingAsRpcError(() =>
+      guard(async (makers) => ({ resources: makers === undefined ? [...resources.resources] : [] })),
+    ),
+  );
 
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-    resourceTemplates: [...resources.templates],
-  }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, () =>
+    refusalCrossingAsRpcError(() =>
+      guard(async (makers) => ({ resourceTemplates: makers === undefined ? [...resources.templates] : [] })),
+    ),
+  );
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
     closingWorkspaces(() =>
-      refusalCrossingAsRpcError(async () => {
-        await beforeRead();
-        return resources.read(session, request.params.uri);
-      }),
+      refusalCrossingAsRpcError(() =>
+        guard(async (makers) => {
+          const { uri } = request.params;
+          if (makers !== undefined) {
+            throw noWorkspaceRefusal("no-such-record", uri, session.context.workspace, makers);
+          }
+          return resources.read(session, uri);
+        }),
+      ),
     ),
   );
 }

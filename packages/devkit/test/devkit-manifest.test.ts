@@ -204,10 +204,10 @@ describe("a bundle's own dependency list is sorted and stable", () => {
 
 async function install(repo: FixtureRepo, name: string, version: string, manifest: ModuleManifest) {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   const buildReceiptId = recordId({ marker: `build-for-${name}-${version}` });
-  return installModule(
+  return await installModule(
     name,
     versionString(version),
     manifest,
@@ -224,7 +224,7 @@ describe("installing into a workspace with nothing installed", () => {
     const repo = await trackedRepo();
     const result = await install(repo, "first-module", "1.0.0", manifestWithContributions([]));
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([
       { id: result.moduleRecordId, name: "first-module", version: "1.0.0" },
@@ -256,7 +256,7 @@ describe("installing a name a workspace already holds", () => {
     const later = await install(repo, "shared-name", "2.0.0", manifestWithContributions([]));
     expect(later.moduleRecordId).not.toBe(earlier.moduleRecordId);
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     expect(index.installedModuleRecords()).toEqual([
       { id: later.moduleRecordId, name: "shared-name", version: "2.0.0" },
@@ -309,7 +309,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
       expect(refusal.message).toMatch(/neither this kernel ships nor this workspace holds/);
     }
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([]);
 
@@ -346,7 +346,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
         expect(refusal.message).toContain(`input property named ${property},`);
       }
 
-      const index = new IndexDb(":memory:");
+      using index = new IndexDb(":memory:");
       await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       expect(index.installedModuleRecords()).toEqual([]);
       const bundleBytes = new TextEncoder().encode("bundle for asserting-module@1.0.0");
@@ -419,7 +419,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
         expect(shortfall, JSON.stringify(input)).toContain(keyword);
       }
 
-      const index = new IndexDb(":memory:");
+      using index = new IndexDb(":memory:");
       await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
       expect(index.installedModuleRecords()).toEqual([]);
       const bundleBytes = new TextEncoder().encode("bundle for open-module@1.0.0");
@@ -431,8 +431,8 @@ describe("a module manifest whose declarations disagree with each other", () => 
     const repo = await trackedRepo();
     const manifest = manifestWithContributions([
       {
-        kind: "view",
-        id: "open-view-module/rows",
+        kind: "parser",
+        id: "open-parser-module/rows",
         version: versionString("1"),
         input: { type: "object", allOf: [{ properties: { via: { type: "string" } } }] },
         output: true,
@@ -440,7 +440,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
       },
     ]);
 
-    await expect(install(repo, "open-view-module", "1.0.0", manifest)).resolves.toMatchObject({
+    await expect(install(repo, "open-parser-module", "1.0.0", manifest)).resolves.toMatchObject({
       moduleRecordId: expect.stringMatching(/^sha256:/),
     });
   });
@@ -480,7 +480,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
       expect(refusal.about).toEqual(["unservable-fold-module/rows", "unservable_fold_module_rows"]);
     }
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([]);
 
@@ -532,7 +532,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
       expect(refusal.about).toEqual(["undeclarable-query-module/watermark", "watermark"]);
     }
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([]);
 
@@ -600,7 +600,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
 
     const result = await install(repo, "paired-pack", "1.0.0", manifest);
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([
       { id: result.moduleRecordId, name: "paired-pack", version: "1.0.0" },
@@ -669,7 +669,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
       expect(refusal.about).toContain("query-pack/reads");
       expect(refusal.detail).toContain("table_pack_rows");
     }
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords().find((held) => held.name === "table-pack")).toEqual({
       id: table.moduleRecordId,
@@ -726,7 +726,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
 
     const result = await install(repo, "unrelated-pack", "1.0.0", manifestWithContributions([]));
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(
       index
@@ -768,7 +768,7 @@ describe("a module manifest whose declarations disagree with each other", () => 
 
     await install(repo, "unrelated-pack", "1.0.0", manifestWithContributions([]));
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(
       index
@@ -803,7 +803,7 @@ describe("two contributions differing only in version", () => {
     ];
     const result = await install(repo, moduleName, "1.0.0", manifestWithContributions(entries));
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const contributions = index.contributionsOf("parser");
     expect(contributions).toHaveLength(2);
@@ -843,7 +843,7 @@ describe("two contribution ids differing only in case", () => {
       `${moduleName}/thing`,
     ]);
 
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     expect(index.contributionById(`${moduleName}/Thing`)?.entry.id).toBe(`${moduleName}/Thing`);
     expect(index.contributionById(`${moduleName}/thing`)?.entry.id).toBe(`${moduleName}/thing`);

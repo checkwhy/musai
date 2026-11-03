@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
@@ -9,7 +9,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { gitCheckIgnored } from "../src/git.js";
 import { adoptWorkspace, initWorkspace, LOCAL_DIR, MUSAI_DIR } from "../src/init.js";
 
-/** One instant for every initialisation, so racing seed commits are one commit. */
 const FIXED_INSTANT = "2026-01-01T00:00:00.000Z";
 const FIXED_NOW = fixedClock(FIXED_INSTANT);
 
@@ -151,7 +150,7 @@ describe("initWorkspace", () => {
     expect(after).toEqual(before);
   });
 
-  test("refuses a bare repository holding no main, as an interrupted initialisation leaves one, and writes nothing", async () => {
+  test("refuses a bare repository holding no main, and writes nothing", async () => {
     const workspace = await makeTempWorkspace();
     const gitDir = join(workspace, MUSAI_DIR);
     await execa("git", ["init", "--quiet", "--bare", gitDir]);
@@ -160,6 +159,17 @@ describe("initWorkspace", () => {
     await expect(initWorkspace(workspace, { now: FIXED_NOW })).rejects.toThrow(gitDir);
     const after = await readTree(workspace);
     expect(after).toEqual(before);
+  });
+
+  test("makes the workspace in an empty .musai", async () => {
+    const workspace = await makeTempWorkspace();
+    await mkdir(join(workspace, MUSAI_DIR));
+
+    const { gitDir, created } = await initWorkspace(workspace, { now: FIXED_NOW });
+
+    expect(created).toBe(true);
+    expect(await readdir(workspace)).toEqual([MUSAI_DIR]);
+    expect(await adoptWorkspace(gitDir)).toBe("adopted");
   });
 
   test("refuses a .musai that is a file by name, and writes nothing", async () => {
@@ -190,21 +200,139 @@ describe("initWorkspace", () => {
     expect(after).toEqual(before);
   });
 
-  test("many initialisations of one directory at once leave a single seeded root, whichever of them the directory check turns away", async () => {
+  test("many initialisations of one directory at once all succeed and leave a single seeded root", async () => {
     const workspace = await makeTempWorkspace();
     const gitDir = join(workspace, MUSAI_DIR);
 
-    // Late callers are refused by name; the rest share one instant, so their seed commits coincide.
-    const outcomes = await Promise.allSettled(
-      Array.from({ length: 6 }, () => initWorkspace(workspace, { now: FIXED_NOW })),
-    );
-    expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+    const outcomes = await Promise.all(Array.from({ length: 6 }, () => initWorkspace(workspace, { now: FIXED_NOW })));
+    expect(outcomes.filter((outcome) => outcome.created)).toHaveLength(1);
 
     const { stdout: reachable } = await execa("git", ["--git-dir", gitDir, "rev-list", "--count", "refs/heads/main"]);
     expect(reachable.trim()).toBe("1");
 
     const { stdout: unreachable } = await execa("git", ["--git-dir", gitDir, "fsck", "--unreachable", "--no-progress"]);
     expect(unreachable).not.toContain("unreachable commit");
+  });
+});
+
+describe("what an initialisation leaves, finished or not", () => {
+  test.skipIf(process.platform === "win32")(
+    "an init that fails after creating the repository leaves no .musai behind, and a retry succeeds",
+    async () => {
+      const workspace = await makeTempWorkspace();
+      const bin = await makeTempWorkspace();
+      const path = process.env["PATH"] ?? "";
+      // A git that refuses to build a tree, so seeding main fails once the repository exists.
+      await writeFile(
+        join(bin, "git"),
+        `#!/bin/sh\nfor arg; do [ "$arg" = mktree ] && exit 1; done\nPATH='${path.replaceAll("'", "'\\''")}' exec git "$@"\n`,
+      );
+      await chmod(join(bin, "git"), 0o755);
+      vi.stubEnv("PATH", `${bin}${delimiter}${path}`);
+
+      await expect(initWorkspace(workspace, { now: FIXED_NOW })).rejects.toThrow();
+      vi.unstubAllEnvs();
+
+      expect(await readdir(workspace)).toEqual([]);
+      const retried = await initWorkspace(workspace, { now: FIXED_NOW });
+      expect(retried.created).toBe(true);
+      expect(await adoptWorkspace(retried.gitDir)).toBe("adopted");
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "an init that finds a symbolic link put at .musai while it built refuses naming it a symbolic link, and leaves it",
+    async () => {
+      const workspace = await makeTempWorkspace();
+      const gitDir = join(workspace, MUSAI_DIR);
+      const target = join(workspace, "elsewhere");
+      const bin = await makeTempWorkspace();
+      const path = process.env["PATH"] ?? "";
+      const quoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+      // A git that links .musai elsewhere while main is seeded, then builds the tree as asked.
+      await writeFile(
+        join(bin, "git"),
+        `#!/bin/sh\nfor arg; do [ "$arg" = mktree ] && ln -s ${quoted(target)} ${quoted(gitDir)}; done\nPATH=${quoted(path)} exec git "$@"\n`,
+      );
+      await chmod(join(bin, "git"), 0o755);
+      vi.stubEnv("PATH", `${bin}${delimiter}${path}`);
+
+      const refusal = await initWorkspace(workspace, { now: FIXED_NOW }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      vi.unstubAllEnvs();
+
+      expect(refusal).toBeInstanceOf(KernelError);
+      expect(refusal).toMatchObject({ reason: "invalid-input", about: [gitDir] });
+      expect((refusal as KernelError).detail).toContain("a symbolic link");
+      expect(await readdir(workspace)).toEqual([MUSAI_DIR]);
+      expect((await lstat(gitDir)).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "an enclosing repository finds nothing to add in a workspace an init is still building, so an init killed mid-build leaves none",
+    async () => {
+      const workspace = await makeTempWorkspace();
+      await execa("git", ["init", "--quiet", workspace]);
+      const bin = await makeTempWorkspace();
+      const log = join(bin, "status");
+      const quoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+      const path = quoted(process.env["PATH"] ?? "");
+      // A git that, as main is seeded, records what the enclosing repository would add and holds.
+      await writeFile(
+        join(bin, "git"),
+        `#!/bin/sh\nfor arg; do [ "$arg" = mktree ] && { ls -A ${quoted(workspace)}; env -i PATH=${path} git -C ${quoted(workspace)} status --porcelain --untracked-files=all; } >> ${quoted(log)}; done\nPATH=${path} exec git "$@"\n`,
+      );
+      await chmod(join(bin, "git"), 0o755);
+      vi.stubEnv("PATH", `${bin}${delimiter}${process.env["PATH"] ?? ""}`);
+
+      await initWorkspace(workspace, { now: FIXED_NOW });
+      vi.unstubAllEnvs();
+
+      const seen = (await readFile(log, "utf8")).trim().split("\n");
+      expect(seen).toEqual([".git", expect.stringMatching(/^\.musai-init-[A-Za-z0-9]{6}$/)]);
+    },
+  );
+
+  test("two inits racing on one directory leave one workspace", async () => {
+    const workspace = await makeTempWorkspace();
+    const gitDir = join(workspace, MUSAI_DIR);
+
+    const outcomes = await Promise.all([
+      initWorkspace(workspace, { now: FIXED_NOW }),
+      initWorkspace(workspace, { now: FIXED_NOW }),
+    ]);
+
+    expect(outcomes.map((outcome) => outcome.created).sort()).toEqual([false, true]);
+    expect(outcomes.map((outcome) => outcome.gitDir)).toEqual([gitDir, gitDir]);
+    expect(await readdir(workspace)).toEqual([MUSAI_DIR]);
+    expect(await adoptWorkspace(gitDir)).toBe("adopted");
+    expect(await ownGit(gitDir, ["rev-list", "--count", "refs/heads/main"])).toBe("1");
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "a fresh workspace's directory takes the mode any directory the process makes takes",
+    async () => {
+      const workspace = await makeTempWorkspace();
+      const { gitDir } = await initWorkspace(workspace, { now: FIXED_NOW });
+      const sibling = join(workspace, "sibling");
+      await mkdir(sibling);
+
+      expect((await stat(gitDir)).mode).toBe((await stat(sibling)).mode);
+    },
+  );
+
+  test("a fresh workspace names no directory of the machine that made it", async () => {
+    const workspace = await makeTempWorkspace();
+    const { gitDir } = await initWorkspace(workspace, { now: FIXED_NOW });
+
+    for (const [path, content] of await readTree(gitDir)) {
+      if (content !== "directory") {
+        expect({ path, names: content.includes(workspace) }).toEqual({ path, names: false });
+      }
+    }
   });
 });
 

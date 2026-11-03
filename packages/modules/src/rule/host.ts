@@ -100,12 +100,12 @@ function stripTypesQuietly(source: string): string {
 }
 
 /** The smallest transform that runs a hand-written gateway in a vm context without a build,
- * compiled strict as the build compiles and with every line in place. */
-function compileModuleScript(source: string, modulePath: string): Script {
+ * strict as the build compiles and with every line in place. */
+function moduleScriptSource(source: string): string {
   const stripped = stripTypesQuietly(source);
   const scriptSource = stripped.replace(TOP_LEVEL_EXPORT, "");
   const body = scriptSource.startsWith("#!") ? `//${scriptSource.slice(2)}` : scriptSource;
-  return new Script(`"use strict";${body}`, { filename: modulePath });
+  return `"use strict";${body}`;
 }
 
 /** The default bounds, shared by every host so two hosts compared run under one bound. */
@@ -117,7 +117,7 @@ export const DEFAULT_MEMORY_LIMIT_MB = 64;
 export const HOST_DEADLINE_GRACE_MS = 500;
 
 interface LoadedModuleMeta {
-  readonly source: string;
+  readonly scriptSource: string;
   readonly exportName: string;
   readonly modulePath: string;
 }
@@ -162,7 +162,7 @@ function spawnWorker(meta: LoadedModuleMeta, limits: Required<InvocationLimits>)
   setFlagsFromString("--max-heap-size=0");
   return new Worker(sandboxWorkerUrl(), {
     workerData: {
-      source: meta.source,
+      scriptSource: meta.scriptSource,
       exportName: meta.exportName,
       modulePath: meta.modulePath,
       timeLimitMs: limits.timeLimitMs,
@@ -241,17 +241,18 @@ export class InProcessHost {
   #modules = new WeakMap<InProcessHandle, LoadedModuleMeta>();
   #workers = new Map<InProcessHandle, WorkerHandle>();
 
-  /** Compiled once so an unparseable source fails at load; a `Script` cannot cross into the
-   * worker, which recompiles the source. */
+  /** Stripped once and compiled so an unparseable source fails at load; a `Script` cannot cross
+   * into the worker, which compiles the stripped source again. */
   async load(modulePath: string, exportName: string): Promise<InProcessHandle> {
     const source = await readFile(modulePath, "utf8");
     const violations = checkRuleImports(source);
     if (violations.length > 0) {
       throw new RuleImportError(modulePath, violations);
     }
-    compileModuleScript(source, modulePath);
+    const scriptSource = moduleScriptSource(source);
+    new Script(scriptSource, { filename: modulePath });
     const handle: InProcessHandle = { __brand: "in-process-handle" };
-    this.#modules.set(handle, { source, exportName, modulePath });
+    this.#modules.set(handle, { scriptSource, exportName, modulePath });
     return handle;
   }
 

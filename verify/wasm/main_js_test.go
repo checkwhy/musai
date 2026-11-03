@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall/js"
 	"testing"
+	"time"
 )
 
 func zipOf(t *testing.T, bundle string) []byte {
@@ -146,5 +148,21 @@ func TestAZipDamagedInTransitAnswersAFailedReport(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(answer.Get("report").String()), []byte("source.unreadable")) {
 		t.Fatalf("the report names no unreadable file: %s", answer.Get("report").String())
+	}
+}
+
+func TestATimeWithoutAZoneIsRefusedWhateverTheHostsZone(t *testing.T) {
+	local := time.Local
+	t.Cleanup(func() { time.Local = local })
+	time.Local = time.FixedZone("UTC+9", 9*60*60)
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC6REw4JnB0v8V4Or3AF4VQPyBD0W3kVNsEbxgrVMeNT"
+	bounded := `florin valid-after="202608311200",valid-before="202608311300" ` + key
+	options := js.ValueOf(map[string]any{"allowedSigners": bounded})
+	answer := js.ValueOf(musaiVerify(js.Undefined(), []js.Value{uint8Array(zipOf(t, "passing")), js.ValueOf("page"), options}))
+	if got := answer.Get("exitCode").Int(); got != 3 {
+		t.Fatalf("exitCode %d (%v), want 3", got, answer.Get("error"))
+	}
+	if !strings.Contains(answer.Get("report").String(), "trust.line-invalid") {
+		t.Fatalf("the report does not refuse the time with no zone: %s", answer.Get("report").String())
 	}
 }

@@ -137,7 +137,7 @@ afterEach(async () => {
 });
 
 async function foldOf(repo: FixtureRepo): Promise<IndexDb> {
-  const index = new IndexDb();
+  const index = repo.keep(new IndexDb());
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   return index;
 }

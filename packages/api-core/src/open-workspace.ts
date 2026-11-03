@@ -51,20 +51,17 @@ async function openUnderClearance(context: OperationContext): Promise<Workspace>
 
 /** Only a maker's or asserter's attestation qualifies: a re-share never speaks for the
  * principal's own class. */
-function attestationsFor(opened: Workspace, subject: RecordId, principal?: string): readonly Attestation[] {
-  const found: Attestation[] = [];
-  for (const { id, record } of opened.index.attestationsBySubject(subject, principal)) {
-    if (record.purpose !== "made" && record.purpose !== "asserted") {
-      continue;
-    }
-    found.push({ id, record });
-  }
-  return found;
+export function givesPrincipalClass(record: AttestationRecord): boolean {
+  return record.purpose === "made" || record.purpose === "asserted";
 }
 
-function attestationFor(opened: Workspace, subject: RecordId, principal?: string): Attestation | null {
-  const found = attestationsFor(opened, subject, principal);
-  return found[0] ?? null;
+/** The maker's attestation, an asserter's only where nobody attests making the subject. */
+export function makerFirst<T extends { readonly record: AttestationRecord }>(found: readonly T[]): T | null {
+  return found.find(({ record }) => record.purpose === "made") ?? found[0] ?? null;
+}
+
+function attestationsFor(opened: Workspace, subject: RecordId, principal?: string): readonly Attestation[] {
+  return opened.index.attestationsBySubject(subject, principal).filter(({ record }) => givesPrincipalClass(record));
 }
 
 /** A missing or bad signature is `workspace-incomplete`: the bytes are sound, and what the
@@ -105,7 +102,7 @@ export async function verifiedAttestationFor(
   subject: RecordId,
   principal?: string,
 ): Promise<AttestationRecord | null> {
-  const attestation = attestationFor(opened, subject, principal);
+  const attestation = makerFirst(attestationsFor(opened, subject, principal));
   if (attestation === null) {
     return null;
   }

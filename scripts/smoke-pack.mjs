@@ -12,6 +12,17 @@ const windows = process.platform === "win32";
 const SHIMS = new Set(["pnpm", "npm", "musai"]);
 const STEP_TIMEOUT_MS = 180_000;
 const STATEMENT = "the greeting says hello";
+const MODULE_DIR = join("rules", "greeting");
+/** How this machine reaches the registry, its proxy and its extra CAs, passed to the stranger. */
+const NETWORK = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+];
 const COMMITTER = {
   GIT_AUTHOR_NAME: "Smoke",
   GIT_AUTHOR_EMAIL: "smoke@musai.invalid",
@@ -21,10 +32,15 @@ const COMMITTER = {
 
 class SmokeFailure extends Error {}
 
+/** @typedef {{ cwd: string, env?: NodeJS.ProcessEnv }} Where */
+
+/** @param {string} reason @returns {never} */
 function fail(reason) {
   throw new SmokeFailure(reason);
 }
 
+/** @param {string} command @param {string[]} args @param {Where} options
+ * @param {(status: number | null) => boolean} [expected] */
 function run(command, args, options, expected = (status) => status === 0) {
   const ran = spawnSync(command, args, {
     encoding: "utf8",
@@ -42,22 +58,27 @@ function run(command, args, options, expected = (status) => status === 0) {
   return ran;
 }
 
+/** @param {ReturnType<typeof run>} ran @param {RegExp} pattern @param {string} what */
 function expectOutput(ran, pattern, what) {
   if (!pattern.test(ran.stdout)) {
     fail(`${what} printed no ${pattern}: ${ran.stdout.trim().split("\n")[0]}`);
   }
 }
 
+/** @param {string} program */
 function locate(program) {
   const name = windows ? `${program}.exe` : program;
   const dir = (process.env.PATH ?? "").split(delimiter).find((entry) => existsSync(join(entry, name)));
   return dir ?? fail(`${program} is not on PATH`);
 }
 
-/** A gzipped ustar's regular files; npm's own tarballs hold nothing else. */
+/** A gzipped ustar's regular files; npm's own tarballs hold nothing else.
+ * @param {Buffer} gzipped */
 function tarFiles(gzipped) {
   const tar = gunzipSync(gzipped);
+  /** @param {number} from @param {number} to */
   const text = (from, to) => tar.toString("utf8", from, to).replace(/\0.*$/s, "");
+  /** @type {{ path: string, body: Buffer }[]} */
   const files = [];
   for (let at = 0; at + 512 <= tar.length && tar[at] !== 0; ) {
     const size = Number.parseInt(text(at + 124, at + 136).trim(), 8);
@@ -71,7 +92,8 @@ function tarFiles(gzipped) {
   return files;
 }
 
-/** The bundle is built inside the clone, so a path of it or of the builder's home is a leak. */
+/** The bundle is built inside the clone, so a path of it or of the builder's home is a leak.
+ * @param {string} tarball */
 function inspect(tarball) {
   const files = tarFiles(readFileSync(tarball));
   if (!files.some((file) => file.path === "package/dist/bin/cli.js")) {
@@ -86,6 +108,7 @@ function inspect(tarball) {
   }
 }
 
+/** @param {string} scratch */
 function pack(scratch) {
   const pkg = join(root, "packages", "musai");
   if (!existsSync(join(pkg, "pack", "package.json"))) {
@@ -97,6 +120,7 @@ function pack(scratch) {
   return packed === undefined ? fail("pnpm pack wrote no tarball") : join(destination, packed);
 }
 
+/** @param {string} scratch */
 function smoke(scratch) {
   const tarball = pack(scratch);
   inspect(tarball);
@@ -112,8 +136,10 @@ function smoke(scratch) {
   for (const dir of [home, install, project]) {
     mkdirSync(dir);
   }
-  const passed = windows ? ["SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP"] : [];
-  // A stranger's machine: a home of its own, and no registry, since the package depends on nothing.
+  const passed = [...(windows ? ["SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP"] : []), ...NETWORK].filter(
+    (name) => process.env[name] !== undefined,
+  );
+  // A stranger's machine: a home of its own, and the registry only for the package's dependency.
   const env = {
     ...Object.fromEntries(passed.map((name) => [name, process.env[name]])),
     PATH: [
@@ -131,6 +157,8 @@ function smoke(scratch) {
     npm_config_offline: "true",
     npm_config_update_notifier: "false",
   };
+  /** @param {string} command @param {string[]} args @param {Record<string, string>} [extra]
+   * @param {(status: number | null) => boolean} [expected] */
   const stranger = (command, args, extra = {}, expected = undefined) =>
     run(command, args, { cwd: project, env: { ...env, ...extra } }, expected);
 
@@ -139,7 +167,9 @@ function smoke(scratch) {
   if (corrected !== undefined) {
     fail(`npm publish --dry-run: ${corrected}`);
   }
-  stranger("npm", ["install", "--prefix", install, "--no-audit", "--no-fund", tarball]);
+  stranger("npm", ["install", "--prefix", install, "--no-audit", "--no-fund", tarball], {
+    npm_config_offline: "false",
+  });
 
   stranger("git", ["init", "--quiet", "--initial-branch", "main"]);
   writeFileSync(join(project, "greeting.txt"), "hello\n");
@@ -163,6 +193,21 @@ function smoke(scratch) {
   stranger("musai", ["export", checked.short, "--to", "public", "--out", bundle, "--key", key]);
   expectOutput(stranger("musai-verify", ["verify", bundle]), / 0 errors/, "musai-verify verify");
 
+  stranger("musai", ["lab", "module", "new", MODULE_DIR]);
+  const built = JSON.parse(stranger("musai", ["lab", "module", "build", MODULE_DIR, "--json"]).stdout);
+  const clone = join(scratch, "clone");
+  mkdirSync(clone);
+  const cli = join(root, "packages", "distribution", "dist", "bin", "cli.js");
+  /** @param {string[]} args */
+  const fromClone = (args) => run(process.execPath, [cli, ...args], { cwd: clone, env });
+  run("git", ["init", "--quiet", "--initial-branch", "main"], { cwd: clone, env });
+  fromClone(["init"]);
+  fromClone(["lab", "module", "new", MODULE_DIR]);
+  const cloned = JSON.parse(fromClone(["lab", "module", "build", MODULE_DIR, "--json"]).stdout);
+  if (cloned.bundleId !== built.bundleId) {
+    fail(`a module built from npm bundles to ${built.bundleId}, and from the clone to ${cloned.bundleId}`);
+  }
+
   writeFileSync(join(project, "greeting.txt"), "goodbye\n");
   stranger("git", ["commit", "--quiet", "-am", "say goodbye"], COMMITTER);
   const moved = stranger("musai", ["status", checked.short, "--plan"], {}, (status) => status !== 0);
@@ -174,7 +219,9 @@ const started = Date.now();
 try {
   smoke(scratch);
   const seconds = Math.round((Date.now() - started) / 1000);
-  process.stdout.write(`smoke-pack: packed, installed, checked, exported and verified in ${seconds}s\n`);
+  process.stdout.write(
+    `smoke-pack: packed, installed, checked, exported, verified and built a module in ${seconds}s\n`,
+  );
 } catch (error) {
   process.stderr.write(`smoke-pack: ${error instanceof SmokeFailure ? error.message : error}\n`);
   process.exitCode = 1;

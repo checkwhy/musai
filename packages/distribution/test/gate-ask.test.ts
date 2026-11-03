@@ -158,7 +158,7 @@ describe("gate.ask@1", () => {
     ]);
     workspace = built.workspace;
     const claimId = built.idBySpecId.get("only")!;
-    const opened = await openWorkspace({ workspace, scope: built.scope, now });
+    using opened = await openWorkspace({ workspace, scope: built.scope, now });
     // Only the kernel builds a workspace, so the stub derives from a real one, one query replaced.
     const stub = Object.create(opened, {
       index: { value: Object.create(opened.index, { claimsInGroup: { value: () => [] } }) as Workspace["index"] },
@@ -215,11 +215,8 @@ describe("gate.pending@1", () => {
     const offeredAfter = await runHandler(gatePending, {}, { workspace, scope: built.scope, now });
     expect(offeredAfter.gates).toEqual(offeredBefore.gates);
 
-    const { status } = await labelledClaim(
-      await openWorkspace({ workspace, scope: built.scope, now }),
-      claim.slot,
-      "perform",
-    );
+    using opened = await openWorkspace({ workspace, scope: built.scope, now });
+    const { status } = await labelledClaim(opened, claim.slot, "perform");
     expect(status.label).toBe("open");
   });
 

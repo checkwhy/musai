@@ -1,4 +1,5 @@
 import type { OperationDescriptor } from "@musai/api-core";
+import { attestationShow } from "./attestation.js";
 import { blobImport } from "./blobs.js";
 import { briefRender } from "./brief.js";
 import { caseBook, caseSoundcheck } from "./case.js";
@@ -12,6 +13,7 @@ import { eventsSinceOperation } from "./events.js";
 import { bundleExport } from "./export.js";
 import { gateAnswer, gateAsk, gatePending } from "./gate.js";
 import { hookStop } from "./hook.js";
+import { forkKeep } from "./keep.js";
 import { keyList, keyRotate } from "./key.js";
 import { moduleBuild, moduleNew, moduleTest } from "./module.js";
 import { caseOpen } from "./open.js";
@@ -28,6 +30,7 @@ import { claimWhy } from "./why.js";
 import { workspaceInit } from "./workspace.js";
 
 export const ALL_OPERATIONS: readonly OperationDescriptor[] = [
+  attestationShow,
   blobImport,
   briefRender,
   bundleExport,
@@ -46,6 +49,7 @@ export const ALL_OPERATIONS: readonly OperationDescriptor[] = [
   configUnset,
   doctorRun,
   eventsSinceOperation,
+  forkKeep,
   gateAnswer,
   gateAsk,
   gatePending,

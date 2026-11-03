@@ -54,13 +54,13 @@ describe("store relayout: a scope's one-level history rewritten two levels deep"
   });
 
   test("a workspace folded before the rewrite opens after it holding every record, refusing none", async () => {
-    await openWorkspace({ workspace, scope: "default", reportRefusal: () => undefined, now });
+    (await openWorkspace({ workspace, scope: "default", reportRefusal: () => undefined, now })).close();
 
     const output = await runHandler(storeRelayout, {}, context);
 
     expect(output).toEqual({ commits: 1, records: 1 });
     const refusals: unknown[] = [];
-    const opened = await openWorkspace({
+    using opened = await openWorkspace({
       workspace,
       scope: "default",
       reportRefusal: (refusal) => {

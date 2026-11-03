@@ -18,6 +18,12 @@ export async function foldedIndex(store: RecordStore): Promise<IndexDb> {
   return index;
 }
 
+/** Leaves only the file, for a test that reads or moves it rather than the index. */
+export async function foldClosed(path: string, store: RecordStore): Promise<void> {
+  using index = new IndexDb(path);
+  await index.fold(store);
+}
+
 /** Stands in for all but the contributions, for a module a test installs and never builds. */
 export function manifestWithContributions(entries: readonly ContributionEntry[]): ModuleManifest {
   return {

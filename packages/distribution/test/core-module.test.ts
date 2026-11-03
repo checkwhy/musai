@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readDeclarativeParameters } from "@musai/api-core";
 import { buildModule, runModuleTests } from "@musai/devkit";
 import { runRestartLoop } from "@musai/evaluate";
 import { IndexDb } from "@musai/fold";
@@ -13,7 +14,14 @@ import {
   invokerFromModuleHost,
   kernelPoint,
 } from "@musai/modules";
-import { CURRENT_SCHEMA_VERSIONS, type ModuleRecord, recordId, validateRecord, versionString } from "@musai/records";
+import {
+  type Conditions,
+  CURRENT_SCHEMA_VERSIONS,
+  type ModuleRecord,
+  recordId,
+  validateRecord,
+  versionString,
+} from "@musai/records";
 import { initWorkspace, Store } from "@musai/store";
 import { blobStoreOf, fixedClock, foldedIndex } from "@musai/test-support";
 import { afterEach, describe, expect, test } from "vitest";
@@ -68,7 +76,7 @@ describe("the derived manifest declares every parser this file contributes", () 
     scratchDirs.push(dir);
     const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
     const store = new Store({ ctx: { gitDir }, scope: "build", now: FIXED_NOW });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
 
     const result = await buildModule(MODULE_DIR, store, {
@@ -104,12 +112,12 @@ describe("the derived manifest declares every parser this file contributes", () 
     }
   });
 
-  test("the same manifest names eight slots and three presets, each namespaced under musai.core", async () => {
+  test("the same manifest names seven slots and three presets, each namespaced under musai.core", async () => {
     const dir = await mkdtemp(join(tmpdir(), "musai-core-module-build-"));
     scratchDirs.push(dir);
     const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
     const store = new Store({ ctx: { gitDir }, scope: "build", now: FIXED_NOW });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
 
     const result = await buildModule(MODULE_DIR, store, {
@@ -132,7 +140,6 @@ describe("the derived manifest declares every parser this file contributes", () 
         "musai.core/pack-irreversible",
         "musai.core/resolution-age",
         "musai.core/signing-level",
-        "musai.core/staleness-policy",
       ].sort(),
     );
 
@@ -147,7 +154,7 @@ describe("the derived manifest declares every parser this file contributes", () 
     scratchDirs.push(dir);
     const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
     const store = new Store({ ctx: { gitDir }, scope: "build", now: FIXED_NOW });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
 
     const result = await buildModule(MODULE_DIR, store, {
@@ -265,11 +272,12 @@ describe("the declarative interpreter uses the ordinary restart path and nothing
     try {
       const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
       const store = new Store({ ctx: { gitDir }, scope: "restart", now: FIXED_NOW });
+      using index = new IndexDb();
       const result = await runRestartLoop({
         invoker,
         input: { claimId: "declarative-invocation-count", conditions: declarativeConditions(parameters), evidence: [] },
         store,
-        index: new IndexDb(),
+        index,
         now: FIXED_NOW,
       });
       expect(result.invocations).toBe(2);
@@ -294,11 +302,12 @@ describe("what a recipe the kernel could not perform decides", () => {
     try {
       const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
       const store = new Store({ ctx: { gitDir }, scope: "refusal", now: FIXED_NOW });
+      using index = new IndexDb();
       const result = await runRestartLoop({
         invoker,
         input: { claimId, conditions: declarativeConditions(parameters), evidence: [] },
         store,
-        index: new IndexDb(),
+        index,
         now: FIXED_NOW,
       });
       return result.verdict;
@@ -377,8 +386,15 @@ describe("the declarative rule decides the six kinds it knows inline and asks th
   }
 
   /** One round of the rule through the host, from a hand-built input rather than a restart loop. */
-  async function answer(
+  function answer(
     parameters: unknown,
+    round: { evidence?: unknown[]; refusals?: unknown[]; invocations?: unknown[] },
+  ): Promise<unknown> {
+    return answerTo(declarativeConditions(parameters), round);
+  }
+
+  async function answerTo(
+    conditions: Readonly<Record<string, unknown>>,
     round: { evidence?: unknown[]; refusals?: unknown[]; invocations?: unknown[] },
   ): Promise<unknown> {
     const host = new InProcessHost();
@@ -390,7 +406,7 @@ describe("the declarative rule decides the six kinds it knows inline and asks th
       version: versionString("1"),
       input: {
         claimId: "declarative-contributed-kind",
-        conditions: declarativeConditions(parameters),
+        conditions,
         evidence: round.evidence ?? [],
         ...(round.refusals === undefined ? {} : { refusals: round.refusals }),
         ...(round.invocations === undefined ? {} : { invocations: round.invocations }),
@@ -508,13 +524,59 @@ describe("the declarative rule decides the six kinds it knows inline and asks th
     expect(output.error.message).toContain("evidence for 1 of its 2 recipes");
   });
 
-  test("an expectation naming no kind is refused by the parameter parser, naming what it lacks", async () => {
-    const output = (await answer(
-      { ...oneRecipe, expectations: [{ selector: { recipe: "r", field: "output" } }] },
-      { evidence: [evidence] },
-    )) as { kind: string; error: { message: string } };
-    expect(output.kind).toBe("error");
-    expect(output.error.message).toContain("an expectation with no kind");
+  test.each([
+    [{ kind: "equals", value: "ok" }, 'its selector as a recipe by name and its field, "output" or "exitCode"'],
+    [{ kind: "differsFrom", selector: { recipe: "r", field: "output" } }, "the value it compares against"],
+    [{ kind: "exitCodeIs", value: 0 }, "its recipe by name"],
+    [{ kind: "exitCodeIs", recipe: "r", value: "0" }, "the exit code it expects as a number"],
+    [{ kind: "keyExists", selector: { recipe: "r", field: "stdout" }, key: "k" }, "its selector as a recipe"],
+    [{ kind: "keyExists", selector: { recipe: "r", field: "output" } }, "the key it looks for as a string"],
+    [{ kind: "selectedItemsEqual", right: { recipe: "r", field: "output" } }, "its left side as a recipe"],
+    [{ kind: "selectedItemsDiffer", left: { recipe: "r", field: "output" } }, "its right side as a recipe"],
+  ])(
+    "refuses an inline expectation missing a field it reads, naming the field, before any recipe runs: %j",
+    async (malformed, named) => {
+      const parameters = { ...oneRecipe, expectations: [{ kind: "exitCodeIs", recipe: "r", value: 0 }, malformed] };
+      const output = (await answer(parameters, {})) as { kind: string; error: { code: string; message: string } };
+
+      expect(output.kind).toBe("error");
+      expect(output.error.code).toBe("invalid-input");
+      expect(output.error.message).toContain(`'s ${malformed.kind} expectation at index 1 does not name ${named}`);
+    },
+  );
+
+  test("refuses as invalid input, in one fixed message, every condition the kernel's reader refuses", async () => {
+    const recipeText = JSON.stringify(recipe);
+    const expectationText = '[{"kind":"exitCodeIs","recipe":"r","value":0}]';
+    const unreadable: readonly Conditions[string][] = [
+      `{"recipes":[{"name":"r","kind":"run","recipe":{"timeoutMs":1e999}}],"expectations":${expectationText}}`,
+      `{"recipes":[{"name":"r","kind":"run","recipe":{"command":["\\ud800"]}}],"expectations":${expectationText}}`,
+      `{"recipes":{},"expectations":${expectationText}}`,
+      `{"recipes":[{"name":"r","kind":"run","recipe":${recipeText}}]}`,
+      `{"recipes":[{"name":"r","kind":"run","recipe":${recipeText}}],"expectations":[{"value":0}]}`,
+      `{"recipes":[{"name":"r","kind":"run","recipe":${recipeText}}],`,
+      "[]",
+      { kind: "any" },
+    ];
+    for (const value of unreadable) {
+      const conditions = { [PARAMETERS_CONDITION]: value };
+      expect(readDeclarativeParameters(conditions)).toBeNull();
+      expect(await answerTo(conditions, {})).toEqual({
+        kind: "error",
+        error: {
+          code: "invalid-input",
+          data: { conditions },
+          message: `the ${PARAMETERS_CONDITION} condition does not read as the interpreter's parameters`,
+        },
+      });
+    }
+
+    const readable = declarativeConditions({
+      ...oneRecipe,
+      expectations: [{ kind: "exitCodeIs", recipe: "r", value: 0 }],
+    });
+    expect(readDeclarativeParameters(readable)).not.toBeNull();
+    expect(await answerTo(readable, {})).toMatchObject({ kind: "request" });
   });
 });
 
@@ -583,11 +645,12 @@ describe("a run-shaped declarative check reaches the same verdict as the default
     try {
       const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
       const store = new Store({ ctx: { gitDir }, scope: "compare", now: FIXED_NOW });
+      using index = new IndexDb();
       const result = await runRestartLoop({
         invoker,
         input: { claimId: "declarative-vs-template", conditions: declarativeConditions(parameters), evidence: [] },
         store,
-        index: new IndexDb(),
+        index,
         now: FIXED_NOW,
       });
       // The default template's coded rule decides the same recipe shape the same way.
@@ -636,7 +699,7 @@ describe("a data-only module — a manifest with no bundle — contributes a wor
       const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
       const store = new Store({ ctx: { gitDir }, scope: "dataonly", now: FIXED_NOW });
       const [moduleId] = await store.putMany([{ kind: "module", value: dataOnlyModule }]);
-      const index = await foldedIndex(store);
+      using index = await foldedIndex(store);
 
       const listed = index.contributionById("dataonly.example/exits-cleanly");
       expect(listed?.moduleRecord).toBe(moduleId);

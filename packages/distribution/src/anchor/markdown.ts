@@ -1,19 +1,21 @@
 import {
+  ANCHOR_ID_PREFIX_PATTERN,
+  ANCHOR_LABEL_PATTERN,
   parseReceiptsSection as kernelParseReceiptsSection,
   RECEIPTS_HEADING,
   type RecordId,
   splitReceiptsSection,
 } from "@musai/records";
-import { ANCHOR_LABEL_WIDTH, type AnchorGrammar, type AnchorParseResult, type AnchorResolution } from "./grammar.js";
+import type { AnchorGrammar, AnchorParseResult, AnchorResolution } from "./grammar.js";
 
 export { RECEIPTS_HEADING };
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
-const LABEL_PATTERN = `[0-9a-f]{${ANCHOR_LABEL_WIDTH}}(?::[^\\]]+)?`;
-const REFERENCE_PATTERN = new RegExp(`\\[\\^(${LABEL_PATTERN})\\](?!:)`, "g");
-const LABEL_PARTS_PATTERN = new RegExp(`^([0-9a-f]{${ANCHOR_LABEL_WIDTH}})(?::(.+))?$`);
+/** A footnote reference in a markdown body, its label captured; never a definition. */
+export const REFERENCE_PATTERN = new RegExp(`\\[\\^(${ANCHOR_LABEL_PATTERN})\\](?!:)`, "g");
+const LABEL_PARTS_PATTERN = new RegExp(`^(${ANCHOR_ID_PREFIX_PATTERN})(?::(.+))?$`);
 
 /** A markdown artifact's footnote labels in first-appearance order, resolved through its own
  * receipts section; an unlisted label resolves to `fullId: null`. */

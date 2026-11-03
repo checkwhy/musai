@@ -6,23 +6,37 @@ import { RULING_HOP_LABEL } from "@musai/evaluate";
 import {
   type ArgumentRecord,
   type AttestationRecord,
+  BRIEF_MEDIA_TYPE,
   type CaseRecord,
   type ClaimRecord,
   type ClaimTypeDeclaration,
+  CREW_MEDIA_TYPE,
   CURRENT_SCHEMA_VERSIONS,
   claimTypesFrom,
   type EvidenceEdge,
+  MODEL_MEDIA_TYPE,
   type RecordId,
   type RulingRecord,
   type RunRecord,
   recordId,
   slotFor,
+  type Timestamp,
   timestamp,
   versionString,
 } from "@musai/records";
 import { RUNNER_PERFORMER } from "@musai/run";
 import { initWorkspace, Store } from "@musai/store";
-import { declareClaimTypes, fixedClock, fixWorkspaceKey, namedCaller, writeTrustFile } from "@musai/test-support";
+import {
+  declareClaimTypes,
+  fixedClock,
+  fixtureRunRecord,
+  fixWorkspaceKey,
+  mintedSortingBefore,
+  namedCaller,
+  pseudonymOf,
+  writeTrustFile,
+} from "@musai/test-support";
+import { type Attestation, mintAttestation } from "@musai/trust";
 import { afterEach, describe, expect, test } from "vitest";
 import { groupHolder } from "../src/claim.js";
 import { briefRender } from "../src/ops/brief.js";
@@ -347,7 +361,7 @@ describe("gate.answer@2", () => {
     expect(statusB.label).toBe("fails");
     expect(statusC.label).toBe("fails");
 
-    const opened = await openWorkspace({ workspace, scope: built.scope, now });
+    using opened = await openWorkspace({ workspace, scope: built.scope, now });
     const rulingIds = await opened.store.list("ruling");
     expect(rulingIds).toHaveLength(1);
   });
@@ -407,7 +421,7 @@ describe("gate.answer@2", () => {
     const claimB = built.idBySpecId.get("b")!;
     const pending = await runHandler(gatePending, { case: slug }, reader);
     const progress = await runHandler(caseStatus, { case: slug }, reader);
-    const opened = await openWorkspace({ workspace, scope: built.scope, now });
+    using opened = await openWorkspace({ workspace, scope: built.scope, now });
     expect(pending.gates).toEqual([]);
     expect(pending.flagged).toEqual([{ case: slug, claim: claimB, gateClass: "intent" }]);
     expect(progress.next).toBeNull();
@@ -527,7 +541,7 @@ describe("gate.answer@2", () => {
       const asked = await runHandler(gateAsk, { claim: claimA }, { workspace, scope: built.scope, now });
       await runHandler(gateAnswer, { pending: claimA, brief: asked.brief, choice: "file", reason }, answerer);
     }
-    const opened = await openWorkspace({ workspace, scope: built.scope, now });
+    using opened = await openWorkspace({ workspace, scope: built.scope, now });
     expect(await opened.store.list("ruling")).toHaveLength(2);
 
     const statusA = await runHandler(
@@ -825,6 +839,62 @@ describe("every ruling on a member of an exclusive group passes the menu's exclu
     await expect(menu.rule("c", "holds", person, brief)).rejects.toMatchObject(conflict);
   });
 
+  test("a menu every option of which is ruled out awaits no answer: pending lists none and progress names no next gate", async () => {
+    const menu = await aMenu("every-option-ruled-out");
+    const reader = { workspace, scope: menu.scope, now };
+    for (const specId of ["a", "b", "c"]) {
+      await menu.rule(specId, "fails", person);
+    }
+
+    const progress = await runHandler(caseStatus, { case: "every-option-ruled-out" }, reader);
+
+    expect(await menu.labels()).toEqual({ a: "fails", b: "fails", c: "fails" });
+    expect(await menu.pending()).toEqual([]);
+    expect(progress).toMatchObject({ next: null, done: false, reason: "claim-fails" });
+  });
+
+  test("a menu with one option ruled out is pending and progress's next gate, both by the same open option", async () => {
+    const menu = await aMenu("one-option-ruled-out");
+    const reader = { workspace, scope: menu.scope, now };
+    const [lowest] = ["a", "b", "c"].sort((left, right) =>
+      menu.slotBySpecId.get(left)! < menu.slotBySpecId.get(right)! ? -1 : 1,
+    );
+    await menu.rule(lowest!, "fails", person);
+
+    const pending = await menu.pending();
+    const progress = await runHandler(caseStatus, { case: "one-option-ruled-out" }, reader);
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).not.toBe(menu.idBySpecId.get(lowest!));
+    expect(progress.next).toEqual({ gate: pending[0], class: "intent" });
+  });
+
+  test("a bare gate claim its own evidence holds, with no ruling, still awaits its answer: pending lists it and progress names it next", async () => {
+    const menu = await aMenu("bare-held-by-evidence", [
+      { id: "solo", rendering: "it holds", exclusiveGroup: null, gateClass: "intent", receipt: "it ran clean" },
+    ]);
+    const reader = { workspace, scope: menu.scope, now };
+    const solo = menu.idBySpecId.get("solo")!;
+
+    const progress = await runHandler(caseStatus, { case: "bare-held-by-evidence" }, reader);
+
+    expect(await menu.labels()).toEqual({ solo: "holds" });
+    expect(await menu.pending()).toEqual([solo]);
+    expect(progress).toMatchObject({ next: { gate: solo, class: "intent" }, done: false, reason: "claim-open" });
+  });
+
+  test("a bare gate claim that does not apply is neither pending nor progress's next gate", async () => {
+    const menu = await aMenu("bare-inapplicable-next", [
+      { id: "solo", rendering: "it holds", exclusiveGroup: null, gateClass: "intent", undeclared: true },
+    ]);
+    const reader = { workspace, scope: menu.scope, now };
+
+    const progress = await runHandler(caseStatus, { case: "bare-inapplicable-next" }, reader);
+
+    expect(await menu.pending()).toEqual([]);
+    expect(progress.next).toBeNull();
+  });
+
   test("a bare gate claim that does not apply is not pending, and the answer its binary menu still offers is refused", async () => {
     const menu = await aMenu("bare-inapplicable", [
       { id: "solo", rendering: "it holds", exclusiveGroup: null, gateClass: "intent", undeclared: true },
@@ -931,7 +1001,7 @@ describe("every ruling on a member of an exclusive group passes the menu's exclu
 
   test("an ungrouped claim at a grouped member's slot answers a binary menu whose hold still passes the group's exclusivity", async () => {
     const menu = await aMenu("ungrouped-at-a-grouped-slot");
-    const opened = await openWorkspace({ workspace, scope: menu.scope, now });
+    using opened = await openWorkspace({ workspace, scope: menu.scope, now });
     const twin: ClaimRecord = {
       ...(opened.read(menu.idBySpecId.get("a")!) as ClaimRecord),
       rendering: "file a new issue, said again without the menu",
@@ -1116,6 +1186,110 @@ describe("gate.answer@2 — an answer against evidence that moved", () => {
     expect(claimStatus.renderText(stale)).toContain("decided on stale evidence");
   });
 
+  async function testifiedAgainst(built: Awaited<ReturnType<typeof buildEvidencedWorkspace>>) {
+    const receipt = fixtureRunRecord("a recommendation against the claim");
+    const testimony: RunRecord = {
+      ...receipt,
+      runKind: "testimony",
+      recipe: {
+        ...receipt.recipe,
+        command: ["ask", "musai.core/judge"],
+        substrates: [
+          { mediaType: BRIEF_MEDIA_TYPE, digest: { sha256: "a".repeat(64) } },
+          { mediaType: CREW_MEDIA_TYPE, digest: { sha256: "b".repeat(64) } },
+          { mediaType: MODEL_MEDIA_TYPE, uri: "model://anthropic/claude" },
+        ],
+        isolation: "none",
+      },
+      observation: { ...receipt.observation, isolationHeld: "none" },
+    };
+    const [run] = await built.store.putMany([{ kind: "run", value: testimony }]);
+    await built.store.putMany([
+      {
+        kind: "argument",
+        value: {
+          kind: "argument",
+          premises: [],
+          supersedes: [],
+          schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+          target: built.claimId,
+          reason: "the testimony recommends against it",
+          evidence: [receiptEdge(run!, "result")],
+        },
+      },
+    ]);
+    return run!;
+  }
+
+  function attestationOf(
+    run: RecordId,
+    name: string,
+    principalClass: "agent" | "person",
+    purpose: "made" | "asserted",
+    at: Timestamp,
+  ) {
+    return mintAttestation({
+      subject: run,
+      principal: pseudonymOf(name),
+      principalClass,
+      via: principalClass === "agent" ? "model" : "signature",
+      purpose,
+      at,
+    });
+  }
+
+  const reviewerAsserted = (run: RecordId) => attestationOf(run, "reviewer", "person", "asserted", FIXED_INSTANT);
+
+  /** A ruling over a brief packing a testimony `first` attests, read again once `late` lands. */
+  async function ruledThenAttested(
+    slug: string,
+    first: (run: RecordId) => Attestation,
+    late: (run: RecordId, first: Attestation) => Attestation,
+  ) {
+    const built = await buildEvidencedWorkspace(slug);
+    workspace = built.workspace;
+    const reader = { workspace, scope: built.scope, now };
+    const run = await testifiedAgainst(built);
+    const pinned = first(run);
+    await built.store.putMany([{ kind: "attestation", value: pinned.record }]);
+    const slot = ((await built.store.read(built.claimId, "claim")) as ClaimRecord).slot;
+    const asked = await runHandler(gateAsk, { claim: built.claimId }, reader);
+    await runHandler(
+      gateAnswer,
+      { pending: built.claimId, brief: asked.brief, choice: "holds", reason: "the testimony does not persuade" },
+      { ...reader, via: "tty", principalName: "person@example.com" },
+    );
+    const fresh = await runHandler(claimStatus, { claim: slot }, reader);
+    await built.store.putMany([{ kind: "attestation", value: late(run, pinned).record }]);
+    return { fresh, after: await runHandler(claimStatus, { claim: slot }, reader) };
+  }
+
+  test("a ruling goes stale when a maker's attestation lands after it changes the evidence kind", async () => {
+    const { fresh, after } = await ruledThenAttested("maker-lands-late", reviewerAsserted, (run) =>
+      attestationOf(run, "agent", "agent", "made", FIXED_INSTANT),
+    );
+    expect(fresh).not.toMatchObject({ decidedOnStaleEvidence: true });
+    expect(after).toMatchObject({ decidedOnStaleEvidence: true });
+  });
+
+  test("a ruling stays fresh when an attestation lands that leaves the evidence kind as it was", async () => {
+    const { fresh, after } = await ruledThenAttested("asserter-lands-late", reviewerAsserted, (run, first) =>
+      mintedSortingBefore(first, (at) => attestationOf(run, "second-reviewer", "person", "asserted", at)),
+    );
+    expect(fresh).not.toMatchObject({ decidedOnStaleEvidence: true });
+    expect(after).not.toMatchObject({ decidedOnStaleEvidence: true });
+  });
+
+  test("a ruling stays fresh when an asserter of another class lands beside the testimony's maker", async () => {
+    const { fresh, after } = await ruledThenAttested(
+      "asserter-beside-maker",
+      (run) => attestationOf(run, "agent", "agent", "made", FIXED_INSTANT),
+      (run, maker) => mintedSortingBefore(maker, (at) => attestationOf(run, "reviewer", "person", "asserted", at)),
+    );
+    expect(fresh).not.toMatchObject({ decidedOnStaleEvidence: true });
+    expect(after).not.toMatchObject({ decidedOnStaleEvidence: true });
+  });
+
   test("a ruling over a brief rendered after an argument against its claim was replaced reads its verdict unflagged, and decided on stale evidence once the standing argument is replaced in turn", async () => {
     const built = await buildEvidencedWorkspace("argued-and-restated-before-the-brief");
     workspace = built.workspace;
@@ -1177,7 +1351,7 @@ describe("gate.answer@2 — an answer against evidence that moved", () => {
 
     const smallAsked = await runHandler(
       gateAsk,
-      { claim: smallBuilt.claimId, budget: 250 },
+      { claim: smallBuilt.claimId, budget: 700 },
       { workspace: smallBuilt.workspace, scope: smallBuilt.scope, now },
     );
     const largeAsked = await runHandler(

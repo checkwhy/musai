@@ -2,7 +2,7 @@ import type { OperationDescriptor } from "@musai/api-core";
 import { OperationError, openWorkspace } from "@musai/api-core";
 import { type RecordId, versionString } from "@musai/records";
 import { materialiseView } from "@musai/store";
-import { findCaseRecord } from "../cases.js";
+import { findCaseRecord, refuseForkedView } from "../cases.js";
 import { DERIVED, editablePathsOf, renderView, type ViewFile, type ViewFileMarker } from "../view/render.js";
 
 /** Maps each worktree path to its marker, so `save` reads it from the commit it diffs against. */
@@ -93,6 +93,7 @@ export const caseOpen: OperationDescriptor<CaseOpenInput, CaseOpenOutput> = {
         detail: `no case found named ${input.case}`,
       });
     }
+    refuseForkedView(opened, found.record.slug);
 
     const rendered = await renderView(opened, found.id, found.record);
     const manifest: ViewFile = {

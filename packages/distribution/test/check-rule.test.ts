@@ -47,7 +47,8 @@ async function refusalOf(input: CheckRunInput, context: OperationContext): Promi
 }
 
 async function conditionsAt(dir: string, slot: string): Promise<unknown> {
-  const claim = (await openWorkspace({ workspace: dir, scope, now })).index.claimAtSlot(slot);
+  using opened = await openWorkspace({ workspace: dir, scope, now });
+  const claim = opened.index.claimAtSlot(slot);
   return claim?.record.kind === "claim" ? claim.record.conditions : undefined;
 }
 
@@ -67,7 +68,7 @@ describe("check --rule: a claim judged by an installed module's rule", () => {
     );
 
     expect([checked.label, checked.reason, checked.toolsAdded]).toEqual(["holds", null, []]);
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     expect(opened.read(checked.claim as RecordId)).toMatchObject({ kind: "claim", type: "musai.core/check@1" });
     expect(await conditionsAt(dir, checked.slot)).toEqual({
       subject: ((await conditionsAt(dir, cited.slot)) as { subject: string }).subject,
@@ -164,7 +165,7 @@ describe("check --rule: a claim judged by an installed module's rule", () => {
 
     expect(byRule.slot).toBe(byCommand.slot);
     expect(byRule.claim).not.toBe(byCommand.claim);
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     expect(opened.read(byRule.claim as RecordId)).toMatchObject({ supersedes: [byCommand.claim] });
     expect(byCommandAgain.slot).toBe(byCommand.slot);
     expect(opened.index.claimAtSlot(byCommand.slot)?.id).toBe(byCommandAgain.claim);

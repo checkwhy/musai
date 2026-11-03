@@ -1,4 +1,6 @@
-import { canonicalBytes, type RecordId, rawId, recordId } from "../canonical/canonicalize.js";
+import { canonicalBytes, isRecordId, type RecordId, rawId, recordId } from "../canonical/canonicalize.js";
+import { isTimestamp, type Timestamp } from "../canonical/numbers.js";
+import { isPlainObject } from "../canonical/plain-object.js";
 import { KernelError } from "../reason/error.js";
 import { NO_CLAIM_TYPES } from "./claim-types.js";
 import type { ValidationOptions } from "./contract.js";
@@ -76,4 +78,52 @@ export function readArrivingRecord(bytes: Uint8Array, id: RecordId, kind: Record
     throw new RecordRefusedError(id, `its bytes are not the canonical form of the ${record.kind} they hold`);
   }
   return record;
+}
+
+/** What every attestation version fixes, read alike from any: a later version only adds a field or
+ * a value, so these keep their meaning there; `null` where a later one's field lacks its form. */
+export interface FixedAttestation {
+  readonly schemaVersion: number;
+  readonly subject: RecordId;
+  readonly principal: string | null;
+  readonly via: string | null;
+  readonly purpose: string;
+  readonly at: Timestamp | null;
+  readonly supersedes: readonly RecordId[];
+}
+
+/** `null` unless the bytes are the canonical form of an attestation at a later version, digesting
+ * to `id`, naming its subject and purpose; a malformed field costs itself, never a withdrawal. */
+export function readLaterAttestation(bytes: Uint8Array, id: RecordId): FixedAttestation | null {
+  if (rawId(bytes) !== id) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!isPlainObject(value) || !Buffer.from(canonicalBytes(value)).equals(bytes)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  const { kind, schemaVersion, subject, principal, via, purpose, at, supersedes } = value;
+  if (
+    kind !== "attestation" ||
+    typeof schemaVersion !== "number" ||
+    schemaVersion <= CURRENT_SCHEMA_VERSIONS.attestation ||
+    !isRecordId(subject) ||
+    typeof purpose !== "string"
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion,
+    subject,
+    principal: typeof principal === "string" ? principal : null,
+    via: typeof via === "string" ? via : null,
+    purpose,
+    at: isTimestamp(at) ? at : null,
+    supersedes: Array.isArray(supersedes) ? supersedes.filter(isRecordId) : [],
+  };
 }

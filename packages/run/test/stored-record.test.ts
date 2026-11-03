@@ -281,7 +281,7 @@ describe("what git holds under records/ is read through the write path's contrac
     const path = recordPath("ruling", id);
     const commit = await commitAroundTheStore(repo, path, bytes);
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(index.claimAtSlot(claim.slot)?.id).toBe(claimId);
@@ -302,7 +302,7 @@ describe("what git holds under records/ is read through the write path's contrac
     const commit = await commitAroundTheStore(repo, path, new TextEncoder().encode("{}"));
     await writeFixtureRecords(repo, [{ kind: "claim", value: claimOver(runId!) }]);
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(index.claimAtSlot(slotFor(CLAIM_DECLARATION, { id: "guarded" }))).toBeDefined();
@@ -315,15 +315,14 @@ describe("what git holds under records/ is read through the write path's contrac
     const bytes = canonicalBytes(floorTierRuling(claimId!));
     await commitAroundTheStore(repo, recordPath("ruling", rawId(bytes)), bytes);
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.refusals()).toHaveLength(1);
 
-    index.rebuild();
-    expect(index.refusals()).toEqual([]);
-    await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
-    expect(index.refusals()).toHaveLength(1);
+    using rebuilt = new IndexDb();
+    await rebuilt.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    expect(rebuilt.refusals()).toEqual(index.refusals());
   });
 });
 

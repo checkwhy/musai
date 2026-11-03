@@ -75,10 +75,17 @@ async function launch(url, profile) {
       pending.set(last, { resolve, reject });
       socket.send(JSON.stringify({ id: last, method, params }));
     });
-  const close = () => {
-    socket.close();
-    browser.kill();
-  };
+  // Chromium writes to its profile until it exits, so the profile is removed only after.
+  const close = () =>
+    new Promise((resolve) => {
+      if (browser.exitCode !== null || browser.signalCode !== null) {
+        resolve();
+        return;
+      }
+      browser.once("exit", resolve);
+      socket.close();
+      browser.kill();
+    });
   return { send, close };
 }
 
@@ -140,8 +147,8 @@ describe("the page", { skip: chrome === undefined && "no Chromium: set CHROME_BI
     await until(`document.readyState === "complete" && document.querySelector("#verdict")?.dataset.state === "idle"`);
   });
 
-  after(() => {
-    page?.close();
+  after(async () => {
+    await page?.close();
     server?.close();
     rmSync(scratch, { recursive: true, force: true });
   });

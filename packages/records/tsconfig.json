@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "paths": { "@musai/records": ["./src/index.ts"] }
+    "paths": { "@musai/records": ["./src/index.ts"] },
+    "allowJs": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "tsup.config.ts", "vitest.config.ts"]
 }

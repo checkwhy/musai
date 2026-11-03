@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { BLOBS_DIR, BlobCorruptedError, blobPath, type Clock, KernelError, type RecordId, rawId } from "@musai/records";
@@ -12,6 +12,7 @@ import {
 } from "./git.js";
 import { LOCAL_DIR } from "./init.js";
 import { type CasRetryHooks, withCasRetry } from "./retry.js";
+import { writeWhole } from "./write-whole.js";
 
 const BLOBS_REF = "refs/heads/blobs";
 
@@ -69,7 +70,7 @@ export class GitBlobStore implements BlobStore {
         return id;
       }
       await withCasRetry({ ctx: this.ctx, ref: BLOBS_REF, ...hooks }, async (tip) => {
-        const tree = await gitSpliceTree(this.ctx, tip, [{ path, sha: sha! }]);
+        const tree = (await gitSpliceTree(this.ctx, tip, [{ path, sha: sha! }])).sha;
         const parents = tip === null ? [] : [tip];
         const commitSha = await gitCommitTree(this.ctx, tree, parents, `write blob ${id}\n`, this.now);
         return { commitSha, value: undefined };
@@ -96,7 +97,6 @@ export class GitBlobStore implements BlobStore {
     return bytes;
   }
 
-  /** Written under a temporary name and renamed, so no reader meets half a file. */
   async materialise(id: RecordId): Promise<string> {
     const path = join(this.ctx.gitDir, LOCAL_DIR, blobPath(id));
     if (await digestsTo(path, id)) {
@@ -104,13 +104,7 @@ export class GitBlobStore implements BlobStore {
     }
     const bytes = await this.read(id);
     await mkdir(dirname(path), { recursive: true });
-    const partial = await mkdtemp(`${path}.partial-`);
-    try {
-      await writeFile(join(partial, "blob"), bytes);
-      await rename(join(partial, "blob"), path);
-    } finally {
-      await rm(partial, { recursive: true, force: true });
-    }
+    await writeWhole(path, bytes);
     return path;
   }
 }

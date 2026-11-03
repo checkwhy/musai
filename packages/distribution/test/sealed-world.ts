@@ -3,18 +3,21 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
+import { EVALUATE_COMMAND, type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
 import { buildModule } from "@musai/devkit";
 import {
   type Audience,
-  type CaseRecord,
   type ClaimRecord,
   type ClaimTypeDeclaration,
+  type ComputedRunRecord,
   CURRENT_SCHEMA_VERSIONS,
   claimTypesFrom,
   type EvidenceEdge,
   type RecordId,
   type RunRecipe,
+  type RunRecord,
+  readEntryFor,
+  recipeReadKey,
   recordId,
   slotFor,
   versionString,
@@ -26,6 +29,8 @@ import {
   blobStoreOf,
   declareClaimTypes,
   fixedClock,
+  fixtureBrief,
+  fixtureCase,
   fixtureRunRecord,
   foldedIndex,
   type TestKey,
@@ -89,21 +94,6 @@ export function claim(
   };
 }
 
-export function caseCiting(slug: string, claims: readonly RecordId[]): CaseRecord {
-  return {
-    kind: "case",
-    supersedes: [],
-    schemaVersion: CURRENT_SCHEMA_VERSIONS.case,
-    type: null,
-    slug,
-    claims: [...claims],
-    preset: { module: "musai.core", contribution: "musai.core/bare", moduleRecord: recordId({ marker: slug }) },
-    projectCommit: "0".repeat(40),
-    overrides: {},
-    evaluatorVersion: versionString("1"),
-  };
-}
-
 export function receiptEdge(run: RecordId): EvidenceEdge {
   return {
     run,
@@ -121,9 +111,10 @@ export interface World {
   readonly station: OperationContext;
 }
 
-/** A workspace `key` may seal in, declaring `writer`; its directory is pushed onto `scratch`. */
-export async function emptyWorld(key: TestKey, scratch: string[]): Promise<World> {
-  const workspace = await mkdtemp(join(tmpdir(), "musai-clearance-"));
+/** A workspace `key` may seal in, declaring `writer`, at `at` or in a directory pushed onto
+ * `scratch`. */
+export async function emptyWorld(key: TestKey, scratch: string[], at?: string): Promise<World> {
+  const workspace = at ?? (await mkdtemp(join(tmpdir(), "musai-clearance-")));
   scratch.push(workspace);
   const { gitDir } = await initWorkspace(workspace, { now });
   await writeTrustFile({ gitDir }, "allowed-signers", allowedSignersLine(key));
@@ -145,57 +136,87 @@ export async function seal(world: World, subject: RecordId, closure?: boolean): 
 export async function restingWorld(
   key: TestKey,
   scratch: string[],
+  at?: string,
 ): Promise<World & { readonly restsOn: RecordId; readonly stationRun: RecordId }> {
-  const world = await emptyWorld(key, scratch);
+  const world = await emptyWorld(key, scratch, at);
   for (const dir of [CORE_MODULE_DIR, RECORD_NEED_MODULE_DIR]) {
+    using folded = await foldedIndex(world.store);
     await buildModule(dir, world.store, {
       blobs: blobStoreOf(world.workspace),
-      index: await foldedIndex(world.store),
+      index: folded,
       now,
     });
   }
   const [restsOn] = await world.store.putMany([
     { kind: "claim", value: claim("rests-on", { [RECORD_NEED_RULE]: SEALED_ID }) },
   ]);
-  await world.store.putMany([{ kind: "case", value: caseCiting("rests", [restsOn!]) }]);
+  await world.store.putMany([{ kind: "case", value: fixtureCase("rests", [restsOn!]) }]);
   return { ...world, restsOn: restsOn!, stationRun: await answerStationRun(world) };
 }
 
-/** The record-need module built again at `at`, so its build is a record of its own. */
-export async function rebuildRecordNeed(world: World, at: string): Promise<void> {
-  await buildModule(RECORD_NEED_MODULE_DIR, world.store, {
+async function rebuild(world: World, dir: string, at: string): Promise<void> {
+  using folded = await foldedIndex(world.store);
+  await buildModule(dir, world.store, {
     blobs: blobStoreOf(world.workspace),
-    index: await foldedIndex(world.store),
+    index: folded,
     now: fixedClock(at),
   });
 }
 
+/** The record-need module built again at `at`, so its build is a record of its own. */
+export async function rebuildRecordNeed(world: World, at: string): Promise<void> {
+  await rebuild(world, RECORD_NEED_MODULE_DIR, at);
+}
+
+/** The core module built again at `at`, so the interpreter's build is a record of its own. */
+export async function rebuildCore(world: World, at: string): Promise<void> {
+  await rebuild(world, CORE_MODULE_DIR, at);
+}
+
 /** A station image configured and the station's own receipt for the rule's run, so a station
  * performs the claim on a machine with no container engine. */
-export async function answerStationRun(world: World, output = ""): Promise<RecordId> {
+export async function answerStationRun(world: World, output = "", exitCode = 0): Promise<RecordId> {
   const trust = { gitDir: join(world.workspace, MUSAI_DIR) };
   const { values } = (await readTrustBranch(trust)).config;
   const configured = { ...values, [STATION_IMAGE_CONFIG_KEY]: STATION_IMAGE };
   await writeTrustFile(trust, "config.json", `${JSON.stringify(configured)}\n`);
-  const image = stationImageFromConfig({ values: configured })!;
-  const clean = fixtureRunRecord(output);
-  const [run] = await world.store.putMany([
-    {
-      kind: "run",
-      value: {
-        ...clean,
-        recipe: stationRecipe(CLEAN_EXIT, { clearance: WRITER, image, musaiDir: trust.gitDir }),
-        observation: {
-          ...clean.observation,
-          resolved: [image],
-          isolationHeld: "container",
-          startedAt: now(),
-          finishedAt: now(),
-        },
-      },
-    },
-  ]);
+  const [run] = await world.store.putMany([{ kind: "run", value: stationReceipt(world, output, exitCode) }]);
   return run!;
+}
+
+/** A receipt of the rule's run in the station's image, which `answerStationRun` configures. */
+function stationReceipt(world: World, output: string, exitCode = 0): RunRecord {
+  const image = stationImageFromConfig({ values: { [STATION_IMAGE_CONFIG_KEY]: STATION_IMAGE } })!;
+  const clean = fixtureRunRecord(output);
+  return {
+    ...clean,
+    recipe: stationRecipe(CLEAN_EXIT, { clearance: WRITER, image, musaiDir: join(world.workspace, MUSAI_DIR) }),
+    observation: {
+      ...clean.observation,
+      resolved: [image],
+      isolationHeld: "container",
+      exitCode,
+      startedAt: now(),
+      finishedAt: now(),
+    },
+  };
+}
+
+/** A station receipt of the rule's run landed in one commit with an evaluation of the claim at
+ * `slot` reading it, keyed as a station's evaluation keys it; answers the receipt's id. */
+export async function stationReceiptReadBeside(world: World, output: string, slot: string): Promise<RecordId> {
+  const receipt = stationReceipt(world, output);
+  const held = world.store.held();
+  const id = await held.put("run", receipt);
+  const brief = fixtureBrief(JSON.stringify({ label: "holds", reason: "the run exited cleanly" }));
+  const evaluation: ComputedRunRecord = {
+    ...brief,
+    runKind: "evaluation",
+    recipe: { command: [EVALUATE_COMMAND, RECORD_NEED_RULE, slot, WRITER], substrates: [] },
+    observation: { ...brief.observation, reads: [readEntryFor(id, recipeReadKey(recordId(receipt.recipe)))] },
+  };
+  await held.land([{ kind: "run", value: evaluation }]);
+  return id;
 }
 
 /** The latest evaluation of the claim resting on the sealed record, as `context` reads it. */

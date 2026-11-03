@@ -1,8 +1,6 @@
 package check_test
 
 import (
-	"encoding/json/v2"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -22,59 +20,6 @@ func table(t *testing.T) refs.Table {
 		t.Fatal(err)
 	}
 	return loaded
-}
-
-// codes returns the sorted, distinct error and warning codes of a result.
-func codes(result check.Result) []string {
-	var out []string
-	for _, finding := range result.Findings {
-		if finding.Severity != check.Info && !slices.Contains(out, finding.Code) {
-			out = append(out, finding.Code)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-func TestEveryConformanceBundleProducesExactlyItsCodesAndVerdict(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(conformance, "bundles.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rows []struct {
-		Name    string   `json:"name"`
-		Verdict string   `json:"verdict"`
-		Codes   []string `json:"codes"`
-	}
-	if err := json.Unmarshal(data, &rows); err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) < 16 {
-		t.Fatalf("%d bundle rows, want at least 16", len(rows))
-	}
-	for _, row := range rows {
-		src, err := source.Open(filepath.Join(conformance, "bundles", row.Name), source.Options{})
-		if err != nil {
-			t.Fatalf("%s: %v", row.Name, err)
-		}
-		result, err := check.Run(src, table(t), trust.Own(src))
-		if err != nil {
-			t.Fatalf("%s: %v", row.Name, err)
-		}
-		if got := codes(result); !slices.Equal(got, row.Codes) {
-			t.Errorf("%s: codes %v, want %v", row.Name, got, row.Codes)
-			for _, f := range result.Findings {
-				t.Logf("  %s %s %s %s: %s", f.Severity, f.Code, f.Path, f.At, f.Detail)
-			}
-		}
-		verdict := "verified"
-		if result.Failed() {
-			verdict = "failed"
-		}
-		if verdict != row.Verdict {
-			t.Errorf("%s: verdict %s, want %s", row.Name, verdict, row.Verdict)
-		}
-	}
 }
 
 func TestThePassingBundleReportsItsVerifiedSignature(t *testing.T) {

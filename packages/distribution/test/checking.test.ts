@@ -7,9 +7,11 @@ import { clockFromEnvironment, type OperationContext, openWorkspace, runHandler 
 import { buildModule } from "@musai/devkit";
 import { INVOCATION_LIMITS_SLOT_ID } from "@musai/modules";
 import {
+  type ArgumentRecord,
   type CaseRecord,
   type ClaimRecord,
   type ClaimTypeDeclaration,
+  type ComputedRunRecord,
   type ContributionEntry,
   CURRENT_SCHEMA_VERSIONS,
   claimTypesFrom,
@@ -37,9 +39,14 @@ import {
   writeTrustFile,
 } from "@musai/test-support";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { parseBriefSubstrates } from "../src/brief/recipe.js";
+import { fullReadIds } from "../src/brief/render.js";
+import { contentIdsOf } from "../src/claim.js";
+import { briefRender } from "../src/ops/brief.js";
 import { caseBook, caseSoundcheck } from "../src/ops/case.js";
 import { caseStatus } from "../src/ops/case-status.js";
 import { claimStatus } from "../src/ops/claim.js";
+import { rulingMake } from "../src/ops/ruling.js";
 import { viewRun } from "../src/ops/view.js";
 import { claimWhy } from "../src/ops/why.js";
 
@@ -182,9 +189,10 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
     localDir = initialised.localDir;
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: CLAIM_TYPES });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
+    using folded = await foldedIndex(store);
     await buildModule(CORE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
   }, 120_000);
@@ -377,9 +385,10 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
   }, 60_000);
 
   test("a check's rule runs under the invocation limits the workspace's configuration assigns at the project layer", async () => {
+    using folded = await foldedIndex(store);
     await buildModule(ALLOCATES_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
     await store.putMany([
@@ -409,6 +418,64 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
     } finally {
       await writeTrustFile(trust, "config.json", "{}\n");
     }
+  }, 120_000);
+
+  test("a check over a claim both cases of a forked slug cite layers neither case's booking", async () => {
+    using folded = await foldedIndex(store);
+    await buildModule(ALLOCATES_MODULE_DIR, store, {
+      blobs: blobStoreOf(workspace),
+      index: folded,
+      now,
+    });
+    const allocates = (id: string): ClaimRecord => ({
+      ...checkClaim(id, null),
+      conditions: { id, [ALLOCATES_RULE]: "" },
+    });
+    const [bounded, shared] = await store.putMany([
+      { kind: "claim", value: allocates("allocates-under-one-booking") },
+      { kind: "claim", value: allocates("allocates-under-a-forked-slug") },
+    ]);
+    const projectCommit = "0".repeat(40);
+    const ceiling = { [INVOCATION_LIMITS_SLOT_ID]: { timeLimitMs: 2000, memoryLimitMb: 8 } };
+    await store.putMany([
+      { kind: "case", value: { ...caseOver("one-booking", [bounded!], projectCommit), overrides: ceiling } },
+      { kind: "case", value: { ...caseOver("a-forked-booking", [shared!], projectCommit), overrides: ceiling } },
+      { kind: "case", value: caseOver("a-forked-booking", [shared!], projectCommit) },
+    ]);
+
+    const layered = await runHandler(claimStatus, { claim: slotOf("allocates-under-one-booking") }, ctx());
+    const unlayered = await runHandler(claimStatus, { claim: slotOf("allocates-under-a-forked-slug") }, ctx());
+
+    expect([layered.label, layered.detail]).toEqual(["open", expect.stringContaining("memory-limit")]);
+    expect(unlayered.label).toBe("holds");
+  }, 120_000);
+
+  test("a check over a claim cases under two slugs cite layers neither booking, though each would bound it", async () => {
+    using folded = await foldedIndex(store);
+    await buildModule(ALLOCATES_MODULE_DIR, store, {
+      blobs: blobStoreOf(workspace),
+      index: folded,
+      now,
+    });
+    const [shared] = await store.putMany([
+      {
+        kind: "claim",
+        value: {
+          ...checkClaim("allocates-under-two-slugs", null),
+          conditions: { id: "allocates-under-two-slugs", [ALLOCATES_RULE]: "" },
+        },
+      },
+    ]);
+    const projectCommit = "0".repeat(40);
+    const ceiling = { [INVOCATION_LIMITS_SLOT_ID]: { timeLimitMs: 2000, memoryLimitMb: 8 } };
+    await store.putMany([
+      { kind: "case", value: { ...caseOver("one-slug", [shared!], projectCommit), overrides: ceiling } },
+      { kind: "case", value: { ...caseOver("another-slug", [shared!], projectCommit), overrides: ceiling } },
+    ]);
+
+    const status = await runHandler(claimStatus, { claim: slotOf("allocates-under-two-slugs") }, ctx());
+
+    expect(status.label).toBe("holds");
   }, 120_000);
 
   test("a check whose recipe declares a name secret that the bindings file binds plain holds on the receipt it minted", async () => {
@@ -469,7 +536,7 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
   test("a case's own verbs settle every check it cites, and a sweep over the same case settles none", async () => {
     const claim = checkClaim("cited-by-a-case", exitCodeCheck(["node", "-e", "process.exit(0)"], 0));
     const [claimId] = await store.putMany([{ kind: "claim", value: claim }]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([{ kind: "case", value: caseOver("a-case-over-a-check", [claimId!], opened.matrix.commit) }]);
 
     // The sweep reads this case's claims, so the count below is a control, not an empty workspace.
@@ -490,7 +557,7 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
   test("a case its check's receipt settled is listed done and previewed done, and neither runs anything", async () => {
     const claim = checkClaim("settled-by-its-check", exitCodeCheck(["node", "-e", "process.exit(0)"], 0));
     const [claimId] = await store.putMany([{ kind: "claim", value: claim }]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([{ kind: "case", value: caseOver("a-settled-case", [claimId!], opened.matrix.commit) }]);
     await runHandler(caseSoundcheck, { case: "a-settled-case" }, wallClockCtx());
     const before = await runCount();
@@ -511,7 +578,7 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
       { kind: "claim", value: holding },
       { kind: "claim", value: failing },
     ]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([{ kind: "case", value: caseOver("a-failing-case", claimIds, opened.matrix.commit) }]);
     await runHandler(caseSoundcheck, { case: "a-failing-case" }, wallClockCtx());
     const before = await runCount();
@@ -525,10 +592,56 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
     expect(await runCount()).toBe(before);
   }, 120_000);
 
+  test("a failing check's brief packs its receipt as attacking evidence, and a challenge to that receipt opens the claim, packed beside it", async () => {
+    const claim = checkClaim("fails-then-challenged", exitCodeCheck(["node", "-e", "process.exit(1)"], 0));
+    const [claimId] = await store.putMany([{ kind: "claim", value: claim }]);
+    const opened = await openWorkspace({ workspace, scope, now });
+    await store.putMany([{ kind: "case", value: caseOver("a-challenged-failure", [claimId!], opened.matrix.commit) }]);
+    opened.close();
+    const failing = await runHandler(claimStatus, { claim: slotOf("fails-then-challenged") }, ctx());
+    const receipt = failing.decidedBy!.id as RecordId;
+    const [counter] = await store.putMany([{ kind: "run", value: bareRun("the challenge's own run") }]);
+    const challenge: ArgumentRecord = {
+      kind: "argument",
+      premises: [],
+      supersedes: [],
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+      target: receipt,
+      reason: "it fails for the wrong reason",
+      evidence: [edgeOn(counter!, "exitCode")],
+    };
+    const [argument] = await store.putMany([{ kind: "argument", value: challenge }]);
+    const planned: OperationContext = { ...ctx(), mode: "plan" };
+
+    const challenged = await runHandler(claimStatus, { claim: slotOf("fails-then-challenged") }, planned);
+    const rendered = await runHandler(briefRender, { claim: claimId! }, ctx());
+    const run = (await store.read(rendered.brief, "run")) as ComputedRunRecord;
+    const { head, caseId } = parseBriefSubstrates(run.recipe);
+    const reader = await openWorkspace(ctx());
+    const staleness = await fullReadIds(reader, caseId, claimId!, head, undefined);
+    reader.close();
+    const verdict = { claim: claimId!, verdict: "holds", reason: "it holds", brief: rendered.brief } as const;
+    await runHandler(rulingMake, verdict, { ...ctx(), via: "tty", principalName: "person@example.com" });
+    const ruled = await runHandler(claimStatus, { claim: slotOf("fails-then-challenged") }, planned);
+
+    expect(failing).toMatchObject({ label: "fails", decidedBy: { kind: "run" } });
+    expect(challenged.label).toBe("open");
+    expect(rendered.output).toContain(
+      `## Attacking evidence\n- receipt ${receipt} (rule ${DECLARATIVE}, which fails)\n`,
+    );
+    expect(rendered.output).toContain(
+      `- receipt ${counter} (musai.core/exit-code@1:exitCode) against the run ${receipt}: it fails for the wrong reason`,
+    );
+    expect(new Set(contentIdsOf(run.observation.reads))).toEqual(new Set(staleness));
+    expect(staleness).toEqual(expect.arrayContaining([receipt, counter, argument]));
+    expect(ruled).toMatchObject({ label: "holds", decidedBy: { kind: "ruling" } });
+    expect(ruled.decidedOnStaleEvidence).toBeUndefined();
+  }, 120_000);
+
   test("a case whose check nothing has run lists that check unchecked, as its preview does, and only performing runs it", async () => {
     const claim = checkClaim("never-run", exitCodeCheck(["node", "-e", "process.exit(0) /* never-run */"], 0));
     const [claimId] = await store.putMany([{ kind: "claim", value: claim }]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([{ kind: "case", value: caseOver("an-unchecked-case", [claimId!], opened.matrix.commit) }]);
     const before = await runCount();
 
@@ -565,7 +678,7 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
       { kind: "claim", value: unrun },
       { kind: "claim", value: judgment },
     ]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([{ kind: "case", value: caseOver("an-open-case", claimIds, opened.matrix.commit) }]);
 
     const listed = await runHandler(viewRun, { view: "musai.core/cases" }, wallClockCtx());
@@ -575,9 +688,10 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
 
   test("a claim naming two rules in its conditions is refused rather than settled by either, and so is the sweep listing a case citing it", async () => {
     // A second module's rule, so the claim below names two.
+    using folded = await foldedIndex(store);
     await buildModule(FIXTURE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
     const parameters = exitCodeCheck(["node", "-e", "process.exit(0)"], 0);
@@ -594,7 +708,7 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
     await expect(runHandler(claimStatus, { claim: slotOf("two-rulers") }, ctx())).rejects.toThrow(/more than one rule/);
 
     // A sweep settles no check but still reads which rule a claim names, so the refusal reaches it.
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await store.putMany([
       { kind: "case", value: caseOver("a-case-over-two-rulers", [claimId!], opened.matrix.commit) },
     ]);
@@ -605,9 +719,10 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
   }, 120_000);
 
   test("a check whose rule requested a record does not read that record as a run", async () => {
+    using folded = await foldedIndex(store);
     await buildModule(RECORD_NEED_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
     const [cited] = await store.putMany([{ kind: "claim", value: checkClaim("cited-by-a-rule", null) }]);
@@ -662,12 +777,13 @@ describe("a claim whose conditions name a rule is settled by running it", () => 
 
   test("a run a pack's rule requests is authorised by a binary another installed module declares", async () => {
     // An install of bytes the name already resolves to commits nothing.
+    using folded = await foldedIndex(store);
     await buildModule(RECORD_NEED_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     expect(index.contributionsOf("requirement").filter((row) => row.moduleName === "record-need")).toHaveLength(0);
 
     const [cited] = await store.putMany([{ kind: "claim", value: checkClaim("cited-by-an-untooled-rule", null) }]);
@@ -726,9 +842,10 @@ describe("a check is performed only where the rule record naming its rule admits
     const { gitDir } = await initWorkspace(workspace, { now });
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: CLAIM_TYPES });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
+    using folded = await foldedIndex(store);
     await buildModule(CORE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
     [goldRule] = await store.putMany([{ kind: "rule", value: declarativeRule("gold-only", "gold") }]);
@@ -807,10 +924,12 @@ describe("a subscription is a run at its trigger, and its receipt is evidence li
     workspace = await mkdtemp(join(tmpdir(), "musai-subscription-"));
     const { gitDir } = await initWorkspace(workspace, { now });
     store = new Store({ ctx: { gitDir }, scope, now });
-    await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index: await foldedIndex(store), now });
+    using folded = await foldedIndex(store);
+    await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index: folded, now });
+    using refolded = await foldedIndex(store);
     await buildModule(SENTINEL_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: refolded,
       now,
     });
   }, 120_000);
@@ -880,9 +999,10 @@ describe("a check over a fold whose slot set the registry refuses", () => {
     const { gitDir } = await initWorkspace(workspace, { now });
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: CLAIM_TYPES });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
+    using folded = await foldedIndex(store);
     await buildModule(CORE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(store),
+      index: folded,
       now,
     });
     const colliding: ModuleRecord = {

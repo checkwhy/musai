@@ -2,7 +2,8 @@ import type { OperationDescriptor, Workspace } from "@musai/api-core";
 import { openWorkspace } from "@musai/api-core";
 import { type CaseRecord, type ClaimRecord, conditionString, type RecordId, versionString } from "@musai/records";
 import { citedClaims, findCase } from "../cases.js";
-import { groupHolder, type LabelledClaim, labelledClaim } from "../claim.js";
+import { type LabelledClaim, labelledClaims } from "../claim.js";
+import { gateStanding } from "../gate/awaiting.js";
 import { GATE_CLASSES, type GateClass, isGateClass } from "../gate-classes.js";
 
 export interface CaseStatusInput {
@@ -71,12 +72,6 @@ function undecided(options: readonly Counted[]): Counted {
   return waiting === undefined ? { label: "fails", waiting: null } : { label: "open", waiting };
 }
 
-/** Whether an open gate awaits an answer as `gate pending` reads it: a menu does only while none
- * of its members holds, on grounds this view holds or not. */
-async function awaitsAnswer(opened: Workspace, claim: ClaimRecord): Promise<boolean> {
-  return claim.exclusiveGroup === null || (await groupHolder(opened, claim.exclusiveGroup)) === null;
-}
-
 /** A case's progress: its first open gate in playbook order, its claims' counts, and whether every
  * claim it cites holds or fails only as a menu option not chosen. */
 export async function deriveCaseStatus(
@@ -88,27 +83,45 @@ export async function deriveCaseStatus(
   const flagged: RecordId[] = [];
   const counted: Counted[] = [];
   const menus = new Map<string, Counted[]>();
-  let cited = 0;
-  for (const { id: claimId, record } of citedClaims(opened, caseRecord)) {
+  const claims = citedClaims(opened, caseRecord);
+  // Not performing still reads each check's evaluation, or a claim only a check settles reads open.
+  const labelledEach = await labelledClaims(
+    opened,
+    claims.map(({ record }) => (record as ClaimRecord).slot),
+    perform ? "perform" : "recorded",
+  );
+  const menuAwaiting = new Map<string, RecordId | null>();
+  const awaitingOf = async (claimId: RecordId, claim: ClaimRecord): Promise<RecordId | null> => {
+    const group = claim.exclusiveGroup;
+    if (group !== null && menuAwaiting.has(group)) {
+      return menuAwaiting.get(group)!;
+    }
+    const { awaiting } = await gateStanding(opened, { id: claimId, record: claim });
+    if (group !== null) {
+      menuAwaiting.set(group, awaiting);
+    }
+    return awaiting;
+  };
+  for (const [position, { id: claimId, record }] of claims.entries()) {
     const claim = record as ClaimRecord;
-    cited += 1;
-    // Not performing still reads the latest receipts, or a claim only a check settles reads open.
-    const labelled = await labelledClaim(opened, claim.slot, perform ? "perform" : "recorded");
+    const labelled = labelledEach[position]!;
     const { status } = labelled;
-    if (claim.exclusiveGroup === null) {
-      counted.push(countedOf(labelled));
-    } else {
-      menus.set(claim.exclusiveGroup, [...(menus.get(claim.exclusiveGroup) ?? []), countedOf(labelled)]);
-    }
     const gateClass = conditionString(claim.conditions, "gateClass");
-    if (!isGateClass(gateClass)) {
-      continue;
+    const awaiting = isGateClass(gateClass) ? await awaitingOf(claimId, claim) : null;
+    if (isGateClass(gateClass)) {
+      if (next === null && awaiting !== null) {
+        next = { gate: awaiting, class: gateClass };
+      }
+      if (status.label !== "open" && status.decidedOnStaleEvidence) {
+        flagged.push(claimId);
+      }
     }
-    if (next === null && status.label === "open" && (await awaitsAnswer(opened, claim))) {
-      next = { gate: claimId, class: gateClass };
-    }
-    if (status.label !== "open" && status.decidedOnStaleEvidence) {
-      flagged.push(claimId);
+    // A gate awaiting its answer is open, whatever its evidence says.
+    const entry: Counted = awaiting !== null ? { label: "open", waiting: "open" } : countedOf(labelled);
+    if (claim.exclusiveGroup === null) {
+      counted.push(entry);
+    } else {
+      menus.set(claim.exclusiveGroup, [...(menus.get(claim.exclusiveGroup) ?? []), entry]);
     }
   }
   let notChosen = 0;
@@ -124,7 +137,7 @@ export async function deriveCaseStatus(
   for (const { label } of counted) {
     counts[label] += 1;
   }
-  const reason = openReason(cited, counted, counts);
+  const reason = openReason(claims.length, counted, counts);
   return {
     next,
     done: reason === null,

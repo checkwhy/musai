@@ -32,6 +32,9 @@ export const RULING = "sha256:4c006fc58e70d4e7df0d10469cd874f7897a6920edeaf35140
 export const ATTESTATION = "sha256:42eb14cc43763a1d89f80dd81def025b9bda99a2e7b4d0b128d06569ba365b28" as RecordId;
 export const RULE = "sha256:052cb330723067db76271a8d69f83e6cee0ca211676249d7a3b7cfe86229bee4" as RecordId;
 
+/** A public key whose private half no case holds. */
+export const SOME_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5";
+
 /** Each path relative to the bundle's root, with the exact bytes written there. */
 export type Bundle = Map<string, Uint8Array>;
 
@@ -187,6 +190,19 @@ export function unsignedCases(): { bundleCase: BundleCase; bundle: Bundle }[] {
         bundle.set(
           "allowed-signers",
           text(new TextDecoder().decode(bundle.get("allowed-signers")).replace(/^florin /, "alice ")),
+        ),
+    ],
+    [
+      {
+        name: "trust-line-refused",
+        verdict: "failed",
+        codes: [PIN, "trust.line-invalid"],
+        what: "allowed-signers holding, after the signer's own line, a line the kernel refuses: a window with no zone",
+      },
+      (bundle) =>
+        bundle.set(
+          "allowed-signers",
+          text(`${new TextDecoder().decode(bundle.get("allowed-signers"))}alice valid-after="20250101" ${SOME_KEY}\n`),
         ),
     ],
     [

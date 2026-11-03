@@ -235,6 +235,12 @@ func TestANameThatIsBothADirectoryAndACommitIsRefused(t *testing.T) {
 	}
 }
 
+func TestAWorkspaceCommitWithoutAllowedSignersIsNotATrustSource(t *testing.T) {
+	if _, err := trust.Resolve([]string{"scope/default"}, open(t, workspace(t)), github(nil)); !errors.Is(err, trust.ErrSpec) {
+		t.Fatalf("err %v, want ErrSpec", err)
+	}
+}
+
 func TestAWorkspaceBranchThatDoesNotExistIsNotATrustSource(t *testing.T) {
 	if _, err := trust.Resolve([]string{"no-such-branch"}, open(t, workspace(t)), github(nil)); !errors.Is(err, trust.ErrSpec) {
 		t.Fatalf("err %v, want ErrSpec", err)

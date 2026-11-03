@@ -7,8 +7,9 @@ import {
   isDimensionOrder,
   isPlainObject,
   KernelError,
+  SchemaCompiler,
 } from "@musai/records";
-import { Ajv, type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
 import { kernelPoint } from "../rule/envelope.js";
 import { onFirstUse } from "./on-first-use.js";
 
@@ -20,7 +21,7 @@ export class DimensionRefusedError extends KernelError {
   }
 }
 
-const ajv = new Ajv({ strict: false, allErrors: true, addUsedSchema: false });
+const schemas = new SchemaCompiler();
 
 /** A declaration's `input` as canonical JSON carries it, before it becomes a `Dimension`. */
 type DimensionOperand =
@@ -47,7 +48,7 @@ const dimensionBranches = onFirstUse(
       (kernelPoint("dimension")!.input as { readonly oneOf: readonly Record<string, unknown>[] }).oneOf.map(
         (branch) => [
           (branch["properties"] as { readonly type: { readonly const: string } }).type.const,
-          ajv.compile<DimensionOperand>(branch),
+          schemas.compile<DimensionOperand>(branch),
         ],
       ),
     ),
@@ -68,7 +69,7 @@ export function dimensionFromEntry(entry: ContributionEntry): Dimension {
   if (!validate(entry.input)) {
     throw new DimensionRefusedError(
       `refusing to register ${entry.id}: a dimension of type ${declaredType} must declare its name and the data that ` +
-        `type compares by: ${ajv.errorsText(validate.errors ?? [], { dataVar: "declaration" })}`,
+        `type compares by: ${schemas.errorsText(validate.errors ?? [], { dataVar: "declaration" })}`,
       [entry.id],
     );
   }

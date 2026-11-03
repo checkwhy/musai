@@ -1,7 +1,16 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Clock, isPlainObject, KernelError } from "@musai/records";
+import {
+  ALLOWED_SIGNERS_FILE,
+  AUDIENCES_FILE,
+  type Clock,
+  CONFIG_FILE,
+  isPlainObject,
+  KernelError,
+  ROLES_FILE,
+  TrustFileError,
+} from "@musai/records";
 import type { GitContext, TreeEntry } from "./git.js";
 import {
   gitCatFile,
@@ -16,14 +25,6 @@ import {
 import { withCasRetry } from "./retry.js";
 
 const TRUST_BRANCH_REF = "refs/heads/main";
-
-const CONFIG_PATH = "config.json";
-
-const ALLOWED_SIGNERS_PATH = "allowed-signers";
-
-const ROLES_PATH = "roles";
-
-const AUDIENCES_PATH = "audiences";
 
 /** Configuration read at one commit, so every decision drawn from it sees the same read. */
 export interface WorkspaceConfig {
@@ -41,14 +42,14 @@ export interface TrustBranch {
   readonly audiences: string;
 }
 
-const TRUST_PATHS = [CONFIG_PATH, ALLOWED_SIGNERS_PATH, ROLES_PATH, AUDIENCES_PATH];
+const TRUST_FILES = [CONFIG_FILE, ALLOWED_SIGNERS_FILE, ROLES_FILE, AUDIENCES_FILE];
 
 /** Each trust file's text at `commit` from one subprocess, `null` where the batch found none. */
 async function batchedTrustFilesAt(ctx: GitContext, commit: string): Promise<Map<string, string | null>> {
   const texts = new Map<string, string | null>();
-  const specs = TRUST_PATHS.map((path) => `${commit}:${path}`);
+  const specs = TRUST_FILES.map((path) => `${commit}:${path}`);
   for await (const bytes of gitCatFileBatch(ctx, specs)) {
-    texts.set(TRUST_PATHS[texts.size]!, bytes === null ? null : new TextDecoder().decode(bytes));
+    texts.set(TRUST_FILES[texts.size]!, bytes === null ? null : new TextDecoder().decode(bytes));
   }
   return texts;
 }
@@ -57,12 +58,12 @@ async function batchedTrustFilesAt(ctx: GitContext, commit: string): Promise<Map
 async function readConfigAt(ctx: GitContext, commit: string, batched: string | null): Promise<WorkspaceConfig> {
   let text: string;
   try {
-    text = batched ?? (await gitCatFile(ctx, `${commit}:${CONFIG_PATH}`)).toString("utf8");
+    text = batched ?? (await gitCatFile(ctx, `${commit}:${CONFIG_FILE}`)).toString("utf8");
   } catch (error) {
     throw new KernelError({
       reason: "workspace-incomplete",
-      detail: `refusing to read workspace configuration: ${CONFIG_PATH} is absent at ${commit}`,
-      about: [CONFIG_PATH],
+      detail: `refusing to read workspace configuration: ${CONFIG_FILE} is absent at ${commit}`,
+      about: [CONFIG_FILE],
       cause: error,
     });
   }
@@ -71,20 +72,18 @@ async function readConfigAt(ctx: GitContext, commit: string, batched: string | n
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new KernelError({
-      reason: "workspace-incomplete",
-      detail: `refusing to read workspace configuration: ${CONFIG_PATH} at ${commit} does not parse as JSON`,
-      about: [CONFIG_PATH],
-      cause: error,
-    });
+    throw TrustFileError.whole(
+      CONFIG_FILE,
+      `refusing to read workspace configuration: ${CONFIG_FILE} at ${commit} does not parse as JSON`,
+      error,
+    );
   }
 
   if (!isPlainObject(parsed)) {
-    throw new KernelError({
-      reason: "workspace-incomplete",
-      detail: `refusing to read workspace configuration: ${CONFIG_PATH} at ${commit} is not a JSON object`,
-      about: [CONFIG_PATH],
-    });
+    throw TrustFileError.whole(
+      CONFIG_FILE,
+      `refusing to read workspace configuration: ${CONFIG_FILE} at ${commit} is not a JSON object`,
+    );
   }
 
   return { commit, values: parsed };
@@ -116,8 +115,7 @@ async function readOptionalTrustFileAt(
   }
 }
 
-/** Reads every trust-branch file at one commit, so a concurrent write cannot land between them. */
-export async function readTrustBranch(ctx: GitContext): Promise<TrustBranch> {
+export async function readTrustTip(ctx: GitContext): Promise<string> {
   const commit = await gitRevParse(ctx, TRUST_BRANCH_REF);
   if (commit === null) {
     throw new KernelError({
@@ -126,16 +124,22 @@ export async function readTrustBranch(ctx: GitContext): Promise<TrustBranch> {
       about: [TRUST_BRANCH_REF],
     });
   }
+  return commit;
+}
+
+/** Reads every trust-branch file at one commit, so a concurrent write cannot land between them. */
+export async function readTrustBranch(ctx: GitContext): Promise<TrustBranch> {
+  const commit = await readTrustTip(ctx);
   const batched = await batchedTrustFilesAt(ctx, commit);
-  const config = await readConfigAt(ctx, commit, batched.get(CONFIG_PATH)!);
+  const config = await readConfigAt(ctx, commit, batched.get(CONFIG_FILE)!);
   const allowedSigners = await readOptionalTrustFileAt(
     ctx,
     commit,
-    ALLOWED_SIGNERS_PATH,
-    batched.get(ALLOWED_SIGNERS_PATH)!,
+    ALLOWED_SIGNERS_FILE,
+    batched.get(ALLOWED_SIGNERS_FILE)!,
   );
-  const roles = await readOptionalTrustFileAt(ctx, commit, ROLES_PATH, batched.get(ROLES_PATH)!);
-  const audiences = await readOptionalTrustFileAt(ctx, commit, AUDIENCES_PATH, batched.get(AUDIENCES_PATH)!);
+  const roles = await readOptionalTrustFileAt(ctx, commit, ROLES_FILE, batched.get(ROLES_FILE)!);
+  const audiences = await readOptionalTrustFileAt(ctx, commit, AUDIENCES_FILE, batched.get(AUDIENCES_FILE)!);
   return { commit, config, allowedSigners, roles, audiences };
 }
 
@@ -226,11 +230,10 @@ export function projectLayerSlots(config: WorkspaceConfig): Readonly<Record<stri
     return {};
   }
   if (!isPlainObject(slots)) {
-    throw new KernelError({
-      reason: "workspace-incomplete",
-      detail: `refusing to read the project layer's slot assignments from configuration at ${config.commit}: ${SLOTS_CONFIG_KEY} must be an object keyed by slot id`,
-      about: [SLOTS_CONFIG_KEY],
-    });
+    throw TrustFileError.atKey(
+      SLOTS_CONFIG_KEY,
+      `refusing to read the project layer's slot assignments from configuration at ${config.commit}: ${SLOTS_CONFIG_KEY} must be an object keyed by slot id`,
+    );
   }
   return slots;
 }

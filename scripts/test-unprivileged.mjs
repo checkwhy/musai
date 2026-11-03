@@ -22,6 +22,7 @@ if (spawnSync("id", [USER]).status !== 0) {
  * a new guarded test joins without a list. */
 function guardedFiles() {
   const byPackage = new Map();
+  /** @param {string} dir */
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);

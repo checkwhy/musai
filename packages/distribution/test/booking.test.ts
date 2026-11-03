@@ -56,7 +56,7 @@ describe("a case booked under a kind cites the claims that kind names", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-booking-"));
     const { gitDir } = await initWorkspace(workspace, { now });
     store = new Store({ ctx: { gitDir }, scope, now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index, now });
     await index.fold(store);
@@ -97,7 +97,7 @@ describe("a case booked under a kind cites the claims that kind names", () => {
   test("the claim types the workspace holds are the pack's own beside the core module's, and they compute the slots a booking mints", async () => {
     const booked = await runHandler(caseBook, { slug: "declared-by-the-pack", kind: KIND }, ctx());
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const held = readClaimTypeDeclarations(opened.index);
     expect(held.refused).toEqual([]);
     expect(identities(held.declarations)).toEqual(
@@ -134,7 +134,7 @@ describe("a case booked under a kind cites the claims that kind names", () => {
       ctx(),
     );
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     expect(opened.claimTypes.get(REPRODUCES_TYPE)?.canonical).toBeUndefined();
     const reproduces = (await claimsOf(booked.case)).find((claim) => claim.type === REPRODUCES_TYPE)!;
     expect(reproduces.canonical).toEqual({ case: slug, subject: slug, reporter: 4711 });
@@ -236,7 +236,7 @@ describe("a case booked under a kind cites the claims that kind names", () => {
     const booked = await runHandler(caseBook, { slug: "no-preset-named", kind: KIND }, ctx());
     const caseRecord = (await store.read(booked.case, "case")) as CaseRecord;
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const slots = readSlotDeclarations(opened.index);
     const pinned = readPresetDeclarations(opened.index, slots).get(caseRecord.preset.contribution);
     expect(pinned?.assignments).toEqual({});
@@ -278,7 +278,7 @@ describe("a kind whose setlist names a claim with two rules in its conditions", 
     workspace = await mkdtemp(join(tmpdir(), "musai-booking-two-rules-"));
     const { gitDir } = await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir }, scope, now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index, now });
     await index.fold(store);

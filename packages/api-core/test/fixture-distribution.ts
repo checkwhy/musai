@@ -1,10 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OperationPlan } from "@musai/modules";
 import { type ClaimTypeDeclaration, DEPRECATED_REASONS, KernelError, timestamp, versionString } from "@musai/records";
-import { type GitContext, initWorkspace, LOCAL_DIR, MUSAI_DIR, Store } from "@musai/store";
-import { declareClaimTypes, fixedClock, fixtureRunRecord, writeTrustFile } from "@musai/test-support";
+import { type GitContext, LOCAL_DIR, MUSAI_DIR, Store } from "@musai/store";
+import { fixedClock, fixtureRunRecord, makeFixtureRepo, writeTrustFile } from "@musai/test-support";
 import { writeSignerConfig } from "@musai/trust";
 import { expect, onTestFinished } from "vitest";
 import type { OperationContext } from "../src/context.js";
@@ -239,26 +237,25 @@ export interface FixtureWorkspace {
   /** Knows no claim type beyond the kernel's own. */
   store(): Store;
   head(): Promise<string | null>;
+  /** Disposed as the test finishes, ahead of the directory, since an open index holds its file. */
+  keep<T extends Disposable>(resource: T): T;
 }
 
 /** Called from inside a test, which removes the workspace's directory when it finishes. */
 export async function fixtureWorkspace(options: FixtureWorkspaceOptions = {}): Promise<FixtureWorkspace> {
-  const dir = await mkdtemp(join(tmpdir(), "api-core-fixture-"));
-  onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const scope = "default";
-  await initWorkspace(dir, { now: FIXTURE_CLOCK });
-  const store = (): Store => new Store({ ctx: gitContextOf(dir), scope, now: FIXTURE_CLOCK });
+  const repo = await makeFixtureRepo(scope, options.claimTypes);
+  onTestFinished(() => repo.cleanup());
+  const dir = repo.workspace;
+  const store = (): Store => new Store({ ctx: repo.ctx, scope, now: FIXTURE_CLOCK });
   if (options.roles !== undefined) {
-    await writeTrustFile(gitContextOf(dir), "roles", options.roles);
+    await writeTrustFile(repo.ctx, "roles", options.roles);
   }
   if (options.allowedSigners !== undefined) {
-    await writeTrustFile(gitContextOf(dir), "allowed-signers", options.allowedSigners);
+    await writeTrustFile(repo.ctx, "allowed-signers", options.allowedSigners);
   }
   if (options.signingKey !== undefined) {
     await writeSignerConfig(join(dir, MUSAI_DIR, LOCAL_DIR), { keyPath: options.signingKey });
-  }
-  if (options.claimTypes !== undefined) {
-    await declareClaimTypes(store(), options.claimTypes);
   }
   return {
     dir,
@@ -266,6 +263,7 @@ export async function fixtureWorkspace(options: FixtureWorkspaceOptions = {}): P
     context: (overrides = {}) => ({ workspace: dir, scope, now: FIXTURE_CLOCK, ...overrides }),
     store,
     head: () => store().tip(),
+    keep: repo.keep,
   };
 }
 

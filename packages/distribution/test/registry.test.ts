@@ -170,6 +170,7 @@ describe("the projection contract every declared operation holds, which a lint o
       "case.book@1": "definedOperation",
       "case.save@1": "definedOperation",
       "challenge.file@2": "definedOperation",
+      "fork.keep@1": "definedOperation",
       "config.set@1": "validates the value, and writes the trust branch only when the call is performing",
       "config.unset@1": "removes the key only when the call is performing",
       "gate.answer@2": "definedOperation",
@@ -184,7 +185,7 @@ describe("the projection contract every declared operation holds, which a lint o
       "case.soundcheck@1": "performs a check only when the call is performing",
       "case.status@2": "performs a check only when the call is performing",
       "claim.status@3": "performs a check only when the call is performing",
-      "claim.why@4": "performs a check only when the call is performing",
+      "claim.why@5": "performs a check only when the call is performing",
       "gate.ask@1": "reaches brief.render through the same context, whose plan mode it carries",
     };
     const planning = [...REGISTRY.entries()]

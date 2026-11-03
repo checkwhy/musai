@@ -93,7 +93,7 @@ describe("a station's needs asked in one call", () => {
     let fetches = 0;
     const answer = satisfyNeeds({
       needs: [...(fetchLast ? [] : [SIBLING_FETCH]), ...needs.map(placed), ...(fetchLast ? [SIBLING_FETCH] : [])],
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       store,
       evaluationOutcomes: new Map(),
       ageLimitMs: Number.POSITIVE_INFINITY,
@@ -142,7 +142,7 @@ describe("a station's needs asked in one call", () => {
         SIBLING_FETCH,
         { kind: "run", recipe: { ...DECLARING_AN_IMAGE, workingDirectory: directory(repo.ctx.gitDir) } },
       ],
-      index: new IndexDb(),
+      index: repo.keep(new IndexDb()),
       store,
       evaluationOutcomes: new Map(),
       ageLimitMs: Number.POSITIVE_INFINITY,
@@ -204,7 +204,7 @@ describe("a station's needs asked in one call", () => {
         },
       },
     ]);
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(store);
     await engineOnPath(false);
     let reads = 0;
@@ -237,7 +237,7 @@ describe("a station's needs asked in one call", () => {
     repos.push(repo);
     await engineOnPath(false);
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = new IndexDb();
+    using index = new IndexDb();
     vi.spyOn(index, "receiptsByRecipe").mockImplementationOnce(() => {
       throw new Error("the index is locked");
     });

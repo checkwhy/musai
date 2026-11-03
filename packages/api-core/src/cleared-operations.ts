@@ -54,11 +54,7 @@ export function refuseUnderClearance(descriptor: OperationDescriptor, input: unk
   }
   const key = `${descriptor.id}@${descriptor.version}`;
   if (descriptor.authorOnly === true) {
-    throw new OperationError({
-      reason: "invalid-input",
-      about: [key],
-      detail: `${key} works in what this machine keeps for its author, and a surface cleared to ${clearance} is handed none: call it from a surface launched with no clearance`,
-    });
+    throw authorOnlyRefusal(key, clearance);
   }
   const given = descriptor.paths?.find((path) => present(input, path));
   if (given !== undefined) {
@@ -78,6 +74,14 @@ export function refuseInputFileUnderClearance(
   }
 }
 
+function authorOnlyRefusal(key: string, clearance: Audience): OperationError {
+  return new OperationError({
+    reason: "invalid-input",
+    about: [key],
+    detail: `${key} works in what this machine keeps for its author, and a surface cleared to ${clearance} is handed none: call it from a surface launched with no clearance`,
+  });
+}
+
 function pathRefusal(key: string, field: string, clearance: Audience): OperationError {
   return new OperationError({
     reason: "invalid-input",
@@ -86,21 +90,23 @@ function pathRefusal(key: string, field: string, clearance: Audience): Operation
   });
 }
 
-/** The operations a surface cleared to an audience offers: none that must be handed a path or
- * works for the author alone, and no optional path field on the rest. */
-export function operationsUnderClearance(
-  registry: ReadonlyMap<string, OperationDescriptor>,
+/** What a surface cleared to `clearance` offers of an operation: it without its optional path
+ * fields, or the refusal a call answers where it must be handed a path or works for the author. */
+export function offeredUnderClearance(
+  descriptor: OperationDescriptor,
   clearance: Audience | undefined,
-): ReadonlyMap<string, OperationDescriptor> {
+): OperationDescriptor | OperationError {
   if (clearance === undefined) {
-    return registry;
+    return descriptor;
   }
-  const offered = new Map<string, OperationDescriptor>();
-  for (const [key, descriptor] of registry) {
-    const paths = descriptor.paths ?? [];
-    if (descriptor.authorOnly !== true && !paths.some((path) => requires(descriptor.input, path))) {
-      offered.set(key, { ...descriptor, input: paths.reduce(withoutField, descriptor.input) });
-    }
+  const key = `${descriptor.id}@${descriptor.version}`;
+  if (descriptor.authorOnly === true) {
+    return authorOnlyRefusal(key, clearance);
   }
-  return offered;
+  const paths = descriptor.paths ?? [];
+  const required = paths.find((path) => requires(descriptor.input, path));
+  if (required !== undefined) {
+    return pathRefusal(key, required, clearance);
+  }
+  return { ...descriptor, input: paths.reduce(withoutField, descriptor.input) };
 }

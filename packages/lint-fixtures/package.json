@@ -5,10 +5,13 @@
   "version": "0.0.0",
   "license": "Apache-2.0",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@musai/test-support": "workspace:*",
     "@types/node": "24.13.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.11"
   }
 }

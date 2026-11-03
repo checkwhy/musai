@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { OperationPlan } from "@musai/modules";
-import type { EffectClass } from "@musai/records";
+import { type EffectClass, isKernelError } from "@musai/records";
 import { MUSAI_DIR, Store } from "@musai/store";
 import { refuseUnderClearance } from "./cleared-operations.js";
 import type { OperationContext } from "./context.js";
@@ -8,7 +8,12 @@ import { OperationError } from "./errors.js";
 import { assertHeadUnmoved } from "./expect-head.js";
 import { closingWorkspaces, openWorkspace } from "./open-workspace.js";
 import { type AppliedPlan, admitPlan, perform, planPrincipal, realisePlan } from "./plan.js";
-import { type OperationDescriptor, validateOperationInput, validateOperationOutput } from "./registry.js";
+import {
+  KERNEL_LEVEL_REASONS,
+  type OperationDescriptor,
+  validateOperationInput,
+  validateOperationOutput,
+} from "./registry.js";
 import type { Workspace } from "./workspace.js";
 
 export interface PlannedOperation<TOutput> {
@@ -103,6 +108,19 @@ function composedStatements(descriptor: OperationDescriptor, input: unknown): un
   return fields;
 }
 
+/** A refusal outside the handler's declared reasons is a defect in the handler, reported as one. */
+function heldToDeclaredReasons(descriptor: OperationDescriptor, key: string, error: unknown): unknown {
+  if (!isKernelError(error) || descriptor.reasons.includes(error.reason) || KERNEL_LEVEL_REASONS.has(error.reason)) {
+    return error;
+  }
+  return new OperationError({
+    reason: "invalid-output",
+    about: [key],
+    detail: `${key} refused ${error.reason}, which it does not declare: ${error.detail}`,
+    cause: error,
+  });
+}
+
 /** The one entry point every surface calls an operation through, so none skips the head guard. */
 export async function runHandler<TInput, TOutput>(
   descriptor: OperationDescriptor<TInput, TOutput>,
@@ -129,7 +147,12 @@ export async function runHandler<TInput, TOutput>(
     });
   }
 
-  const output: TOutput = await closingWorkspaces(() => descriptor.handler(input, context));
+  let output: TOutput;
+  try {
+    output = await closingWorkspaces(() => descriptor.handler(input, context));
+  } catch (error) {
+    throw heldToDeclaredReasons(descriptor as OperationDescriptor, key, error);
+  }
 
   const outputValidation = validateOperationOutput(descriptor as OperationDescriptor, output);
   if (!outputValidation.ok) {

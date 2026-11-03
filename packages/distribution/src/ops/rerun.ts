@@ -48,9 +48,14 @@ import {
 import {
   bindCheckout,
   checkoutBindingsFor,
+  commandLine,
+  DOLLAR_QUOTE_SHELLS,
+  engineLineOfRun,
+  holdsDollarWord,
   isContainerImageSubstrate,
   namesTree,
   performRecipe,
+  printable,
   RUNNER_PERFORMER,
   resolveSubstrates,
 } from "@musai/run";
@@ -60,7 +65,7 @@ import { readBundle } from "../bundle/source.js";
 import { recordedRuleVerdict } from "../claim.js";
 import { shortIdOf } from "../claim-ref.js";
 import { buildCarried, judgingModuleName, judgingModulesOf } from "../export/closure.js";
-import { commandText, markOf } from "../text.js";
+import { inlineText, markOf } from "../text.js";
 import { repositoryOf } from "./check.js";
 import { workspaceInit } from "./workspace.js";
 
@@ -466,19 +471,19 @@ function markOfVerdict(verdict: RerunRule["verdict"]): string {
 }
 
 function treeText(tree: NonNullable<RerunRun["tree"]>): string {
-  const recorded = tree.recorded?.slice(0, 12) ?? "none";
+  const recorded = printable(tree.recorded?.slice(0, 12) ?? "none");
   if (tree.here === null) {
     return `recorded ${recorded}, here unmeasured`;
   }
   return tree.here === tree.recorded
     ? `the tree the receipt read (${recorded})`
-    : `another tree than the receipt read (recorded ${recorded}, here ${tree.here.slice(0, 12)})`;
+    : `another tree than the receipt read (recorded ${recorded}, here ${printable(tree.here.slice(0, 12))})`;
 }
 
 function runLines(run: RerunRun): string[] {
-  const tree = run.tree === null ? [] : [`  ${run.tree.name}: ${treeText(run.tree)}`];
+  const tree = run.tree === null ? [] : [`  ${printable(run.tree.name)}: ${treeText(run.tree)}`];
   return [
-    `  ${commandText(run.command)}${run.tools.length > 0 ? ` · tools ${run.tools.join(", ")}` : ""}`,
+    `  ${commandLine(run.command)}${run.tools.length > 0 ? ` · tools ${printable(run.tools.join(", "))}` : ""}`,
     ...tree,
     `  recorded ${endText(run.recorded)}`,
     ...(run.rerun === null
@@ -491,11 +496,13 @@ function runLines(run: RerunRun): string[] {
 
 function ruleLines(rule: RerunRule): string[] {
   if (rule.verdict === "not-re-derivable") {
-    return [`· ${rule.statement} (${rule.short}) · rule ${rule.rule} not re-derivable here: ${rule.why}`];
+    return [
+      `· ${inlineText(rule.statement)} (${rule.short}) · rule ${printable(rule.rule)} not re-derivable here: ${printable(rule.why!)}`,
+    ];
   }
   return [
-    `${markOfVerdict(rule.verdict)} ${rule.statement} (${rule.short}) · ${rule.verdict}`,
-    `  rule ${rule.rule}: recorded ${rule.recorded}${rule.rerun === null ? "" : `, rerun ${rule.rerun}`}`,
+    `${markOfVerdict(rule.verdict)} ${inlineText(rule.statement)} (${rule.short}) · ${rule.verdict}`,
+    `  rule ${printable(rule.rule)}: recorded ${rule.recorded}${rule.rerun === null ? "" : `, rerun ${rule.rerun}`}`,
     ...rule.runs.flatMap(runLines),
   ];
 }
@@ -512,16 +519,16 @@ function checkHeadline(claim: RerunClaim): string {
 }
 
 function signerText(signer: { readonly principal: string; readonly name: string | null }): string {
-  return signer.name === null ? signer.principal : `${signer.name} (${signer.principal})`;
+  return printable(signer.name === null ? signer.principal : `${signer.name} (${signer.principal})`);
 }
 
 function renderRerunText(output: RerunOutput): string {
   const release =
     output.release === null
       ? "release: unchecked, the bundle names no audience"
-      : `release: covered for ${output.release.audience}, signed by ${signerText(output.release.signer)}`;
+      : `release: covered for ${printable(output.release.audience)}, signed by ${signerText(output.release.signer)}`;
   const claims = output.claims.flatMap((claim) => [
-    `${markOfVerdict(claim.verdict)} ${claim.statement} (${claim.short}) · ${checkHeadline(claim)}`,
+    `${markOfVerdict(claim.verdict)} ${inlineText(claim.statement)} (${claim.short}) · ${checkHeadline(claim)}`,
     ...runLines(claim),
   ]);
   const footer = output.performed ? [] : ["nothing ran: `musai rerun <bundle> --yes` performs each recipe above here"];
@@ -655,7 +662,7 @@ export const bundleRerun: OperationDescriptor<RerunInput, RerunOutput> = {
   effect: "performs",
   authority: null,
   plans: true,
-  reasons: ["invalid-input", "record-corrupted", "not-authorised", "no-such-record"],
+  reasons: ["invalid-input", "record-corrupted", "not-authorised", "no-such-record", "workspace-incomplete"],
   documentation:
     "Checks a bundle's ids, signatures and release, shows each recipe it carries, and with yes performs them here and compares each with its receipt.",
   paths: ["bundle"],
@@ -700,10 +707,14 @@ export const bundleRerun: OperationDescriptor<RerunInput, RerunOutput> = {
         run.recipe.substrates.some(isContainerImageSubstrate),
       );
       if (image !== undefined) {
+        const engine = engineLineOfRun(image.run);
+        const shells = engine !== null && holdsDollarWord(engine.argv) ? `, in ${DOLLAR_QUOTE_SHELLS}` : "";
+        const byHand =
+          engine === null ? "" : `; the engine line its run took runs it by hand${shells}: ${engine.shell}`;
         throw new OperationError({
           reason: "invalid-input",
           about: [image.id],
-          detail: `refusing to rerun ${image.id}: its recipe declares a container image, which rerun does not run`,
+          detail: `refusing to rerun ${image.id}: its recipe declares a container image, which rerun does not run${byHand}`,
         });
       }
       const performed = input.yes === true && context.mode !== "plan";

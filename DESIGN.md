@@ -184,8 +184,9 @@ and its exit-code classes.
 - **Evaluator.** Computes every claim's status with its justification, and what went stale: a
   claim whose latest evaluation read a key that holds something else now, found by a lookup in
   the fold's reverse index over every run's read-set rather than a scan. A claim read without
-  performing answers from an evaluation nothing has moved under, with no rule invoked: the one its
-  brief packs, by its rule's installed build, so where that build evaluated nothing it counts none.
+  performing answers from the evaluation its brief packs, by its rule's installed build, with no
+  rule invoked: where that build evaluated nothing it counts none, and where a read of that
+  evaluation or a working tree under its receipts has moved, the claim reads stale, naming the move.
 - **Scheduler.** Decides what to compute next under budgets and concurrency, and when to park.
 - **Runner and fetcher.** Musai's own performer of runs and fetches. Every receipt names who
   performed it, so a foreign tool's run is admitted under its own performer and trusted as far as
@@ -215,12 +216,36 @@ and its exit-code classes.
   root writes would outlast the run, and a bound value reaches it by name from the engine's own
   environment, never in the engine's arguments, which any local user reads, so a name the engine's
   client itself reads (`DOCKER_*`, `CONTAINER_*`, `LD_*` and the like) is refused for such a run.
+  The engine line a run held in a container took follows from its receipt alone, and a verifier's
+  `recipe` prints it for a stranger to type: the image by its resolved digest, the same mounts,
+  environment (the literals in RFC 8785 key order), working directory and command, the checkout
+  `${MUSAI_CHECKOUT:?set it to your checkout}` with the working directory after it uncleaned, so the
+  shell refuses the line until it is set, a fresh scratch, no container name, which is the run's
+  own, and each declared name passed alone and once, so no value reaches the line; a run degraded
+  to hygiene prints none, and a station's mask of `.musai/` is no part of it, as a result resting
+  there is the recipe's mistake. A printed command, the engine line among them, is the line a POSIX
+  shell splits back into its arguments and holds nothing a terminal acts on: a word is bare only
+  where nothing in it splits, expands or assigns, so `=` and `%` are quoted, and a word holding a
+  character the printing of a record's text escapes is POSIX.1-2024 `$'…'`, which bash, zsh and
+  ksh read too, each byte of that character in three octal digits, so the line pastes back as the
+  arguments exactly, and a line holding one names those shells beside it. A recipe's literal prints
+  as the assignment `NAME=value` where its name is one a shell assigns, else as the one quoted word
+  the engine line passes.
   The observation records what each name resolved to, so a receipt taken under
   hygiene is scoped to its host by its isolation level, and a re-run elsewhere is the same recipe
-  with a new observation. A host run is its own session, with no terminal: its deadline ends the whole
-  group, SIGTERM then SIGKILL after a short grace, and its caller's interruption sends the group
-  SIGTERM, since a grandchild holding the run's output would otherwise hold the call and outlive
-  it. A container run's deadline ends only the engine's client.
+  with a new observation. A host run is its own session, with no terminal: its deadline and its
+  caller's interruption end the whole group and every process the machine's process table lists
+  as descending from the run, which a grandchild calling `setsid` leaves the group but not:
+  SIGTERM, then SIGKILL once a short grace has passed or the call settles, whichever comes first,
+  since a grandchild holding the run's output would otherwise hold the call and outlive it. An
+  interrupted caller cannot wait out the grace, so it leaves a detached process to send the
+  SIGKILL. Each listed process is signalled SIGKILL only while its start time is the one listed,
+  so a pid the system has since given a stranger is left alone. The table is `/proc` on Linux and
+  `/bin/ps` elsewhere, named by path so no search path decides it; where it cannot be read the
+  group alone is ended, and `doctor`'s machine row says so. A descendant whose parent exited
+  before the run ended hangs from init and is beyond reach. A caller killed by SIGKILL runs
+  nothing, so its run is left running, and nothing later can tell it from any other process. A
+  container run's deadline ends only the engine's client.
   Windows, which has no groups, ends the tree with `taskkill /T /F`. A checkout a run stands on is named in its recipe by commit, bound to a
   directory on this machine outside any record, and measured before anything spawns: a checkout
   whose tree is not the commit's, or a working directory that leaves it, by its spelling or through a symlink, is refused, and a receipt for the commit keeps satisfying after
@@ -242,7 +267,8 @@ and its exit-code classes.
   recorded still resolves to the digest it recorded: running it again could differ only by what no
   input names. Of a recipe's receipts, the latest that still satisfies is reused, so a tree
   returned to what an earlier receipt measured reuses that one. A tree that measures as no
-  receipt recorded re-runs the recipe, and read without performing it, the claim reads stale. The resolution age applies to everything else. Bookers, sinks
+  receipt recorded re-runs the recipe; read without performing, a tree off the receipts the claim's
+  evaluation rests on reads stale, an earlier receipt measuring it or not. The resolution age applies to everything else. Bookers, sinks
   and sensors are runs performed at their trigger, so a case's origin and an artifact's publication
   carry receipts like a test does.
 - **Signer and authority.** Verifies sidecar signatures over attestation bytes against the
@@ -417,9 +443,28 @@ hands an extension tool the session's context as it was built, beside the sinks 
 subscription's trace and, once per session, each file the fold left out of the index: it adds no channel or principal,
 so one that attests anything establishes its own. It validates the call's arguments against the
 tool's own input schema, refusing `invalid-input` before the tool is reached (a tool whose schema
-does not compile is refused `tool-unavailable` by its name, and its siblings serve), so `plan` and
+does not compile is withheld from the listing with the name it holds, the session's log says why
+once, and its siblings serve), so `plan` and
 `expectHead`, which a projected call strips, are refused by a tool that does not declare them, and writes the call
-to the session's log as it does a projected tool's. An operation that
+to the session's log as it does a projected tool's. A session lists and dispatches from one map of
+names, so a name is callable exactly where it is listed. Where no workspace stands, at the
+session's start or once one is removed under it, that map holds only the operation that makes one,
+and every other tool name is refused `unknown-operation`, saying no workspace stands there yet and
+naming the tool that makes one; the session lists no resource or prompt either, and refuses a read
+or a get `no-such-record` the same way without opening a workspace, since every other verb reads or
+writes one and the session's log lives in one. The init is the first entry in the log it makes, and
+the first request after the init reads the events from the start, so what it installed is notified.
+A workspace made again at the path is a fresh one too, known by its not holding the session's log,
+whose name is random and whose file the session makes when it first sees the workspace stand, so
+the tie holds before any entry; no entry from a request begun under one workspace lands in
+another's log.
+An extension of an operation's name stands in its place, unless the clearance withholds that
+operation, which withholds the extension with it; a call to a withheld operation is refused by
+the kernel's own gate, in the order and with the refusal the API gives the same input. Two
+operations or two extension tools projecting to one name (a tool name drops the version and folds
+`.` into `_`) build no server. A contribution claiming a
+name another contribution or an operation holds is withheld at each request, an operation keeping
+its name, the session's log saying so once, and every other tool still served. An operation that
 writes returns the records it minted, ids and bodies, so a
 surface never assembles a commit; one asked in plan mode returns what it would mint without
 writing a record (a salted draft may create the workspace key, so the ids it shows are the ids
@@ -427,8 +472,9 @@ written), which is where an irreversible gate's preview comes from, and a verb w
 preview refuses plan mode by name rather than performing under it; one that needs a decision
 returns a pending record another operation answers. Events are a cursor a caller reads forward,
 never a push, and the MCP server's own list-changed notification is derived from that cursor
-rather than a mechanism of its own; a session whose scope is dropped under it refuses every tool call, tool
-list, resource read and prompt `workspace-incomplete`, naming the drop, until the scope is made again. An operation is named `id@version`, and every answer is
+rather than a mechanism of its own; a session whose scope is dropped under it, its workspace still
+standing, refuses every tool call, list, resource read and prompt `workspace-incomplete`,
+naming the drop, until the scope is made again. An operation is named `id@version`, and every answer is
 checked against its output schema, which a reader holds it to, so an output that gains a field, or a
 field that comes to count something else, is the operation's next version. An operation is declared by any module: its
 handler answers with a plan — records to put,
@@ -448,9 +494,9 @@ refused unless a project slot allows it. A pack's draft supersedes nothing, save
 standing in for one artifact of its own case, and carries no sealed text; the kernel refuses both
 before any distribution's admission runs: retiring a record reaches it forward out of the
 rulings, the contributors and the arguments the fold weighs, and that is an act its own verb asks
-authority for; and the key that could open a sealed value lives on this machine, so a value a
-pack hands over was sealed under no key the workspace holds, and nothing that reads the record
-could read it. A pack drafts no run, attestation, module record, rule record or ruling: the kernel
+authority for, as `check --replace` and `keep` close a fork; and the key that could open a sealed
+value lives on this machine, so a value a pack hands over was sealed under no key the workspace
+holds, and nothing that reads the record could read it. A pack drafts no run, attestation, module record, rule record or ruling: the kernel
 alone mints a run, an attestation or a module record, nothing mints a rule record, and a ruling is
 a person's act, minted by a distribution's own verb under its authority check. The module
 boundary's plan schema refuses a plan putting any of these kinds first, on either host, and the
@@ -458,8 +504,10 @@ kernel's pass refuses each again, before any distribution's admission runs, as t
 that never crossed a host; both read the kinds a pack may put off each kind's contract, its
 `packMayDraft`, so the kernel names no kind. A distribution's admission, not the kernel, must
 refuse a pack's case under a slug the store already holds, which would re-pin the booked case, and
-its claim naming another exclusive group at a slot already spoken for, which would leave every read
-of the slot refused; musai's refuses both through its own verbs' checks. Every evidence edge a pack's drafted record cites is re-admitted by the kernel before any
+its claim naming another exclusive group at a slot already spoken for, which would fork the slot;
+musai's refuses both through its own verbs' checks, against the drafter's fold, so a station's
+claim at a slot sealed from it forks the author's slot as a claim judged otherwise does, and
+learns nothing. Every evidence edge a pack's drafted record cites is re-admitted by the kernel before any
 distribution's admission runs, as `challenge.file`'s own edge is: the cited run's attestation
 verified where the signing level requires it, the selector's parser run over the run's own
 observation, and the item it names compared with the edge's. What an edge says a receipt says is
@@ -472,8 +520,9 @@ kind's setlist instead, and the case records which kind it was booked under.
 
 - **MCP server**, a core module, started with the session. Tools are typed: `case_book`,
   `claim_status`, `gate_pending`, `gate_ask`, `gate_answer`, `challenge_file`,
-  `ruling_make`, `brief_render`, `claim_why`. It lists the CLI's public verbs alone unless started
-  with `--lab`, as the plugin starts it, so a stranger's agent meets the same words. Resources: `case://<slug>`, `claim://<slot>`,
+  `ruling_make`, `brief_render`, `claim_why`. It lists and answers the CLI's public verbs alone
+  unless started with `--lab`, as the plugin starts it, so a stranger's agent meets the same words
+  and can call nothing it was not shown. Resources: `case://<slug>`, `claim://<slot>`,
   `gates://pending`. Modules add tools, prompts and resources at runtime through it, so the
   Claude Code plugin directory is a thin shell — mechanically: a contribution kind whose own
   declared input is an object schema (never the boolean shorthand a kind nothing invokes
@@ -493,7 +542,9 @@ kind's setlist instead, and the case records which kind it was booked under.
   a longer argument survives in it verbatim. That is tolerable only while the log stays on the
   machine that wrote it: a call log is secret-bearing, and any surface that would export,
   attach or display one must either scrub beyond equality or require an explicit release, the
-  same posture export attestation takes for a record.
+  same posture export attestation takes for a record. Its reader is `doctor`, for the author
+  alone: a row per extension tool and per subscription, counting what every session logged and
+  what failed, and never a logged value.
 - **Claude Code plugin.** Skills for the conversational entry, the funnel, the retro and kind
   drafting; hooks on `SessionStart`, `PreToolUse`, `Stop` and `SubagentStop` that call the
   engine, the `PreToolUse` one also refusing reads under `.musai/` when `agent_type` names a
@@ -525,9 +576,12 @@ kind's setlist instead, and the case records which kind it was booked under.
   installed module's rule instead, `<s>` its condition's value, so a module's own rule judges a
   claim with no kind around it; a sentence moved between the two forms is a successor at its slot.
   `export <id> --to <audience>` mints the closure release it ships when none stands; `release` and
-  `revoke`, under `lab`, set terms and withdraw. An export carries `allowed-signers` and `roles`
-  cut to the principals whose signatures it holds, and never `config.json`, a writer's policy no
-  verifier reads.
+  `revoke`, under `lab`, set terms and withdraw. They, `seal` and `keep` take a record by its id or
+  by eight or more of its hex digits, matched against the fold the caller reads: a record the fold
+  refused counts as a match and is refused as a read of it is, and a prefix only records withheld
+  from the caller's clearance match is refused as one matching nothing. An export carries
+  `allowed-signers` and `roles` cut to the principals whose signatures it holds, and never
+  `config.json`, a writer's policy no verifier reads.
   A check claim cites no run, so its export also carries the runs that decide it and each run of
   the same recipes that read the same tree and binaries, each under a record release of its own;
   a module rule's are the runs its evaluations read, and its module record, build receipt and code
@@ -546,20 +600,22 @@ kind's setlist instead, and the case records which kind it was booked under.
   over the runs performed here as over the bundle's receipts; with no module or no verdict to
   re-derive, as where a module that stays home decides an expectation, `rerun` names the rule not
   re-derivable there, and a module that came without its build by name, as `export` named it, and
-  exits as unheld. Over MCP the person at the client confirms
+  exits as unheld. A recipe that declares an image `rerun` refuses, as it runs nothing in a
+  container, naming the engine line `recipe` prints where the receipt's run was held in one. Over
+  MCP the person at the client confirms
   through elicitation before `rerun` performs, whoever passed `yes`.
   `init`, `book`, `list`, `status`, `progress`, `log`, `soundcheck`, `ask`,
   `pending`, `answer`, `rule`, `why`, `brief`, `open`, `save`, `diff`, `remix`, `drop`, `remote`, `run`,
-  `module`, `test`, `plugin`, `doctor`, `key`, `release`, `revoke`, `export`, `check`, `render`, `rerun`. `progress` is a case's own progress — the next
+  `module`, `test`, `plugin`, `doctor`, `key`, `release`, `revoke`, `attestation`, `export`, `check`, `keep`, `render`, `rerun`. `progress` is a case's own progress — the next
   pending gate in playbook order, or that it is done — kept apart from `status`, a single claim's,
   since the two answer different questions and `status` was already spoken for. A case is done
-  when it cites a claim and each one holds or fails only as a menu member its holding sibling
-  settled; otherwise it is open, saying why: it cites no claim, a claim is open, a check reads
+  when it cites a claim, each one holds or fails only as a menu member its holding sibling
+  settled, and no gate awaits an answer; otherwise it is open, saying why: it cites no claim, a claim is open, a check reads
   stale, a check has not run here, or a claim fails. Its counts take a menu once: by the member
   chosen, each other member counted as **not chosen** rather than failing, or, where nobody has
-  chosen, as one open claim. `list` reads that same derivation from recorded receipts, performing
-  nothing, so a check whose inputs moved reads stale there and one nothing has run reads
-  unchecked, rather than judged.
+  chosen, as one open claim. `list` reads that same derivation from each check's last evaluation,
+  performing nothing, so a check whose inputs moved reads stale there and one nothing has
+  evaluated reads unchecked, rather than judged.
   A verb groups under its noun only when the noun has a verb family of its own — `module new`,
   `module test`, `module build`, since `new`, `test` and `build` are generic and mean nothing
   without the noun beside them; a verb unique in the whole design stays bare — `status`, `answer`,
@@ -593,7 +649,10 @@ and a hook can hash them. Why a thing did not happen — an open status, a refus
 omission — is one closed vocabulary: a reason is deprecated, never removed or renumbered, so a
 receiver reading an old refusal in a bundle still resolves it. Every refusal the kernel raises
 carries a reason from that vocabulary and so its class; a failure with no reason is class 1 by
-rule, and a stack is shown only when asked for. Exit codes name the caller's next
+rule, and a stack is shown only when asked for. An operation declares the reasons it refuses with
+itself, and a refusal outside them is reported as a defect, class 1, save `workspace-incomplete`,
+`tool-unavailable`, `undeclared-binary`, `record-corrupted` and `declaration-conflict`, which the
+store, runner or fold beneath any operation may raise. Exit codes name the caller's next
 move, one per class, and `musai doctor` prints the table:
 
 | Exit | The caller's next move |
@@ -609,7 +668,11 @@ move, one per class, and `musai doctor` prints the table:
 
 `doctor` exits 3 when a row about the workspace fails; a row about the machine, such as the
 canary or the container engine, is routine to fail and never sets its exit, and neither does a
-requirement row, a conflicted pair included, since the run it refuses reports it by name.
+requirement row, a conflicted pair included, since the run it refuses reports it by name, nor a
+row naming a holder an init left, which nothing reads or stages, nor a call-log row, whose
+failures are history a later call may have cleared. A trust file that does not parse refuses the
+open `doctor` needs, so `doctor` then reports its failed trust-file rows and the machine rows
+alone, and exits 3.
 
 ### Proof
 
@@ -633,7 +696,17 @@ the lint, so a limb cannot be left hanging quietly.
   declares; a kind answers with none, and a claim a pack's plan drafts names none or the one its
   type and conditions compute. Two records with one slot are
   one claim; the engine merges by it and conflicts only on it, and a contributor some later record
-  supersedes neither speaks for the slot nor lends it evidence.
+  supersedes neither speaks for the slot nor lends it evidence. Its live contributors must agree on
+  what judges it, their conditions alike and no two naming different exclusive groups, or the slot
+  is **forked**: it reads open, `forked-slot`,
+  naming each contributor the reader holds, `doctor` names it to the author, and a successor
+  superseding every one closes it: `check --replace` mints one at a check's slot, and `lab keep
+  <claim>` at a slot of any type, carrying the contributor it names. `keep` is refused under a
+  clearance, since a cleared fold may miss a contributor sealed from it, and its successor's
+  evidence is admitted again, as any verb minting an edge admits it. A fork reads open, never refused,
+  so a station landing a claim at a slot sealed from it leaves the author's reads of it standing;
+  it learns nothing, the sealed claim being absent from its fold. A fork reads alike whichever
+  contributor landed first, so clones folding in different orders agree on it.
 - `conditions`: per dimension, a value from the shared vocabulary — a point spelled as a bare
   string, or a scope. Identity dimensions are points, since a slot computed from a span would put
   one claim in many places at once.
@@ -663,7 +736,16 @@ meaning unmeasured rather than zero — and how the run ended. A deterministic r
 so its id is its content and a stranger's re-run mints the same record. A plain binding's recorded value
 names no path of this machine either: a path under the run's working root is recorded as
 `./<path>`, one under a root the caller names, such as a tool's package, as `<root>:<path>`,
-and a run binding any other absolute path is refused; a helper is recorded by its program's name.
+and a run binding any other absolute path is refused as a workspace to fix, naming the binding
+and that a path under the checkout the run stands on clears it; a helper is recorded by its
+program's name. A run stands on the first checkout its recipe names, or, naming none, on the
+root its caller gives, as devkit's build and test do beside the tool package roots they name; a
+verb's run is given none, so there a recipe naming no checkout refuses every absolute path. `doctor` holds no recipe: it names each plain binding whose value and helper
+arguments name absolute paths no single root a run here can stand on holds, of the checkouts
+`checkouts.json` binds and the working tree holding the workspace, as a failed workspace row saying
+whether a path lies under none or the paths under different ones, one held by some root as a passing
+row naming those roots and that a recipe standing elsewhere refuses it, and a `checkouts.json` no
+reader takes as one row of its own.
 What still ties a receipt to a machine is the binaries it resolved, by digest, which is what ran;
 a container run resolves none on the host, since its image's digest, a substrate, fixes every program
 inside it. It also records what the run read beyond its recipe and its bindings — nothing, for
@@ -681,18 +763,31 @@ case and a byte budget, all named in its recipe beside the kernel version that r
 the clearance it was rendered under where one is set, reading exactly the records whose bytes it
 carries (each it packed, and each argument whose reason it quotes, standing against the claim or
 a run it rests on: one it cites, or for a check each receipt of its latest evaluation at that head,
-by its rule's build installed there, that holds) and writing the rendered bytes as its output,
+by its rule's build installed there, that concluded, a failing one's packed as attacking the claim)
+and writing the rendered bytes as its output,
 so a receiver re-renders it byte-for-byte, a ruling's evidence is its read-set, and a seal on
-anything it quotes withholds it.
+anything it quotes withholds it. Where that evaluation has moved, as a read without performing
+names the move, no brief is rendered over it and no ruling made over one already rendered: the
+refusal names the move and asks for `status` first, under the brief's clearance where it is not
+the reader's. Nor does any route make a ruling over a brief whose reads moved since it was
+rendered, each head read as the brief's clearance reads it where the reader is the author, so
+what lands sealed from a station moves none of its briefs; a station rules only over a brief
+rendered under its own clearance, since its fold may miss what another's reads; no judge answers a
+brief stale before they answer it, and a receiver's re-render, which checks nothing, stays
+byte-for-byte.
 It does not read the evaluation that chose a check's receipts, whose bytes it carries none of: a
 later one holding on the same receipts moves nothing, and one on others moves the receipts. A
 station and its author each evaluate under their own recipe, so a ruling is held to the receipts
-of the clearance its brief was rendered under, whoever reads it. Its budget trims what is not
-pinned weakest first, an argument whole, and names each omission.
+of the clearance its brief was rendered under, whoever reads it. A brief over a check its rule's
+installed build has not judged since a rebuild packs none of its receipts and says so in a pinned
+line naming the `status` that evaluates it. Its budget bounds the whole rendered brief, header and
+omission list included: it trims what is not pinned weakest first, an argument whole, and names
+each omission.
 A rule's evaluation is a run of its own kind, its
 reads in that same shape, so the dependency fold reads one shape for every derived thing and a
 verdict is a receipt a stranger re-runs. An evaluation's
-read-set is what the kernel handed its rule: the claim under its slot, each evidence run, each
+read-set is what the kernel handed its rule: the claim under its slot, each evidence run under
+the recipe it ran by, a station's in its image, so only a newer receipt of that recipe moves it, each
 record asked for and each invoked contribution's module. A rule is handed each record it asks for, a
 claim as it stands at its slot whichever of its ids was asked, so a successor reaches the rule and
 its reads alike. A performed evaluation is minted only where it read or
@@ -734,18 +829,43 @@ second a policy, bearing on every claim of that type whose conditions the scope 
 once rather than repeated per claim. A **gate** is a claim of a class that admits only a ruling, with
 the policy that may answer it, so a ruling alone decides a gate no evidence reaches, and `why`
 names that ruling, never a receipt, as what decided it; a menu is a set of sibling gate claims declared mutually
-exclusive, closed by the commit that opens it, so no later claim joins it. A member holds only when
-it applies and its own rulings resolve `holds`, which settles the siblings as failed, so a person's
+exclusive, closed by the commit that opens it, so no later claim joins it; a successor superseding
+a member, as `keep` mints, stands in for that member at its slot and joins nothing. A member holds
+only when it applies and its own rulings resolve `holds`, which settles the siblings as failed, so a person's
 `fails` over a delegate's answer reopens the menu; a member that does not apply settles nothing for
 its group and is offered by no menu, and a ruling on a claim that does not apply is refused, since
-nothing about it is decided; a second ruling that would make two hold is refused. **Rules** are records: a module seeds its own at load, and the retro
+nothing about it is decided; a second ruling that would make two hold is refused. A gate that
+applies awaits an answer until a vouched ruling on a brief the reader holds decides it, whatever its
+evidence says, and a menu while none of its members holds and an applying one is so undecided,
+named by the first such; `pending` lists exactly these and `progress` names the first as next, so a menu every
+option of which is ruled out awaits nothing and counts as one failure. **Rules** are records: a module seeds its own at load, and the retro
 writes a lesson as a rule whose provenance is the accepted challenge. A rule record names the
 contribution whose policy it states; a lesson's names none. **Cases** cite claims and own
 drafts, artifacts, a preset, and edges to other cases (spawned, after, fixture, remixed from), and
 pin the evaluator version they were booked under: a kernel whose version later disagrees is a
 moved reference, going stale through the same machinery rather than being refused. A remix is an
 edge and never a supersession — both timelines stay and both answer — while a case that supersedes
-another replaces a booking that should no longer be read as current.
+another replaces a booking that should no longer be read as current, and answers the artifacts
+drafted under it. A slug names one case, so two live cases under one, as a scope merge lands where
+both scopes booked it, **fork** the slug: the merge, a union, lands it rather than refusing, a read
+by the slug is refused naming each live case the reader holds, each still answers by its own id
+save that the slug's view, which belongs to the slug, neither opens nor saves under either,
+the author's `doctor` names its cases by short id, never the slug, which may be a sealed case's, and `lab keep <case>` closes it with a successor carrying
+the case it names and superseding every live case under the slug; it stands in for that case in a
+ruling's read-set, since it holds all that case held, so a ruling over the kept case's brief stays
+current and one over another case of the fork reads stale, as does one read where that case is
+sealed, since nothing there can compare the two. No id order picks one, so clones
+folding in different orders agree: a claim two cases of a forked slug cite belongs to neither, so a
+brief over it is refused naming both and its check layers no booking, and `pending` lists a gate
+they share once, each row of a forked slug naming its live cases. A claim cases under different
+slugs cite is shared, not forked: its brief takes a `case`, by slug, id or short id, and is refused
+without one naming each citing case, a ruling over it standing while the case its brief read, or a
+keep carrying it, still cites the claim, `pending` lists it once under the first citing slug naming
+every one, and its check layers no booking, since none is the claim's own; under a clearance the
+candidates are the cleared fold's alone.
+A station booking a slug whose case is sealed from it forks the author's slug and learns nothing,
+the sealed case and every draft under it being absent from its fold, while the drafts under its
+own booking stay its own.
 **Artifacts** have a lifecycle: drafted, dropped, retracted; an artifact names the format its
 bytes are written in and the drafts it supersedes — a list, so a draft that resolves a fork
 closes it — and its sentences anchor to the claims and runs they rest on through footnotes
@@ -788,8 +908,9 @@ For each claim, in order:
 1. **Applicability.** A rule, ruling or lesson applies under the claim's conditions or it does not.
    Binary, decided first.
 2. **Evidence kind.** Receipt, citation, person's judgment, agent's judgment. Fixed in the kernel,
-   read from the run's kind and the class of the principal on its attestation. A derived claim takes the weakest link of its chain: a receipt that rests on an agent's guess
-   counts as a guess.
+   read from the run's kind and the class of the principal on its maker's attestation, an
+   asserter's only where none attests making it. A derived claim takes the weakest link of its
+   chain: a receipt that rests on an agent's guess counts as a guess.
 3. **Specificity, then weight.** Within a kind, the narrower scope wins; scopes neither of which
    contains the other count as equal; among equals, the declared weight; among equals again, two
    arguments that both support the claim corroborate it, `status` counting and `why` listing every
@@ -799,7 +920,8 @@ For each claim, in order:
    graph, `why` shows who overruled it, and the retro counts it.
 5. **The floor** is strict and changes only by a configuration commit.
 
-A challenge that wins against a run removes the support and leaves the claim open; a challenge
+A challenge that wins against a run removes what the run grounds, a support or a failing check's
+attack on the claim, and leaves the claim to the rest of its evidence; a challenge
 that wins against the claim makes it fail; a cycle of attacks leaves every claim in it open.
 Validity is separate from weight: an unsigned ruling where signing is required, an unknown type,
 or an out-of-scope condition is rejected or inapplicable, never "light". A claim of an
@@ -862,14 +984,37 @@ contested rulings), delegate (an agent; `rule` only). Who holds a role is two of
 allowed-signers file, in git's own format, binds a key with a validity window to its own form and
 to the name shown beside it, `<name>,key:SHA256:<fingerprint>`, so `ssh-keygen -Y verify -I` checks
 the key a record names; a line listing another key's form is refused, since one key never speaks
-as another. The roles file grants a principal, a key or a pseudonym, roles at scopes. `init --key`
+as another. A line is read as OpenSSH reads it or refused by its number: an option it does not
+know, a value out of quotes, an option twice, a time or window it reads no time in, a key type it
+does not read or a key that is no key of its type, since a line `ssh-keygen` skips would still
+grant its principal roles here. A time is in UTC, ending `Z` or `UTC`, since one without reads in
+the verifying machine's zone and a stranger's re-check could judge it otherwise, and after the
+epoch, a window compared as OpenSSH normalises its days. A key is checked as OpenSSH 9.6 reads it,
+an ECDSA point uncompressed on its curve, each coordinate over half its order's bits and short
+of the order less one, and an RSA modulus of 1024 to 16384 bits, by arithmetic rather than a
+crypto library, which only the canonicaliser imports; and it is refused
+past that where its line would mislead: a DSA key, which OpenSSH 10 reads no longer; an RSA
+exponent even, under 3 or over 24 bits, past which the Go verifier's SSH library parses no
+signature; an mpint padded with a zero, since OpenSSH fingerprints the key it re-encodes. A line
+holds no NUL, and its principals no control, Unicode space or byte-order mark, which OpenSSH reads
+as part of a name. Each refusal has a class, and
+`conformance/allowed-signers.json` holds a line of each with its class, so a second verifier
+refuses what the kernel refuses for the same reason. A trust file a
+reader cannot take, a line of `allowed-signers`, `roles` or `audiences` or a key of `config.json`,
+refuses every open `workspace-incomplete`, naming the line or the key and that fixing or removing
+it on the trust branch clears it, a cycle of `includes` by the line that closes it and a
+`declaredNames` value by its key; `doctor`, refused the open, reads the trust branch alone and
+shows one failed row per such line, never one for a line relying only on an audience a refused line
+declares. The roles file grants a principal, a key or a pseudonym, roles at scopes. `init --key`
 registers the operator, the key's line in allowed-signers under the name `MUSAI_PRINCIPAL` gives,
 or under its own form alone where none is given, and the key's form `owner any` in roles, so a workspace's releases count; with no key both stay
 empty, every role is anyone's and nothing is written. A call holding no key attests as the
 pseudonym `MUSAI_PRINCIPAL` takes under the workspace key, and with neither is refused, naming
 both. A workspace registered before keeps its records; a key whose line lists only a name is
-refused with the line to put in its place, and no trust file is rewritten for it. A principal matches an allowed-signers entry exactly; OpenSSH's wildcard and negation
-forms are not implemented rather than approximated. A signature is verified at its attestation's
+refused with the line to put in its place, and no trust file is rewritten for it. A principal matches an allowed-signers entry exactly; a line whose principals hold OpenSSH's
+wildcard or negation forms (`*`, `?`, `!`) is refused by its number rather than approximated,
+since OpenSSH would match by them, and a negated key form skips its line there without a word;
+so is one holding a quote, which OpenSSH strips, ending the principals at the closing one. A signature is verified at its attestation's
 own claimed time, so a key rotated out of its window later never invalidates history it signed
 while valid.
 
@@ -884,8 +1029,13 @@ is a standing ruling over a claim type at a scope, standing behind a principal. 
 the ruling stands for its snapshot and the dependent gate is flagged "decided on stale evidence":
 it stays answered with the ruling's verdict, every reader agrees that it does (`status` carries the
 flag, `pending` and `progress` list the gate as flagged), and the person may re-affirm it or
-supersede it. A claim whose own check's tree moved has no current receipt and reads open as stale.
-Equal authority in conflict is open with reason "contested-authority" and gated to the arbiter.
+supersede it. A call performing several checks, as `progress` and `soundcheck` do, evaluates every
+one before weighing any ruling, so a ruling over a sibling's brief is held to what that call
+evaluated. A read of one menu option runs no sibling's check: a ruling over a sibling's brief that
+packed the sibling's holding check, which its rule's installed build has not evaluated since, reads
+stale, naming the sibling whose `status` evaluates it. A claim whose own check's tree moved has no
+current receipt and reads open as stale. Equal authority in conflict is open with reason
+"contested-authority" and gated to the arbiter.
 
 A ruling is corrected by a later ruling on the same claim that names it in `supersedes`, and `why`
 still reaches it from its successor. A higher tier retires a lower; its own principal, where every
@@ -913,7 +1063,9 @@ contribution** assigning slot values by id; layering is pack defaults, project, 
 per-booking. The case records the preset and overrides, so `why` can say "delegate, because
 preset overnight": it stores the layers it was booked under — the commit of `main` its project
 configuration was read at, the preset, the overrides — and never an effective value, which could
-disagree with the layers that produced it. A pack author ships presets with the workflow; a
+disagree with the layers that produced it. A configuration slot's value is no read of its own: it
+moves a claim only through what it selects, as a resolution age moves the receipt a need reads. A
+pack author ships presets with the workflow; a
 project and a person add their own; the model may choose one when the ask implies it, and the choice is recorded.
 
 Shipped: `bare`, the booking default, which assigns no slot; `interactive`, where an isolation
@@ -939,6 +1091,10 @@ what it cost. The retro reads the reversal rate per gate type.
 
 `musai init [workspace]` creates `<workspace>/.musai/`, the current directory's when none is
 named, a git repository holding only the framework's own records. Project repositories never see it.
+It is built in a sibling directory and renamed into place, so an init that fails leaves no
+`.musai/`, and one that loses a race adopts the workspace that won it. The sibling's own
+`.gitignore` ignores all of it, so one an init killed mid-build left gives an enclosing working
+tree nothing to stage, and `doctor` names it for removal.
 
 ```
 main                         config, project modules, allowed signers, roles, audiences
@@ -956,7 +1112,9 @@ record pointing at the old one. Two trees of records union without conflict, and
 other property rests on that. A commit adds records and swaps the scope's ref by compare-and-swap;
 a lane that loses the swap re-reads and retries, and no lane needs a working tree. Git's own
 collection is off, since an object is written before any ref reaches it; past 6,700 loose objects,
-git's own default, a write packs the store and prunes nothing, and `doctor` shows the count. The swap
+git's own default, a write packs the store and prunes nothing, and `doctor` shows the count. A
+store counts at its first write, then again only once its own writes since could have reached the
+threshold; another writer's objects wait for that writer's count. The swap
 settles which commit lands, never whether two writers agreed: a check made against the fold before
 it saw an older tip, so two packs whose declarations collide can both land, which costs less than a
 lost write, since the collision is refused when the declarations are read. A write carrying an
@@ -991,8 +1149,15 @@ one's type or meaning, or makes an optional one required, and a record keeps the
 minted at and is read as minted. `conformance/frozen.json` holds a record of each frozen kind at its
 version, which the kernel mints and a verifier reads byte for byte. A verifier extends trust only for
 meanings it knows: a release or a seal of a version later than it reads counts for nothing, and its
-report names it skipped, with its version. Every other kind, and the kernel
-around them, keeps changing for the packs.
+report names it skipped, with its version, save that a withdrawal only narrows what leaves, so a
+later release still replaces what it supersedes and a later revocation still withdraws it, each as
+at a version it reads. The kernel reads one the same way: it refuses the record and keeps only what
+every version fixes (subject, principal, channel, purpose, time and `supersedes`), a field without
+its form read as absent, so a withdrawal needs only its subject and the ids it supersedes, while a
+replacement still counts only verified and in the name of a holder of `publish`; what it keeps
+withdraws a release and never grants one, seals, lifts a seal or replaces one, and a cleared fold
+keeps of it what it keeps of any attestation it withholds. Every other kind, and the
+kernel around them, keeps changing for the packs.
 References are ids, so a ruling's snapshot commits to the exact evidence it saw. A payload too large
 for a record is a blob, a git object on the store's `blobs` branch at `<xx>/<hex>`, hashed raw,
 referenced by id, travelling with every clone, deletable from the branch's tip and never from
@@ -1019,8 +1184,14 @@ it names: a record released to `public` still reaches peers, so pulling it back 
 release that stands. A release, like a seal, is a person's: it is refused through a model, an
 export through one mints none, and one relayed through a model counts for nothing. A release
 stands while it counts, signed by a principal holding `publish`, and no counting revocation or
-later release supersedes it; a revocation counts when a principal holding `publish` or the
-release's own signer signed it. Nothing compares the attestations' `at`, which each signer
+later release supersedes it, a release of any record counting as one of its own would; a
+revocation withdraws it when it names a principal holding `publish` or the release's own signer, whether or not its signature verifies, since a withdrawal stripped of
+its sidecar must not let the record leave again. The author's `doctor` names each unverified
+revocation that alone withdraws a release, and an export it withholds says so, each telling, without
+naming the principal, whether it is in the name of a key this machine holds a private half for,
+the configured one, an older one or another registered beside it: revoking again names that release
+and signs, the only answer to one in the author's own name, so a stripped sidecar never leads the
+author to undo their own revocation, while releasing again supersedes it, an answer to another's. Nothing compares the attestations' `at`, which each signer
 asserts: a forward-dated release cannot outrun a revocation, and releases and revocations from
 many lanes or remotes merge as a two-phase set. A record derived from others carries an
 **audience label** the fold computes from its read-set, never a field of the record, so the
@@ -1031,17 +1202,44 @@ A release decides what leaves the machine; a **seal** decides what a station ins
 is an attestation, purpose `sealed`, naming one record and `seal: { audience, extent }`; the extent,
 as a release's, is the record alone or its closure (`seal --closure`, as `release --closure`), and
 the record alone is written by naming none, never `record`, so one meaning has one id. Sealing
-from an audience at another extent supersedes the seal from it that stands. A seal stands as a
-release does, signed by a holder of `publish`, and is refused through a model, as a release is. A
-revocation lifts it: the verb withdraws releases or lifts seals, never both in one call, though a
-revocation naming both counts for both; one relayed through a model lifts no seal. A record is
+from an audience supersedes the seals from it that stand, save a closure seal, verified or not,
+when the record alone is asked: only a revocation, or a seal of the closure, replaces one, so
+narrowing a closure seal to the record alone is a revocation and then a seal. A seal stands as a
+release does, by a holder of `publish` and refused through a model, save that a seal naming one
+stands whether or not its signature verifies: the sidecar lies outside the id, so stripping or
+replacing it must not unseal, while a seal forged in a name the trust grants no `publish` hides
+nothing. An unverified seal replaces no seal it supersedes, so a forged one narrows none; the
+author's `doctor` names each by its short id with the remedy, sealing its subject, by short id,
+again, which signs a seal that replaces it, or finding what stripped its signature, and nothing
+under a clearance names it. The row leaves out the audience, which its remedy's `lab attestation
+show <id>` names, the author's alone, showing one attestation by id or prefix, its subject,
+audience, extent, terms, signer, what it supersedes and whether it verifies, so a row pasted with
+short ids alone still names commands the author runs as they stand. A
+signed revocation lifts a seal: the verb withdraws releases or lifts seals, never both in one call,
+though a revocation naming both counts for both, an unverified one withdrawing the releases and
+lifting no seal; one relayed through a model lifts no seal. A record is
 sealed from a clearance where a standing seal over it, or a closure seal over a record whose
 closure holds it as a release's would (cited, or a receipt of a check claim's recipe) through any
 chain the cleared fold's position holds, names that clearance, an audience covering it or an
 audience it covers, so a seal from `cast` hides from `cast`, from what `cast` includes
-and from `public`, and reaches no audience beside `cast` either way; a run is sealed
-with anything it consumed, a record with what it supersedes, and an attestation with its subject,
-unless a standing release over it covers the clearance; a bare citation is not a read, so a case
+and from `public`, and reaches no audience beside `cast` either way; a run is sealed with anything
+it consumed, a record with what it supersedes and the case it names, and an attestation with its
+subject, unless a standing release over it covers the clearance, save that a revocation or a release
+withheld there, whatever withholds it, keeps a withdrawal of what else it supersedes and nothing
+more: it names no record withheld there and carries whether it verified, judged on the author's side
+where its bytes are read, since a station's store holds none of them; on a withheld subject a
+revocation keeps nothing, as it withdraws on its own subject alone, and a release keeps only the ids
+it replaces, where the author's side finds it counts. The verdicts enter what names the clearance's
+judgement, so a trust move that turns one refolds the station. A case's drafts are so sealed with
+it, while the claims it cites stay, save under `seal --closure`; a closure seal over one draft
+reaches its case, so every draft under it, and through a successor's `supersedes` the cases it
+replaces, a station's own booking that `keep` closed among them. A draft a release brings back is
+withheld again once a successor withheld for its case replaces it, since that succession never
+reaches the station: it loses the draft, every draft it replaced, which would otherwise read live in
+its place, and all that is sealed with them, as a run that read one or a release over one, and
+learns nothing of what replaced it, and the set so withheld enters what names the clearance's
+judgement. No withdrawal is lost to a withheld record;
+a bare citation is not a read, so a case
 citing a sealed claim stays and lists the rest, and a claim citing a sealed run is judged on the
 rest of its evidence, while an argument citing one, or a ruling whose brief is withheld, stays and
 contests the claim on grounds the station is not shown, so the claim, and every option of a menu
@@ -1059,23 +1257,46 @@ What its evaluations read is judged in log order: a receipt is judged at the lat
 standing closure seal's commit and its own, and withheld where the sealed claim and an evaluation of
 it reading its recipe had both landed by then, so neither an evaluation nor a closure member a
 station cannot see withdraws a receipt it holds, and none an evaluation's own loop performed is ever
-shown, since those land in its commit. Where the sealed closure holds a claim a module's rule
+shown, since those land in its commit. An evaluation of it is one whose read of its slot consumed
+the sealed claim's own id: another claim's at that slot, a station's own check of the same sentence
+or a successor's, withholds nothing by it. Nothing in an evaluation shows the evaluator minted it,
+so a hand writing raw objects into `.musai/` could forge one that withholds receipts from stations;
+that hand is outside the threat model until records arrive from peers. Where the sealed closure holds a claim a module's rule
 judges, a receipt landing from the later of that seal's commit and the claim's landing that nothing
 in its own commit reads is withheld too, as a failed loop's receipts land alone and name no claim,
-so a station's own standalone receipts are withheld from it there. Lifting the earliest of several
+so a station's own standalone receipts are withheld from it there. A station's evaluation reads
+its runs under the station's recipe, so its own receipts of a run a sealed claim's evaluation read
+are withheld from it as the author's are, and one an evaluation in its own commit reads is not
+standalone. Lifting the earliest of several
 seals judges again from the next one's commit, as that seal landing alone would. Receipts landed
 apart before the seal, by a subscription, a plan's needs or `rerun`, stay shown though a later
-evaluation reuses them. A
+evaluation reuses them. A closure seal matches a check's receipts by the recipe the claim names, so
+a station's receipts, filed under its station recipe, are its own: no closure seal withholds them
+from the station that ran them, save those its evaluation read, as above. A
 **clearance** is fixed when a surface starts, `--clearance` for the MCP server and
 `MUSAI_CLEARANCE` for the CLI, never by a call; the server refuses to start on a flag it does not
 read, or with `MUSAI_CLEARANCE` set and no `--clearance`. A workspace opened under one reads the
 **cleared fold**, `cleared/<audience digest>.sqlite` beside the scope's, which folds every commit
 and admits a record only where it is not sealed from that clearance, in log order; it is refolded
-from nothing when the standing that judges it moves, never back under a judgement made before the
-one it holds, and holds no commit that admitted nothing, so a sealed record's restatement moves no
-byte a station prints, nor does the landing of a record withheld for what it reads, supersedes or
-attests, whose id a corrupt path named before: that refusal stands. A call closes every fold it
-opened when it ends, a refused open's included, so a scope's directory can be removed after one.
+from nothing when the standing that judges it moves, or when the position it was judged at has left
+the author's history or the trust commit it was judged under has left the trust branch (rewound,
+rewritten or pruned) and the judgement is made at the scope's tip and the trust branch's, a
+judgement short of either refused, never back under a judgement made before the one it holds nor
+under a trust commit short of the trust branch's tip: a write judges at that tip, whose files a
+running process reads once for as long as that tip stands, and a judgement short of it is made again
+there, the branch rewound or rewritten too, where it still declares the
+clearance, and one still short of the tip is refused and moves nothing in the file, since it may
+admit what the branch now withholds; a trust advance landing while a fold walks leaves that walk
+under the trust it read, as its open was, and the next fold at the new tip refolds the file from
+nothing, since the digest names the standing that moved; a fold that finds the file walked past its position along that history, under its own
+admission, reads it as it stands, and holds no commit that admitted nothing, so a sealed record's
+restatement moves no byte a station prints, nor does the landing of a record withheld for what it
+reads, supersedes or attests, or for the case it names, whose id a corrupt path named before:
+that refusal stands. Folding
+from nothing drops every table the file holds, a contribution's with the kernel's, and every
+connection that writes a fold overwrites the pages it frees, and a fold rebuilt for another schema
+version is vacuumed, so no row an earlier admission folded stays in the file. A call closes every fold it opened when it ends, a refused open's included, so a scope's directory can be
+removed after one.
 There a sealed record is absent, `no-such-record`, never named sealed; its evaluations and briefs
 are their own, the clearance in their recipe; a verb that reads a file by path (`--input <file>`
 too, refused before the file is opened), or works in what the machine keeps for its author (the view
@@ -1114,22 +1335,38 @@ never be signed later, and a workspace that raised its level would find its hist
 The key is the invocation's, else this machine's configuration under `local/`, else the pair beside
 the public key the allowed-signers file registers for the principal: the most deliberate answer
 wins. That key is the principal, its fingerprint read from the public half beside it, so a preview
-names who performing would without spawning a signer, and a key signs only as itself. A signature is a sidecar in the signer's
+names who performing would without spawning a signer, and a key signs only as itself. A pair is
+discovered only where its private half is a file; a named or configured key whose private half is
+not one still names the principal, and performing refuses it `workspace-incomplete` by its path
+before any signer runs. A signature is a sidecar in the signer's
 own format over the attestation's stored bytes — the ones git holds, never a record
 re-canonicalised after it was read, which would differ the moment the kind's version moves:
 `<id>.sig` from `ssh-keygen -Y sign` under the `musai`
 namespace, `<id>.sigstore.json` for a Sigstore bundle. It survives re-sharing and history rewrites
 with its record, `sha256sum` reproduces any id, and `ssh-keygen -Y verify` checks any signature
-with no git configuration involved. Which attestations have verified is cached beside the fold,
-keyed by attestation id and the digest of the allowed-signers bytes, never inside it, since what a
-key file grants is not in the log; only successes are cached, since a failure can be transient.
+with no git configuration involved; the allowed-signers file it reads is materialised under the
+digest of its bytes, so no check reads another trust commit's. Which attestations have verified is
+cached beside the fold, keyed by attestation id in one file per digest of the allowed-signers
+bytes, so a process reading two trust commits evicts neither's, never inside it, since what a key file grants is not in the log; only successes are cached, since a
+failure can be transient. A check that reaches no verdict is no failure: an allowed-signers file
+missing (`workspace-incomplete`), or an `ssh-keygen` that does not start, is ended by a signal or its
+time limit, or exits without OpenSSH's verdict line on stdout, a good signature for the principal
+under `musai` at 0 or `Could not verify signature.` at 255 with no diagnostic naming a line of
+the allowed-signers file but one judging the signature by it (`tool-unavailable`), refuses the call
+naming the attestation, so a fault never reads as a bad signature: a seal that cannot be checked
+refuses a cleared open rather than admit what it seals, and a release or revocation refuses what
+reads its standing. A release counts only signed, and a seal or a revocation is checked though one
+counts unverified, whatever the level, so sealing and releasing need `ssh-keygen` at `off` too: a machine without one cannot open a cleared
+workspace that holds either, and `doctor` names it as a machine row, having made a key, signed
+and verified with it.
 **The index** is
 `node:sqlite` (`bun:sqlite` under Bun), one fold per scope over the records from the last indexed
 commit, kept in `local/scopes/<scope>/`, a directory of its own apart from the workspace key and
 every other file the workspace keeps in `local/`, so no scope's name can land on one of them, and
 never committed; a workspace that arrives without `local/`, as every clone does, opens and folds
 from the log, and a module's bundle, held on the store's `blobs` branch, travels with it and is
-materialised into `local/` on first use; a directory holding no workspace is refused by name; the index holds every kind
+materialised into `local/` on first use; a directory holding no workspace is refused by name, a `.musai/` holding anything else with
+the advice to move it aside before `init`; the index holds every kind
 and is what an operation reads. The workspace key is minted only where no enclosing working tree
 would stage `local/`, asked of `local/` rather than of the workspace: an enclosing project may
 commit a workspace's records on purpose, but an add-everything there must never pick up the key or
@@ -1143,8 +1380,9 @@ silence. **Hand edits**: `musai open <case>` materialises the dossier, drafts an
 a worktree under the workspace's own local directory, `musai save` turns the edits back into
 records naming what each was edited from, and `view/<slug>` holds the same materialisation for
 reading on a forge. The view branch is derived, exactly like the index: rebuilt from records, never
-signed, never pushed, and safe to discard — a stale one is `musai doctor`'s to remove, never a
-fact anything else depends on.
+signed, never pushed, and safe to discard — never a fact anything else depends on. `musai doctor`
+reports a stale one and removes nothing: its row names it by its commit, never by its slug, with
+the git commands under the workspace's own git directory that remove it and its branch.
 
 ## Federation
 
@@ -1166,7 +1404,7 @@ read: no policy of a scope or a remote takes them from the store of the person w
 owner adds, never a heuristic. An **audience** is `public`, one key (`key:SHA256:…`), one Sigstore
 identity (`identity:<issuer>#<subject>`), or a name `audiences` defines by its members and by the
 names it `includes`. Only `public` and `includes` make one audience cover another, a member key is
-covered by the audiences holding it, and a cycle of `includes` is a `declaration-conflict`.
+covered by the audiences holding it, and a cycle of `includes` is refused as a trust file to fix.
 `musai init` writes `peer` and `known`, `known` including `peer`. A release binds its audience by
 name, so a member added later receives what was released before; the trust branch's history is
 the record of who could. Signer classes and audiences are two relations over the same remotes,
@@ -1244,7 +1482,9 @@ npm install --global checkwhy
 
 The engine ships as one npm package, `checkwhy`, whose command is `musai`, because npm refuses
 `musai` as too near `must`. It needs Node 24 or later and git, and otherwise ships as a compiled
-binary for the platform from Releases, checksum verified. The Claude Code plugin is one shell over
+binary for the platform from Releases, checksum verified. It depends on one package alone,
+esbuild, pinned exactly at devkit's version, so a stranger builds a module from npm and its
+bundle is byte for byte the one a clone's build makes. The Claude Code plugin is one shell over
 it, not the way in: installed from its marketplace, its install prompt asks for the workspace
 directory, the forge, the branch prefix and the signing level, and on the first session a
 `SessionStart` hook installs the same engine into the plugin's persistent data directory, with a

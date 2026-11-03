@@ -15,16 +15,15 @@ import {
   canonicalBytes,
   exitCodeForLabel,
   type PerformedRunRecord,
-  performedRun,
   type RecordId,
   type RunRecipe,
-  type RunRecord,
   slotFor,
   versionString,
 } from "@musai/records";
 import {
   authorisedBinary,
   bindCheckout,
+  commandLine,
   DEFAULT_CONTAINER_ENGINE,
   isToolName,
   readMachineTools,
@@ -48,7 +47,7 @@ import { assertMayAdmitTools } from "@musai/trust";
 import { labelledClaim, measureTreeNow, treeMovement } from "../claim.js";
 import { CHECK_CLAIM_TYPE, checkSpelling, shortIdOf } from "../claim-ref.js";
 import { missingProgramHint, programHolderOf } from "../missing-program.js";
-import { commandText, markOf } from "../text.js";
+import { markOf } from "../text.js";
 
 export interface CheckRunInput {
   readonly statement: string;
@@ -245,22 +244,24 @@ async function movedDuringRun(opened: Workspace, gitDir: string, run: PerformedR
   return `the tree moved while the command ran, so the claim reads stale from now on: ${named}${rest}; ignore ${them} in git, or have the command write ${them} outside the tree`;
 }
 
-/** `recipeNames` is `null` for a rule's run, whose programs no `--tool` can widen. */
+/** `recipeNames` is `null` for a rule's run, whose programs no `--tool` can widen. A reused
+ * receipt matched the tree as it was just measured, so only a run performed here can move it. */
 async function hintFrom(
   opened: Workspace,
   gitDir: string,
-  runId: RecordId,
+  run: PerformedRunRecord,
+  performed: boolean,
   label: CheckRunOutput["label"],
   recipeNames: ReadonlySet<string> | null,
 ): Promise<string | null> {
-  const run = performedRun(runId, (await opened.store.read(runId, "run")) as RunRecord);
   const { output, exitCode } = run.observation;
   const holder = programHolderOf(run, recipeNames);
   const missing =
     label === "fails" && holder !== null && typeof output === "string"
       ? missingProgramHint(exitCode, output, holder)
       : null;
-  const hints = [missing, await movedDuringRun(opened, gitDir, run)].filter((hint) => hint !== null);
+  const moved = performed ? await movedDuringRun(opened, gitDir, run) : null;
+  const hints = [missing, moved].filter((hint) => hint !== null);
   return hints.length === 0 ? null : hints.join("\n");
 }
 
@@ -295,7 +296,7 @@ function judgedBy(conditions: Readonly<Record<string, unknown>>): { readonly key
   if (typeof declared === "string") {
     const { recipes } = JSON.parse(declared) as { recipes: { recipe: { command: string[] } }[] };
     const command = recipes[0]!.recipe.command;
-    return { key: JSON.stringify(command), text: commandText(command) };
+    return { key: JSON.stringify(command), text: commandLine(command) };
   }
   const [rule, parameters] = Object.entries(conditions).find(([key]) => key !== "subject" && key !== "statement")!;
   return { key: JSON.stringify([rule, parameters]), text: `the rule ${rule} reading ${JSON.stringify(parameters)}` };
@@ -324,7 +325,9 @@ async function claimFor(opened: Workspace, subject: string, input: CheckRunInput
   }
   const slot = slotFor(declaration, conditions);
   const existing = opened.index.claimAtSlot(slot);
+  const fork = opened.index.forkAtSlot(slot);
   if (
+    fork.length === 0 &&
     existing?.record.kind === "claim" &&
     isDeepStrictEqual(existing.record.conditions, conditions) &&
     (input.salt !== true || existing.record.salt !== undefined)
@@ -332,8 +335,19 @@ async function claimFor(opened: Workspace, subject: string, input: CheckRunInput
     return { slot, id: existing.id, recipeNames };
   }
   if (existing?.record.kind === "claim" && input.replace !== true) {
-    const before = judgedBy(existing.record.conditions);
     const after = judgedBy(conditions);
+    if (fork.length > 0) {
+      const judges = fork.map(({ id, record }) => ({ short: shortIdOf(id), record: record as ClaimRecord }));
+      const alike = new Set(judges.map(({ record }) => judgedBy(record.conditions).key)).size === 1;
+      const apart = alike
+        ? `name different exclusive groups (${judges.map(({ short, record }) => `${short} in ${record.exclusiveGroup ?? "no group"}`).join("; ")})`
+        : `are judged differently (${judges.map(({ short, record }) => `${short} by ${judgedBy(record.conditions).text}`).join("; ")})`;
+      throw new SentenceClaimedError(
+        slot,
+        `refusing to check ${JSON.stringify(statement)} by ${after.text}: its live claims ${apart}, and one sentence is one claim; pass --replace to check it by ${after.text} from now on, superseding them all`,
+      );
+    }
+    const before = judgedBy(existing.record.conditions);
     if (before.key !== after.key) {
       throw new SentenceClaimedError(
         slot,
@@ -343,7 +357,7 @@ async function claimFor(opened: Workspace, subject: string, input: CheckRunInput
   }
   const record: ClaimRecord = {
     kind: "claim",
-    supersedes: existing === undefined ? [] : [existing.id],
+    supersedes: opened.index.contributorsAtSlot(slot).map(({ id }) => id),
     schemaVersion: CURRENT_SCHEMA_VERSIONS.claim,
     type: CHECK_CLAIM_TYPE,
     about: [subject],
@@ -447,7 +461,8 @@ export const checkRun: OperationDescriptor<CheckRunInput, CheckRunOutput> = {
       "command" in judge ? await admitPrograms(before, context.principalName, [judge.command[0]!, ...judge.tool]) : [];
     const opened = toolsAdded.length === 0 ? before : await openWorkspace(context);
     const { slot, id, recipeNames } = await claimFor(opened, subject, input, judge);
-    const { status, runIdByArgumentId } = await labelledClaim(opened, slot, "perform", context.runTimeoutMs);
+    const heldBefore = opened.index.watermark()!;
+    const { status, runIdByArgumentId, runs } = await labelledClaim(opened, slot, "perform", context.runTimeoutMs);
     const decidedBy = runIdByArgumentId.get(`${id}#rule:${"rule" in judge ? judge.rule : DECLARATIVE_RULE}`);
     return {
       label: status.label,
@@ -457,7 +472,17 @@ export const checkRun: OperationDescriptor<CheckRunInput, CheckRunOutput> = {
       claim: id,
       short: shortIdOf(slot),
       toolsAdded,
-      hint: decidedBy === undefined ? null : await hintFrom(opened, gitDir, decidedBy, status.label, recipeNames),
+      hint:
+        decidedBy === undefined
+          ? null
+          : await hintFrom(
+              opened,
+              gitDir,
+              runs.get(decidedBy)!,
+              !opened.index.landedBy(decidedBy, heldBefore),
+              status.label,
+              recipeNames,
+            ),
     };
   },
 };

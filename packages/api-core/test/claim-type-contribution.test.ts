@@ -55,7 +55,7 @@ function claimTypeEntry(
 
 async function install(repo: FixtureRepo, name: string, manifest: ModuleManifest): Promise<void> {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   await installModule(
     name,
@@ -70,13 +70,13 @@ async function install(repo: FixtureRepo, name: string, manifest: ModuleManifest
 }
 
 async function foldedDeclarations(repo: FixtureRepo): Promise<ReturnType<typeof readClaimTypeDeclarations>> {
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   return readClaimTypeDeclarations(index);
 }
 
 async function openOver(repo: FixtureRepo): Promise<Workspace> {
-  return Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) });
+  return repo.keep(await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: fixedClock(FIXED_INSTANT) }));
 }
 
 function claimOf(declaration: ClaimTypeDeclaration, subject: string): ClaimRecord {

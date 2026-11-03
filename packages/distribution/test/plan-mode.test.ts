@@ -66,7 +66,7 @@ describe("case.book@1 in plan mode", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-plan-mode-"));
     await initWorkspace(workspace, { now });
     const store = storeAt();
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(artefacts, store, blobStoreOf(workspace), index);
   });
@@ -208,7 +208,7 @@ describe("a verb about one named claim or case, in plan mode", () => {
       claimTypes: claimTypesFrom([declaration]),
     });
     await declareClaimTypes(store, [declaration]);
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(await readDistributionArtefacts(), store, blobStoreOf(workspace), index);
   });
@@ -271,7 +271,7 @@ describe("a verb about one named claim or case, in plan mode", () => {
 
   test("case.status over a case citing an unperformed check mints no run receipt and moves no head, where performing mints one", async () => {
     const { claim } = await unperformedCheck("planned-case-claim");
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const caseRecord: CaseRecord = {
       kind: "case",
       supersedes: [],

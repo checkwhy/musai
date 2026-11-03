@@ -278,8 +278,9 @@ describe("evaluateClaims: the reasons the fixpoint alone cannot produce", () => 
 });
 
 describe("reasonPrecedence", () => {
-  test("the fixed order is inapplicable, over-budget, cycle, contested-authority, stale, no-evidence", () => {
+  test("the fixed order is forked-slot, inapplicable, over-budget, cycle, contested-authority, stale, no-evidence", () => {
     expect(REASON_PRECEDENCE).toEqual([
+      "forked-slot",
       "inapplicable",
       "over-budget",
       "cycle",
@@ -294,7 +295,16 @@ describe("reasonPrecedence", () => {
     expect(reasonPrecedence(applicable)).toBe("cycle");
   });
 
-  test("over-budget outranks every reason but inapplicable, asserted directly", () => {
+  test("a claim at a forked slot reads open, whatever a ruling on it decides", () => {
+    const ruling = resolveClaimRulings({ rulings: [pinnedRuling("ruling", "holds")], floor: null });
+    const claim: ClaimEvaluationInput = { ...selfReferentialClaim("forked", ruling), forked: true };
+
+    const { statuses } = evaluateClaims([claim], ["forked"], [], (id) => receipt(id));
+
+    expect(statuses.get("forked")).toMatchObject({ label: "open", reason: "forked-slot" });
+  });
+
+  test("over-budget outranks every reason but forked-slot and inapplicable, asserted directly", () => {
     expect(
       reasonPrecedence(new Set<ReasonClass>(["over-budget", "cycle", "contested-authority", "stale", "no-evidence"])),
     ).toBe("over-budget");

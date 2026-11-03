@@ -268,39 +268,103 @@ function isInlineExpectation(
 /** Folded into the rule's conclusive error rather than thrown, so the loop concludes. */
 class ParameterError extends Error {}
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** RFC 8785 has no form for a non-finite number or a lone surrogate, and JSON text holds either. */
+function hasCanonicalForm(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value === "string") {
+    return !/\p{Cs}/u.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.every(hasCanonicalForm);
+  }
+  if (isPlainObject(value)) {
+    return Object.entries(value).every(([key, item]) => hasCanonicalForm(key) && hasCanonicalForm(item));
+  }
+  return true;
+}
+
+const UNREADABLE_PARAMETERS =
+  "the " + PARAMETERS_CONDITION + " condition does not read as the interpreter's parameters";
+
+/** The kernel's own reading rule, so a condition the kernel refuses this refuses too. */
 function parseParameters(conditions: Readonly<Record<string, unknown>>): DeclarativeParameters {
   const raw = conditions[PARAMETERS_CONDITION];
-  if (raw === undefined) {
-    throw new ParameterError(
-      "the declarative interpreter's parameter object is missing its condition: " + PARAMETERS_CONDITION,
-    );
-  }
-  if (typeof raw !== "string") {
-    throw new ParameterError(
-      "the declarative interpreter's parameter object must be a single canonical-JSON string, and " +
-        PARAMETERS_CONDITION +
-        " holds a scope instead",
-    );
-  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new ParameterError(
-      "the declarative interpreter's parameter object does not parse as JSON: " +
-        (error instanceof Error ? error.message : String(error)),
-    );
+    parsed = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
   }
-  const candidate = parsed as DeclarativeParameters;
-  for (const expectation of candidate.expectations) {
-    if (typeof expectation.kind !== "string" || expectation.kind.length === 0) {
+  if (!isPlainObject(parsed)) {
+    throw new ParameterError(UNREADABLE_PARAMETERS);
+  }
+  const { recipes, expectations } = parsed;
+  const readable =
+    Array.isArray(recipes) &&
+    recipes.every((entry) => isPlainObject(entry) && isPlainObject(entry.recipe) && hasCanonicalForm(entry.recipe)) &&
+    Array.isArray(expectations) &&
+    expectations.every((entry) => isPlainObject(entry) && typeof entry.kind === "string" && entry.kind.length > 0);
+  if (!readable) {
+    throw new ParameterError(UNREADABLE_PARAMETERS);
+  }
+  (expectations as Record<string, unknown>[]).forEach((expectation, index) => {
+    const missing = missingInlineField(expectation);
+    if (missing !== null) {
       throw new ParameterError(
-        "the declarative interpreter's parameter object names an expectation with no kind, so nothing can decide it: " +
-          JSON.stringify(expectation),
+        "the declarative interpreter's " +
+          String(expectation.kind) +
+          " expectation at index " +
+          index +
+          " does not name " +
+          missing,
       );
     }
+  });
+  return parsed as unknown as DeclarativeParameters;
+}
+
+const FIELD_REF = 'a recipe by name and its field, "output" or "exitCode"';
+
+function isFieldRef(value: unknown): boolean {
+  return (
+    isPlainObject(value) && typeof value.recipe === "string" && (value.field === "output" || value.field === "exitCode")
+  );
+}
+
+/** What an inline kind reads and its expectation lacks, or `null` where every field is there. */
+function missingInlineField(expectation: Record<string, unknown>): string | null {
+  const kind = expectation.kind;
+  if (kind === "equals" || kind === "differsFrom") {
+    if (!isFieldRef(expectation.selector)) {
+      return "its selector as " + FIELD_REF;
+    }
+    return Object.hasOwn(expectation, "value") ? null : "the value it compares against";
   }
-  return candidate;
+  if (kind === "exitCodeIs") {
+    if (typeof expectation.recipe !== "string") {
+      return "its recipe by name";
+    }
+    return typeof expectation.value === "number" ? null : "the exit code it expects as a number";
+  }
+  if (kind === "keyExists") {
+    if (!isFieldRef(expectation.selector)) {
+      return "its selector as " + FIELD_REF;
+    }
+    return typeof expectation.key === "string" ? null : "the key it looks for as a string";
+  }
+  if (kind === "selectedItemsEqual" || kind === "selectedItemsDiffer") {
+    if (!isFieldRef(expectation.left)) {
+      return "its left side as " + FIELD_REF;
+    }
+    return isFieldRef(expectation.right) ? null : "its right side as " + FIELD_REF;
+  }
+  return null;
 }
 
 /** Evidence arrives in the order the recipes were declared, so a count mismatch breaks the only
@@ -640,8 +704,6 @@ const INVOCATION_LIMITS_SCHEMA = {
 
 const SIGNING_LEVEL_SCHEMA = { type: "string", enum: ["off", "person", "all"] };
 
-const STALENESS_POLICY_SCHEMA = { type: "string", enum: ["strict", "lenient"] };
-
 const SLOT_CONTRIBUTIONS: readonly ContributionEntry[] = [
   slotContribution(
     "isolation-policy",
@@ -692,20 +754,12 @@ const SLOT_CONTRIBUTIONS: readonly ContributionEntry[] = [
     "whether an operation a pack contributes may declare an irreversible effect — project-layer only, because a pack cannot grant itself the thing this decides",
   ),
   slotContribution(
-    "staleness-policy",
-    STALENESS_POLICY_SCHEMA,
-    ["project", "preset", "booking"],
-    true,
-    "strict",
-    "how the evaluator treats a claim whose trace touches a moved read: strict recomputes every such claim, lenient recomputes the same set today, since this phase has no second behaviour to distinguish them by",
-  ),
-  slotContribution(
     "brief-budget",
     NON_NEGATIVE_INTEGER_SCHEMA,
     ["project", "preset", "booking"],
     true,
     20000,
-    "how many UTF-8 bytes a rendered brief, its omission list included, may occupy before the trim starts removing the weakest evidence",
+    "how many UTF-8 bytes a rendered brief, its header and omission list included, may occupy before the trim starts removing the weakest evidence",
   ),
 ];
 

@@ -4,7 +4,7 @@ Check a musai bundle as its receiver: no Node, no git, no ssh-keygen, and
 signatures checked against keys you chose rather than keys the sender chose.
 
 ```console
-$ curl -sSfLO https://github.com/checkwhy/musai/releases/download/verify%2Fv0.1.1/musai-verify-linux-amd64
+$ curl -sSfLO https://github.com/checkwhy/musai/releases/download/verify%2Fv0.1.2/musai-verify-linux-amd64
 $ chmod +x musai-verify-linux-amd64 && mv musai-verify-linux-amd64 musai-verify
 
 $ musai-verify verify path/to/bundle
@@ -39,6 +39,11 @@ substrates
 command
   brief sha256:921e892da524cdff8699d6025fc8fd4c3b735fec451ab5c2b0c7e90fee7d3f68
 ```
+
+A run held in a container also prints its `engine line`: the `docker run` a
+stranger types to perform it by hand, the checkout left as
+`${MUSAI_CHECKOUT:?set it to your checkout}`, which the shell refuses while it
+is unset, and each declared name passed from their own environment, never a value.
 
 A bundle comes from the sender's `musai export`, which releases a record and
 everything it needs beside it to an audience, signed, and writes them as a
@@ -100,9 +105,11 @@ blobs/<first two hex>/<hex>                    payloads too large to inline, whe
    under the namespace `musai`, from a key `allowed-signers` lists for the
    attestation's principal, whose `namespaces` and validity window admit it at
    the attestation's own time: the answer `ssh-keygen -Y verify` gives, held to
-   it by a differential test. A time in `allowed-signers` with no zone is read
-   as UTC on every machine, and warned about, since ssh-keygen would read it
-   in its host's local time.
+   it by a differential test. `allowed-signers` is read by the kernel's rules,
+   held to them by `conformance/allowed-signers.json`: a line the kernel
+   refuses, a time with no zone among them since ssh-keygen would read it in
+   its host's local time, fails the verification, naming the line and the
+   class of its reason.
 
    **Whose keys.** By default the keys are the bundle's own, which proves the
    bundle agrees with itself, not who made it: whoever sent it chose them.
@@ -115,6 +122,8 @@ blobs/<first two hex>/<hex>                    payloads too large to inline, whe
    | `path/to/dir` | the `allowed-signers` file in that directory |
    | `main` or a commit | a workspace's trust branch at that commit |
 
+   A directory or a commit holding no `allowed-signers` file is refused, as
+   is any `--trust` that names nothing to trust: the invocation exits 2.
    The summary under every verdict names whose keys they were, and `--json`
    records each trust source in the report's recipe: a GitHub account by the
    digest of the keys it served, a pin as written, a directory by its digest.
@@ -154,8 +163,7 @@ codes each tampered bundle must produce.
 | `sig.namespace-not-permitted` | error | the line's `namespaces` excludes `musai` |
 | `sig.not-yet-valid`, `sig.expired` | error | the attestation's time is outside the line's window |
 | `sig.certificate-unsupported` | error | the signature was made by a certificate |
-| `trust.line-invalid` | warning | an allowed-signers line ssh-keygen would skip |
-| `trust.zoneless-time` | warning | an allowed-signers time with no zone, read as UTC here and as local time by ssh-keygen |
+| `trust.line-invalid` | error, warning | an allowed-signers line the kernel refuses, the detail naming the class of its reason, so the line is not trusted; a warning for a line of a GitHub account's keys that is no key, skipped |
 | `trust.key-mismatch` | error | an allowed-signers line listing a key form, `key:SHA256:…`, that is not its own key's fingerprint: one key never speaks as another, so the line is not trusted |
 | `blob.mismatch` | error | a held blob digests to another id |
 | `blob.absent` | warning | the source holds blobs, but not this one |
@@ -230,9 +238,12 @@ $ python3 -m http.server -d site
 `../conformance/` is written by the TypeScript kernel and read here:
 the canonical vectors, a few thousand random values in non-canonical spellings
 with the kernel's canonical bytes for each, the reference table (embedded in
-the binary as `internal/refs/references.json`, byte for byte), the tampered
-bundles with each one's digest, the bundles carrying releases with each one's
-entitlement, and an archive the kernel's own `musai export` wrote.
+the binary as `internal/refs/references.json`, byte for byte), the role table
+(embedded as `internal/release/roles.json`) with whether each role holds
+publish, every pair of a shared audiences file with whether a release to one
+covers the other, the tampered bundles with each one's digest, the bundles
+carrying releases with each one's entitlement, and an archive the kernel's own
+`musai export` wrote.
 `musai-verify conformance ../conformance` runs all of it and CI runs it on every
 push.
 

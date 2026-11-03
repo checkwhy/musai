@@ -84,12 +84,31 @@ function nodeStatement(statement: StatementSync): IndexStatement {
   };
 }
 
+/** SQLite's primary result code for a file that is not a database. */
+const SQLITE_NOTADB = 26;
+
+/** Node names the engine's result code `errcode` and Bun `errno`; the low byte is the primary. */
+export function isNotADatabase(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const { errcode, errno } = error as { errcode?: unknown; errno?: unknown };
+  const code = typeof errcode === "number" ? errcode : errno;
+  return typeof code === "number" && (code & 0xff) === SQLITE_NOTADB;
+}
+
 /** Long enough to outwait another process's group transaction, a cold fold's included. */
 const BUSY_TIMEOUT_MS = 60_000;
 
 /** A writer waits for the lock another process holds rather than failing on it at once. */
 function waiting(connection: IndexConnection): IndexConnection {
   connection.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+  return connection;
+}
+
+/** Freed pages are overwritten, so no row a fold deletes or drops leaves its bytes in the file. */
+function erasing(connection: IndexConnection): IndexConnection {
+  connection.exec("PRAGMA secure_delete = ON");
   return connection;
 }
 
@@ -107,7 +126,7 @@ function nodeConnection(database: DatabaseSyncType): IndexConnection {
 
 export function nodeSqliteProvider(): IndexProvider {
   const { DatabaseSync } = requireEngine("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
-  const open = (path: string): IndexConnection => waiting(nodeConnection(new DatabaseSync(path)));
+  const open = (path: string): IndexConnection => erasing(waiting(nodeConnection(new DatabaseSync(path))));
   let capabilities: ReadonlySet<IndexCapability> | undefined;
   return {
     name: "node:sqlite",
@@ -166,7 +185,7 @@ export function bunSqliteProvider(): IndexProvider {
   const { Database } = requireEngine("bun:sqlite") as {
     Database: new (path: string, options?: unknown) => BunDatabase;
   };
-  const open = (path: string): IndexConnection => waiting(bunConnection(new Database(path)));
+  const open = (path: string): IndexConnection => erasing(waiting(bunConnection(new Database(path))));
   let capabilities: ReadonlySet<IndexCapability> | undefined;
   return {
     name: "bun:sqlite",

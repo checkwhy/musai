@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
@@ -15,6 +16,7 @@ import {
 } from "@musai/records";
 import { type WorkspaceKey, workspaceKey } from "@musai/store";
 import { execa } from "execa";
+import { onExit } from "signal-exit";
 import { authorisedBinary, declaredProgramsPath, type RequirementRegistry, resolveBinaries } from "./binaries.js";
 import {
   type BindingsFile,
@@ -22,17 +24,21 @@ import {
   type CheckoutBindings,
   type LayerDeclaration,
   readBindings,
+  UNRECORDABLE_BINDING_REMEDY,
 } from "./bindings.js";
 import {
-  CONTAINER_MOUNT_ROOT,
   ContainerUnavailableError,
   containerArgv,
   containerEngineAvailable,
+  containerName,
   DEFAULT_CONTAINER_ENGINE,
+  endContainer,
+  endContainerOnExit,
   isContainerImageSubstrate,
 } from "./container.js";
 import {
   hygienicEnvironment,
+  onHost,
   RunRefusedError,
   refuseEngineClientNames,
   UndeclaredBinaryError,
@@ -40,6 +46,14 @@ import {
 } from "./hygiene.js";
 import { readMachineTools } from "./machine-tools.js";
 import { portableValue, WORKING_ROOT_LABEL } from "./portable.js";
+import {
+  descendantsOf,
+  type ListedProcess,
+  ProcessTableError,
+  signalIfLive,
+  signalListed,
+  startTimeOf,
+} from "./process-table.js";
 import { type BoundSecret, refuseSecretInArgv, scrubOutput, secretObservation, secretReadId } from "./secrets.js";
 import { type Station, stationMasks, stationRecipeReady } from "./station.js";
 import {
@@ -113,8 +127,9 @@ export interface HygieneProof {
   readonly channels: readonly { readonly status: "absent" | "denied" | "present" }[];
 }
 
-/** How long a run ended at its deadline has to stop before its whole process tree is killed. */
-const DEADLINE_KILL_GRACE_MS = 2000;
+/** How long a run ended at its deadline has to stop before its whole process tree is killed: past a
+ * crashing child's core dump, so its own signal still decides its class. */
+const DEADLINE_KILL_GRACE_MS = 5000;
 
 /** A bound secret shorter than this is not scrubbed, so output never becomes substitutions. */
 const DEFAULT_SCRUB_MINIMUM_LENGTH = 6;
@@ -332,16 +347,102 @@ export async function refuseStationRun(
 
 /** The grace's SIGKILL is dropped once the call settles, so a group ignoring SIGTERM ends here. */
 function endGroup(pid: number): void {
-  if (process.platform === "win32") {
-    return;
+  if (process.platform !== "win32") {
+    signalIfLive(-pid, "SIGKILL");
   }
+}
+
+/** The run's descendants, or none where the process table cannot be read: the group still ends,
+ * and `doctor`'s process-table row names the table. */
+function sweptDescendants(pid: number): readonly ListedProcess[] {
   try {
-    process.kill(-pid, "SIGKILL");
+    return descendantsOf(pid);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-      throw error;
+    if (error instanceof ProcessTableError) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** SIGTERM goes out as the listing is read; a later SIGKILL checks each is still the one listed. */
+function signalSwept(swept: readonly ListedProcess[], signal: NodeJS.Signals): void {
+  for (const entry of swept) {
+    if (signal === "SIGTERM") {
+      signalIfLive(entry.pid, signal);
+    } else {
+      signalListed(entry, signal);
     }
   }
+}
+
+/** Awaits a run, ending its group and every descendant of it at `timeoutMs`: SIGTERM, then
+ * SIGKILL once the grace has passed or the call settles. */
+async function settleByDeadline<S extends PromiseLike<unknown> & { readonly pid?: number; kill(): boolean }>(
+  subprocess: S,
+  timeoutMs: number | undefined,
+): Promise<{ readonly result: Awaited<S>; readonly timedOut: boolean }> {
+  const { pid } = subprocess;
+  let swept: readonly ListedProcess[] | undefined;
+  let grace: NodeJS.Timeout | undefined;
+  const deadline =
+    timeoutMs === undefined || pid === undefined
+      ? undefined
+      : setTimeout(() => {
+          // Listed before any signal, while every descendant still hangs from the run.
+          const listed = sweptDescendants(pid);
+          swept = listed;
+          subprocess.kill();
+          signalSwept(listed, "SIGTERM");
+          grace = setTimeout(() => signalSwept(listed, "SIGKILL"), DEADLINE_KILL_GRACE_MS);
+        }, timeoutMs);
+  try {
+    const result = await subprocess;
+    if (swept !== undefined) {
+      endGroup(pid!);
+      signalSwept(swept, "SIGKILL");
+    }
+    return { result, timedOut: swept !== undefined };
+  } finally {
+    clearTimeout(deadline);
+    clearTimeout(grace);
+  }
+}
+
+/** The script a detached process runs to SIGKILL a run's group and listed descendants once the
+ * grace has passed, should this process exit first: an exiting process runs no timer. */
+export function treeKillerScript(group: number, swept: readonly ListedProcess[], graceMs: number): string {
+  const listed = swept.map(({ pid, started }) => ({ pid, started }));
+  return `const startTimeOf = ${startTimeOf.toString()};
+const group = ${group};
+const swept = ${JSON.stringify(listed)};
+const live = (target) => { try { process.kill(target, 0); return true; } catch { return false; } };
+const kill = (target) => { try { process.kill(target, "SIGKILL"); } catch {} };
+const poll = setInterval(() => live(-group) || swept.some(({ pid }) => live(pid)) || process.exit(), 100);
+setTimeout(() => {
+  clearInterval(poll);
+  kill(-group);
+  for (const { pid, started } of swept) if (startTimeOf(pid) === started) kill(pid);
+}, ${graceMs});`;
+}
+
+/** Ends a run's tree should this process exit first, in place of execa's cleanup, which would
+ * signal the group before its descendants were listed. */
+function endTreeOnExit(pid: number): () => void {
+  if (process.platform === "win32") {
+    return () => {};
+  }
+  return onExit(() => {
+    const swept = sweptDescendants(pid);
+    signalIfLive(-pid, "SIGTERM");
+    signalSwept(swept, "SIGTERM");
+    // The script carries its values, so no runtime's way of passing `-e` arguments matters.
+    spawn(process.execPath, ["-e", treeKillerScript(pid, swept, DEADLINE_KILL_GRACE_MS)], {
+      detached: true,
+      stdio: "ignore",
+      env: {},
+    }).unref();
+  });
 }
 
 /** The kernel's one spawn path. Everything refusable is refused before the child starts, and a
@@ -418,7 +519,9 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
     const portable = portableValue(value, roots);
     if (portable === null) {
       throw new RunRefusedError(
-        `refusing to run: the binding ${name} names ${value}, a path under neither the run's working root nor a root it declares, and its receipt would carry this machine's layout`,
+        `refusing to run: the binding ${name} names ${value}, a path under neither the run's working root nor a root it declares, and its receipt would carry this machine's layout; ${UNRECORDABLE_BINDING_REMEDY}`,
+        "workspace-incomplete",
+        [name],
       );
     }
     return portable;
@@ -449,21 +552,17 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
   });
 
   return withScratch(async (scratch) => {
-    const environment = hygienicEnvironment(recipe, scratch, bound);
-    // A container keeps the image's own PATH: the host's directories name nothing inside it.
-    const childEnvironment = containerHeld
-      ? environment
-      : { ...environment, PATH: await declaredProgramsPath(scratch.root, resolvedBinaries) };
-
     const spawned = {
       reject: false,
       encoding: "buffer",
       input: options.input,
-      timeout: options.timeoutMs,
       // A grandchild holding the output pipes would hold the call past its deadline and outlive it.
       killDescendants: true,
       forceKillAfterDelay: DEADLINE_KILL_GRACE_MS,
+      // Windows' `taskkill /T` needs no listing first; elsewhere `endTreeOnExit` takes its place.
+      cleanup: process.platform === "win32",
     } as const;
+    const container = containerHeld ? containerName() : undefined;
     const startedAt = now();
     const subprocess = containerHeld
       ? execa(
@@ -471,25 +570,33 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
           containerArgv(
             recipe,
             imageDigestHex!,
-            scratch,
-            hostWorkingDirectory,
-            CONTAINER_MOUNT_ROOT,
-            childEnvironment,
+            { tree: hostWorkingDirectory, scratch: scratch.root, name: container! },
             masked,
-            Object.keys(bound),
           ),
           { ...spawned, env: bound },
         )
       : execa(program, args, {
           ...spawned,
           cwd: hostWorkingDirectory,
-          env: childEnvironment,
+          env: {
+            ...hygienicEnvironment(recipe, onHost(scratch), bound),
+            PATH: await declaredProgramsPath(scratch.root, resolvedBinaries),
+          },
           extendEnv: false,
         });
-    const result = await subprocess;
-    if (result.timedOut && subprocess.pid !== undefined) {
-      endGroup(subprocess.pid);
-    }
+    const unwatchTree = subprocess.pid === undefined ? undefined : endTreeOnExit(subprocess.pid);
+    const unwatchContainer = container === undefined ? undefined : endContainerOnExit(engine, container, bound);
+    const { result, timedOut } = await settleByDeadline(subprocess, options.timeoutMs)
+      .then(async (settled) => {
+        if (settled.timedOut && container !== undefined) {
+          await endContainer(engine, container, bound);
+        }
+        return settled;
+      })
+      .finally(() => {
+        unwatchTree?.();
+        unwatchContainer?.();
+      });
     const finishedAt = now();
 
     const captured = Buffer.concat([result.stdout ?? new Uint8Array(), result.stderr ?? new Uint8Array()]);
@@ -516,6 +623,6 @@ export async function performRecipe(asked: RunRecipe, options: PerformRecipeOpti
       reads: [],
       cost: {},
     };
-    return { recipe, observation, reads, timedOut: result.timedOut ?? false };
+    return { recipe, observation, reads, timedOut };
   });
 }

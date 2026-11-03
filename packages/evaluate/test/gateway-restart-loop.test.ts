@@ -88,7 +88,7 @@ describe("the restart loop driven through a host: the envelope crosses on every 
         invoker,
         input: { claimId: `claim-gateway-${name}`, conditions: {}, evidence: [] },
         store,
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
       });
 

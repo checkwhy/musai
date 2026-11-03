@@ -45,7 +45,7 @@ function extensionFor(format: string): string {
 
 const encoder = new TextEncoder();
 
-/** Every artifact citing `caseId`, in record id order. */
+/** Every artifact citing `caseId` or a case it replaces, in record id order. */
 export async function artifactsOf(
   opened: Workspace,
   caseId: RecordId,
@@ -71,7 +71,7 @@ async function renderClaimLine(opened: Workspace, claim: ClaimRecord): Promise<s
   const labelled = await labelledClaim(opened, claim.slot, "recorded");
   const { status } = labelled;
   const detail = status.label === "open" ? ` (${status.reason})` : "";
-  const run = await decidingRun(opened, labelled);
+  const run = decidingRun(labelled);
   const ran = run === null ? "" : ` · ${markdownCommand(run.record.recipe.command)}`;
   return `- ${markdownText(renderedTextOf(claim.rendering))} — ${status.label}${detail}${ran}`;
 }

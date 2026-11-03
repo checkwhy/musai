@@ -61,17 +61,21 @@ const ALLOWLIST = [
   },
 ];
 
+/** @param {number} count @param {string} noun */
 function counted(count, noun) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Relative to the scan root, with forward slashes on every platform, as allowlist rows name it. */
+/** Relative to the scan root, with forward slashes on every platform, as allowlist rows name it.
+ * @param {string} path */
 function displayPath(path) {
   return relative(scanRoot, path).split(sep).join("/");
 }
 
-/** Walked by directory entry, so a symbolic link is never followed. */
+/** Walked by directory entry, so a symbolic link is never followed.
+ * @param {string} dir @returns {Promise<string[]>} */
 async function sourceFilesUnder(dir) {
+  /** @type {string[]} */
   const files = [];
   let entries;
   try {

@@ -7,7 +7,6 @@ import { buildModule } from "@musai/devkit";
 import { IndexDb } from "@musai/fold";
 import { installModule } from "@musai/modules";
 import {
-  type CaseRecord,
   type ClaimRecord,
   type ClaimTypeDeclaration,
   type ContributionEntry,
@@ -25,6 +24,7 @@ import {
   declareClaimTypes,
   fixedClock,
   fixtureBrief,
+  fixtureCase,
   foldedIndex,
   manifestWithContributions,
   pseudonymOf,
@@ -66,25 +66,6 @@ function claimAtBuild(id: string, build: string, gateClass?: string): ClaimRecor
     rendering: id,
     evidence: [],
     exclusiveGroup: null,
-  };
-}
-
-function caseCiting(slug: string, claims: readonly RecordId[]): CaseRecord {
-  return {
-    kind: "case",
-    supersedes: [],
-    schemaVersion: CURRENT_SCHEMA_VERSIONS.case,
-    type: null,
-    slug,
-    claims: [...claims],
-    preset: {
-      module: "musai.core",
-      contribution: "musai.core/bare",
-      moduleRecord: recordId({ marker: "ruling-dimension-fixture" }),
-    },
-    projectCommit: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-    overrides: {},
-    evaluatorVersion: versionString("1"),
   };
 }
 
@@ -139,7 +120,7 @@ describe("a policy is applied under the dimensions the workspace's installed mod
     const gitDir = join(workspace, ".musai");
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: claimTypesFrom([CLAIM_DECLARATION]) });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installModule(
       MODULE_NAME,
@@ -175,7 +156,8 @@ describe("a policy is applied under the dimensions the workspace's installed mod
     ]);
 
     // An unvouched policy leaves claims it bears on contested; numeric order puts 10 past 9.
-    const status = await claimStatus.handler(
+    const status = await runHandler(
+      claimStatus,
       { claim: slotFor(CLAIM_DECLARATION, { id: "tenth" }) },
       { workspace, scope, now },
     );
@@ -190,7 +172,7 @@ describe("a policy is applied under the dimensions the workspace's installed mod
       { kind: "claim", value: claimAtBuild("tenth", "10", "judgment") },
       { kind: "claim", value: claimAtBuild("eighth", "8", "judgment") },
     ]);
-    await store.putMany([{ kind: "case", value: caseCiting("builds-case", [tenth!, eighth!]) }]);
+    await store.putMany([{ kind: "case", value: fixtureCase("builds-case", [tenth!, eighth!]) }]);
     await vouchedPolicyFromBuildNine(store, "2026-08-31T00:00:00.000Z");
 
     const pending = await runHandler(gatePending, {}, { workspace, scope, now });
@@ -199,9 +181,10 @@ describe("a policy is applied under the dimensions the workspace's installed mod
   });
 
   test("a case whose claim at build 10 a later policy over every build from 9 on reaches is as recent as that policy", async () => {
-    await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index: await foldedIndex(store), now });
+    using folded = await foldedIndex(store);
+    await buildModule(CORE_MODULE_DIR, store, { blobs: blobStoreOf(workspace), index: folded, now });
     const [tenth] = await store.putMany([{ kind: "claim", value: claimAtBuild("tenth", "10") }]);
-    await store.putMany([{ kind: "case", value: caseCiting("recent-case", [tenth!]) }]);
+    await store.putMany([{ kind: "case", value: fixtureCase("recent-case", [tenth!]) }]);
     const dayLater = "2026-09-01T00:00:00.000Z";
     await vouchedPolicyFromBuildNine(
       new Store({

@@ -15,11 +15,13 @@ const ALLOWLIST_PATH = join("scripts", "orphan-allowlist.md");
 const SYMBOL_TABLE_HEADING = "## Symbols";
 const FILE_TABLE_HEADING = "## Files";
 
+/** @param {number} count @param {string} noun */
 function counted(count, noun) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Relative to the scan root, with forward slashes on every platform, as allowlist rows name it. */
+/** Relative to the scan root, with forward slashes on every platform, as allowlist rows name it.
+ * @param {string} path */
 function displayPath(path) {
   return relative(scanRoot, path).split(sep).join("/");
 }
@@ -35,7 +37,9 @@ async function packageSourceRoots() {
   return roots.sort();
 }
 
+/** @param {string} dir @returns {Promise<string[]>} */
 async function productionFilesUnder(dir) {
+  /** @type {string[]} */
   const files = [];
   let entries;
   try {
@@ -54,7 +58,8 @@ async function productionFilesUnder(dir) {
   return files.filter((path) => !EXCLUDED_DIRECTORIES.some((excluded) => displayPath(path).includes(`/${excluded}/`)));
 }
 
-/** A name an `export { … }` clause passes on is not a use of it, so a barrel hides no orphan. */
+/** A name an `export { … }` clause passes on is not a use of it, so a barrel hides no orphan.
+ * @param {string} code */
 function withoutExportClauses(code) {
   const out = code.split("");
   for (const match of code.matchAll(/\bexport\s*(?:type\s+)?\{/g)) {
@@ -63,7 +68,7 @@ function withoutExportClauses(code) {
       continue;
     }
     const rest = code.slice(close + 1);
-    const tail = /^\s*(?:from\s*["'][^"']*["'])?\s*;?/.exec(rest)[0];
+    const [tail] = /** @type {string[]} */ (/^\s*(?:from\s*["'][^"']*["'])?\s*;?/.exec(rest));
     for (let i = match.index; i < close + 1 + tail.length; i += 1) {
       if (out[i] !== "\n") {
         out[i] = " ";
@@ -84,7 +89,7 @@ const IDENTIFIER = /[A-Za-z_$][\w$]*/g;
 
 /** `.set(` names a member, not the exported `set`. It also hides `ns.foo()` under
  * `import * as ns`, which no production file writes. */
-function readsAMember(code, index) {
+function readsAMember(/** @type {string} */ code, /** @type {number} */ index) {
   let back = index - 1;
   while (back >= 0 && /\s/.test(code[back])) {
     back -= 1;
@@ -92,7 +97,8 @@ function readsAMember(code, index) {
   return code[back] === "." && code[back - 1] !== ".";
 }
 
-/** The `from` of an import or export statement, not an exported constructor named `from`. */
+/** The `from` of an import or export statement, not an exported constructor named `from`.
+ * @param {string} code @param {string} name @param {number} index */
 function isModuleFrom(code, name, index) {
   return name === "from" && /^\s*["'`]/.test(code.slice(index + name.length));
 }
@@ -168,6 +174,7 @@ async function scan() {
   return { exportCount: exports.length, orphanSymbols, orphanFiles: orphanFiles.sort() };
 }
 
+/** @param {string} text @param {string} heading */
 function rowsUnder(text, heading) {
   const start = text.indexOf(heading);
   if (start === -1) {

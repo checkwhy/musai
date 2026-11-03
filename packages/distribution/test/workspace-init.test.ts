@@ -39,7 +39,7 @@ describe("workspace.init@1", () => {
   test("a workspace it creates has musai.core among its installed modules, the bundle readable through the workspace's blob store", async () => {
     await runHandler(workspaceInit, { workspace }, { workspace, scope, now });
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const entry = (await installedModules(opened)).byName.get("musai.core");
     expect(entry).toBeDefined();
 
@@ -62,7 +62,7 @@ describe("workspace.init@1", () => {
   test("the build receipt of the core module it installs carries observation timestamps pinned to the epoch", async () => {
     await runHandler(workspaceInit, { workspace }, { workspace, scope, now });
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const entry = (await installedModules(opened)).byName.get("musai.core");
     const record = opened.read(entry!.moduleRecordId) as ModuleRecord;
     const buildReceipt = opened.read(record.build!) as PerformedRunRecord;
@@ -77,7 +77,7 @@ describe("workspace.init@1", () => {
 
     await runHandler(workspaceInit, { workspace }, { workspace, scope, now });
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const entry = (await installedModules(opened)).byName.get("musai.core");
     expect(entry).toBeDefined();
     expect(await opened.blobs.read((opened.read(entry!.moduleRecordId) as ModuleRecord).bundle!)).toEqual(
@@ -93,7 +93,7 @@ describe("workspace.init@1", () => {
   test("initialising an existing workspace again leaves the core module record it resolves to unmoved, even where the distribution's own build holds another", async () => {
     const { gitDir } = await initWorkspace(workspace, { now });
     const store = new Store({ ctx: { gitDir }, scope, now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     const earlierBuild = { ...artefacts, version: versionString("0") };
     const { moduleRecordId } = await installDistributionModule(earlierBuild, store, blobStoreOf(workspace), index);
@@ -101,7 +101,7 @@ describe("workspace.init@1", () => {
 
     await runHandler(workspaceInit, { workspace }, { workspace, scope, now });
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     expect((await installedModules(opened)).byName.get("musai.core")?.moduleRecordId).toBe(moduleRecordId);
     expect(await store.tip()).toBe(tipBefore);
   });
@@ -164,7 +164,7 @@ describe("workspace.init@1", () => {
       { workspace, key: key.keyPath },
       { workspace, scope, now, principalName: OPERATOR },
     );
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const build = opened.read(
       (await installedModules(opened)).byName.get("musai.core")!.moduleRecordId,
     ) as ModuleRecord;
@@ -187,7 +187,7 @@ describe("workspace.init@1", () => {
       { kind: "attestation", value: release.record, signature },
     ]);
 
-    const reopened = await openWorkspace({ workspace, scope, now });
+    using reopened = await openWorkspace({ workspace, scope, now });
     expect((await releaseStanding(reopened, subject)).standing.map((standing) => standing.id)).toEqual([release.id]);
   });
 

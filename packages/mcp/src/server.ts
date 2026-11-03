@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -25,8 +27,8 @@ import {
   type OperationContext,
   type OperationDescriptor,
   OperationError,
+  offeredUnderClearance,
   openWorkspace,
-  operationsUnderClearance,
   principalNameFromEnvironment,
   runHandler,
   type SubscriptionTrace,
@@ -45,7 +47,16 @@ import {
   type Reason,
 } from "@musai/records";
 import { MUSAI_DIR, Store } from "@musai/store";
-import { appendCall, type CallLog, type CallLogRequest, type CallLogResponse, openCallLog } from "./call-log.js";
+import {
+  appendCall,
+  type CallLog,
+  type CallLogRequest,
+  type CallLogResponse,
+  type CallLogSource,
+  logCall,
+  noWorkspaceAt,
+  openCallLog,
+} from "./call-log.js";
 import {
   type McpDistribution,
   type McpExtensionServer,
@@ -55,14 +66,15 @@ import {
   registerResourceHandlers,
 } from "./extension.js";
 import {
-  manifestContributionProjections,
+  contributionProjections,
+  DuplicateToolNameError,
+  operationProjections,
+  operationTool,
   type ProjectedContribution,
-  toolNameFor,
-  toolsFromManifests,
-  toolsFromRegistry,
+  type ToolNameCollision,
 } from "./project.js";
 import { registerPromptHandlers } from "./prompts.js";
-import { refusalCrossingAsRpcError, refusalText } from "./refusal.js";
+import { noWorkspaceRefusal, type ReadGuard, refusalCrossingAsRpcError, refusalText } from "./refusal.js";
 
 /** Stripped before validation, since no operation's input schema admits them. */
 function splitEnvelopeFields(args: Record<string, unknown>): {
@@ -128,19 +140,10 @@ async function callExtensionTool(
   extensionTool: McpExtensionTool,
   session: McpToolSession,
   args: Record<string, unknown>,
-  log: CallLog,
-  uncompilable: ReadonlyMap<string, string>,
+  log: CallLogSource,
 ): Promise<CallToolResult> {
   const request = extensionCallRequest(extensionTool.tool.name, args);
   try {
-    const why = uncompilable.get(extensionTool.tool.name);
-    if (why !== undefined) {
-      throw new OperationError({
-        reason: "tool-unavailable",
-        about: [extensionTool.tool.name],
-        detail: `its input schema does not compile: ${why}`,
-      });
-    }
     const validation = validateAgainstSchema(extensionTool.tool.inputSchema as JsonSchema, args);
     if (!validation.ok) {
       throw new OperationError({
@@ -150,11 +153,11 @@ async function callExtensionTool(
       });
     }
     const result = await extensionTool.call(session, args);
-    await appendCall(log, session.context.workspace, request, extensionResultToLogResponse(result));
+    await logCall(log, session.context.workspace, request, extensionResultToLogResponse(result));
     return result;
   } catch (error) {
     if (isKernelError(error)) {
-      await appendCall(log, session.context.workspace, request, refusalToLogResponse(error));
+      await logCall(log, session.context.workspace, request, refusalToLogResponse(error));
     }
     throw error;
   }
@@ -171,26 +174,278 @@ function foldRefusalRequest(refusal: WorkspaceRefusal): CallLogRequest {
   return { contribution: "fold", id: refusal.path, version: "0", input: { commit: refusal.commit, id: refusal.id } };
 }
 
-/** A refusal on the way is logged under the name as sent, since no contribution is known yet. */
-async function resolveContributionTool(
+interface OperationTarget {
+  readonly kind: "operation";
+  readonly tool: Tool;
+  readonly descriptor: OperationDescriptor;
+}
+
+interface ContributionTarget {
+  readonly kind: "contribution";
+  readonly tool: Tool;
+  readonly projected: ProjectedContribution;
+  readonly opened: Workspace;
+}
+
+/** Carries the session it runs under, so a call by the name needs nothing but the map. */
+interface ExtensionTarget {
+  readonly kind: "extension";
+  readonly tool: Tool;
+  readonly extension: McpExtensionTool;
+  readonly session: McpToolSession;
+}
+
+/** A name the session leaves out of its listing, answered with a refusal saying why. */
+interface WithheldTarget {
+  readonly kind: "withheld";
+  readonly refusal: OperationError;
+  loggedAs(args: Record<string, unknown>): CallLogRequest;
+}
+
+/** Unlisted, and dispatched through the kernel's own gate, so a call is refused in the order and
+ * with the refusal the API gives it. */
+interface ClearedOutTarget {
+  readonly kind: "cleared-out";
+  readonly descriptor: OperationDescriptor;
+  readonly refusal: OperationError;
+}
+
+type DistributionTarget = OperationTarget | ClearedOutTarget | ContributionTarget | WithheldTarget;
+
+type ToolTarget = DistributionTarget | ExtensionTarget;
+
+/** Built once per session; the contributions an install can change mid-session join it per
+ * request, after `operations` and before `joining`, the names an extension holds alone. */
+interface SessionTools<T extends ToolTarget> {
+  readonly operations: ReadonlyMap<string, T>;
+  readonly joining: ReadonlyMap<string, T>;
+  readonly projectsContributions: boolean;
+  /** Why each extension the session leaves out of `operations` and `joining` is left out. */
+  readonly leftOut: ReadonlyMap<string, string>;
+  reportCollision(collision: ToolNameCollision, refusal: OperationError): Promise<void>;
+}
+
+function operationCallRequest(descriptor: OperationDescriptor, input: Record<string, unknown>): CallLogRequest {
+  return { contribution: "operation", id: descriptor.id, version: String(descriptor.version), input };
+}
+
+function operationTarget(descriptor: OperationDescriptor, context: OperationContext): DistributionTarget {
+  const offered = offeredUnderClearance(descriptor, context.clearance);
+  if (offered instanceof OperationError) {
+    return { kind: "cleared-out", descriptor, refusal: offered };
+  }
+  return { kind: "operation", tool: operationTool(offered), descriptor };
+}
+
+/** Where `offered` names the operations a session offers, no contribution projects. */
+function distributionTools(
+  distribution: Distribution,
+  context: OperationContext,
+  offered: ReadonlySet<string> | undefined,
+  reportCollision: SessionTools<DistributionTarget>["reportCollision"] = async () => {},
+): SessionTools<DistributionTarget> {
+  const operations = new Map<string, DistributionTarget>();
+  for (const [name, { key, descriptor }] of operationProjections(distribution.registry)) {
+    if (offered === undefined || offered.has(key)) {
+      operations.set(name, operationTarget(descriptor, context));
+    }
+  }
+  return {
+    operations,
+    joining: new Map(),
+    projectsContributions: offered === undefined,
+    leftOut: new Map(),
+    reportCollision,
+  };
+}
+
+/** The extension tools a session mounts, by name, with why each whose input schema does not
+ * compile is withheld. */
+interface SessionExtensions {
+  readonly tools: ReadonlyMap<string, McpExtensionTool>;
+  readonly uncompilable: ReadonlyMap<string, string>;
+}
+
+function sessionExtensions(tools: readonly McpExtensionTool[]): SessionExtensions {
+  const byName = new Map<string, McpExtensionTool>();
+  for (const [index, extension] of tools.entries()) {
+    const name = extension.tool.name;
+    const first = tools.findIndex((other) => other.tool.name === name);
+    if (first !== index) {
+      throw new DuplicateToolNameError(name, `the extension tool at ${first}`, `the one at ${index}`);
+    }
+    byName.set(name, extension);
+  }
+  return { tools: byName, uncompilable: uncompilableToolSchemas(tools) };
+}
+
+function uncompilableTarget(name: string, why: string): WithheldTarget {
+  return {
+    kind: "withheld",
+    refusal: new OperationError({
+      reason: "unknown-operation",
+      about: [name],
+      detail: `this server offers no tool named ${name}: its input schema does not compile: ${why}`,
+    }),
+    loggedAs: (args) => extensionCallRequest(name, args),
+  };
+}
+
+/** An extension stands in the place of a target of its name, never of one the session withholds,
+ * and adds a name of its own only where contributions project. */
+function sessionTools(
+  distribution: McpDistribution,
+  context: OperationContext,
+  lab: boolean,
+  extensions: SessionExtensions,
+  session: McpToolSession,
+  reportCollision: SessionTools<ToolTarget>["reportCollision"],
+): SessionTools<ToolTarget> {
+  const offered = lab ? undefined : distribution.publicOperations;
+  const base = distributionTools(distribution, context, offered, reportCollision);
+  const operations = new Map<string, ToolTarget>(base.operations);
+  const joining = new Map<string, ToolTarget>();
+  const leftOut = new Map<string, string>();
+  for (const [name, extension] of extensions.tools) {
+    const standsOver = operations.get(name);
+    if (standsOver?.kind === "cleared-out") {
+      leftOut.set(name, `it stands over ${name}, which this session withholds: ${standsOver.refusal.detail}`);
+      continue;
+    }
+    if (standsOver === undefined && !base.projectsContributions) {
+      leftOut.set(name, `this session offers no operation named ${name} for it to stand over`);
+      continue;
+    }
+    const why = extensions.uncompilable.get(name);
+    const target =
+      why === undefined
+        ? { kind: "extension" as const, tool: extension.tool, extension, session }
+        : uncompilableTarget(name, why);
+    (standsOver === undefined ? joining : operations).set(name, target);
+  }
+  return { ...base, operations, joining, leftOut };
+}
+
+function collisionRefusal({ name, claimants }: ToolNameCollision): OperationError {
+  return new OperationError({
+    reason: "declaration-conflict",
+    about: [name, ...claimants],
+    detail: `this server offers no contribution named ${name}: ${claimants.join(" and ")} each project to it`,
+  });
+}
+
+/** Every other verb reads or writes a workspace, and would run unlogged before one stands. */
+function workspaceMakers<T extends ToolTarget>(operations: ReadonlyMap<string, T>): ReadonlyMap<string, T> {
+  return new Map(
+    [...operations].filter(([, target]) => "descriptor" in target && target.descriptor.makesWorkspace === true),
+  );
+}
+
+/** Every name the session answers, in listing order, the installed set read afresh. */
+async function allTargets<T extends ToolTarget>(
+  tools: SessionTools<T>,
+  distribution: Distribution,
+  context: OperationContext,
+): Promise<ReadonlyMap<string, T | ContributionTarget | WithheldTarget>> {
+  if (await noWorkspaceAt(context.workspace)) {
+    return workspaceMakers(tools.operations);
+  }
+  const targets = new Map<string, T | ContributionTarget | WithheldTarget>(tools.operations);
+  if (tools.projectsContributions) {
+    const opened = await openWorkspace(context);
+    const { projected, collisions } = contributionProjections(distribution.registry, await installedManifests(opened));
+    for (const contribution of projected) {
+      const name = contribution.tool.name;
+      const target = { kind: "contribution" as const, tool: contribution.tool, projected: contribution, opened };
+      targets.set(name, tools.joining.get(name) ?? target);
+    }
+    for (const collision of collisions) {
+      const refusal = collisionRefusal(collision);
+      await tools.reportCollision(collision, refusal);
+      // The operation of the name keeps it; a name contributions alone claim answers the refusal.
+      if (!targets.has(collision.name)) {
+        const withheld: WithheldTarget = {
+          kind: "withheld",
+          refusal,
+          loggedAs: (args) => unresolvedCallRequest(collision.name, args),
+        };
+        targets.set(collision.name, tools.joining.get(collision.name) ?? withheld);
+      }
+    }
+  }
+  for (const [name, target] of tools.joining) {
+    targets.set(name, target);
+  }
+  return targets;
+}
+
+/** Reads the installed set only for a name no operation or extension holds, since a contribution
+ * can claim no other. */
+async function targetNamed<T extends ToolTarget>(
+  tools: SessionTools<T>,
+  distribution: Distribution,
+  context: OperationContext,
+  name: string,
+): Promise<T | ContributionTarget | WithheldTarget | undefined> {
+  if (await noWorkspaceAt(context.workspace)) {
+    const makers = workspaceMakers(tools.operations);
+    const maker = makers.get(name);
+    if (maker === undefined) {
+      throw noWorkspaceRefusal("unknown-operation", name, context.workspace, [...makers.keys()]);
+    }
+    return maker;
+  }
+  const held = tools.operations.get(name) ?? tools.joining.get(name);
+  if (held !== undefined || !tools.projectsContributions) {
+    return held;
+  }
+  return (await allTargets(tools, distribution, context)).get(name);
+}
+
+function listedTools(targets: ReadonlyMap<string, ToolTarget>): Tool[] {
+  return [...targets.values()].flatMap((target) => ("tool" in target ? [target.tool] : []));
+}
+
+/** A refusal on the way is logged under the name as sent, since no target is known yet. */
+async function resolveTarget<T>(
+  found: () => Promise<T | undefined>,
   context: OperationContext,
   toolName: string,
   args: Record<string, unknown>,
-  log: CallLog | undefined,
-): Promise<{ readonly opened: Workspace; readonly projected: ProjectedContribution }> {
+  log: CallLogSource,
+): Promise<T> {
   try {
-    const opened = await openWorkspace(context);
-    const manifests = await installedManifests(opened);
-    const projected = manifestContributionProjections(manifests).find((candidate) => candidate.tool.name === toolName);
-    if (projected === undefined) {
+    const target = await found();
+    if (target === undefined) {
       throw new OperationError({ reason: "unknown-operation", about: [toolName], detail: `no tool named ${toolName}` });
     }
-    return { opened, projected };
+    return target;
   } catch (error) {
-    if (log !== undefined && isKernelError(error)) {
-      await appendCall(log, context.workspace, unresolvedCallRequest(toolName, args), refusalToLogResponse(error));
+    if (isKernelError(error)) {
+      await logCall(log, context.workspace, unresolvedCallRequest(toolName, args), refusalToLogResponse(error));
     }
     throw error;
+  }
+}
+
+async function callTarget(
+  target: ToolTarget,
+  distribution: Distribution,
+  context: OperationContext,
+  args: Record<string, unknown>,
+  log: CallLogSource,
+): Promise<CallToolResult> {
+  switch (target.kind) {
+    case "withheld":
+      await logCall(log, context.workspace, target.loggedAs(args), refusalToLogResponse(target.refusal));
+      throw target.refusal;
+    case "operation":
+    case "cleared-out":
+      return callOperation(target.descriptor, context, args, log);
+    case "contribution":
+      return callContributionTool(context, target.opened, target.projected, args, log, distribution.admitDrafts);
+    case "extension":
+      return callExtensionTool(target.extension, target.session, args, log);
   }
 }
 
@@ -199,7 +454,7 @@ async function callContributionTool(
   opened: Workspace,
   projected: ProjectedContribution,
   args: Record<string, unknown>,
-  log: CallLog | undefined,
+  log: CallLogSource,
   admitDrafts: DraftAdmission,
 ): Promise<CallToolResult> {
   const toolName = projected.tool.name;
@@ -231,20 +486,18 @@ async function callContributionTool(
     if (!outputValidation.ok) {
       throw new OperationError({ reason: "invalid-output", about: [toolName], detail: outputValidation.errors });
     }
-    if (log !== undefined) {
-      await appendCall(log, context.workspace, request, {
-        ok: true,
-        output: response.output,
-        diagnostics: response.diagnostics,
-      });
-    }
+    await logCall(log, context.workspace, request, {
+      ok: true,
+      output: response.output,
+      diagnostics: response.diagnostics,
+    });
     return {
       content: [{ type: "text", text: new TextDecoder().decode(canonicalBytes(response.output)) }],
       structuredContent: response.output as Record<string, unknown>,
     };
   } catch (error) {
-    if (log !== undefined && isKernelError(error)) {
-      await appendCall(
+    if (isKernelError(error)) {
+      await logCall(
         log,
         context.workspace,
         request,
@@ -268,7 +521,7 @@ async function callContributedOperation(
   projected: ProjectedContribution,
   entry: OperationContributionEntry,
   args: Record<string, unknown>,
-  log: CallLog | undefined,
+  log: CallLogSource,
   admitDrafts: DraftAdmission,
 ): Promise<CallToolResult> {
   const { operationArgs, plan, expectHead } = splitEnvelopeFields(args);
@@ -306,20 +559,18 @@ async function callContributedOperation(
       callContext,
       admitDrafts,
     );
-    if (log !== undefined) {
-      await appendCall(log, context.workspace, request, {
-        ok: true,
-        output: applied,
-        diagnostics: response.diagnostics,
-      });
-    }
+    await logCall(log, context.workspace, request, {
+      ok: true,
+      output: applied,
+      diagnostics: response.diagnostics,
+    });
     return {
       content: [{ type: "text", text: new TextDecoder().decode(canonicalBytes(applied)) }],
       structuredContent: applied as unknown as Record<string, unknown>,
     };
   } catch (error) {
-    if (log !== undefined && isKernelError(error)) {
-      await appendCall(
+    if (isKernelError(error)) {
+      await logCall(
         log,
         context.workspace,
         request,
@@ -330,83 +581,48 @@ async function callContributedOperation(
   }
 }
 
-/** Throws a refusal, logged first; the `tools/call` handler answers it as an error result, so a
- * test can drive this with no transport. */
-export async function callTool(
+async function callOperation(
+  descriptor: OperationDescriptor,
+  context: OperationContext,
+  args: Record<string, unknown>,
+  log: CallLogSource,
+): Promise<CallToolResult> {
+  const { operationArgs, plan, expectHead } = splitEnvelopeFields(args);
+  const request = operationCallRequest(descriptor, operationArgs);
+  try {
+    const output = await runHandler(descriptor, operationArgs, {
+      ...context,
+      mode: plan ? "plan" : context.mode,
+      expectHead: expectHead ?? context.expectHead,
+    });
+    await logCall(log, context.workspace, request, { ok: true, output, diagnostics: [] });
+    return {
+      content: [{ type: "text", text: new TextDecoder().decode(canonicalBytes(output)) }],
+      structuredContent: output as Record<string, unknown>,
+    };
+  } catch (error) {
+    if (isKernelError(error)) {
+      await logCall(log, context.workspace, request, refusalToLogResponse(error));
+    }
+    throw error;
+  }
+}
+
+/** The one dispatch of `tools/call`, through the session's map, or with none through a `lab`
+ * map of the distribution alone; throws a refusal, logged first. */
+export function callTool(
   distribution: Distribution,
   context: OperationContext,
   toolName: string,
   args: Record<string, unknown>,
-  log?: CallLog,
+  log: CallLogSource = async () => undefined,
+  tools: SessionTools<ToolTarget> = distributionTools(distribution, context, undefined),
 ): Promise<CallToolResult> {
-  let descriptor: OperationDescriptor | undefined;
-  for (const candidate of distribution.registry.values()) {
-    if (toolNameFor(candidate) === toolName) {
-      descriptor = candidate;
-      break;
-    }
-  }
-  if (descriptor !== undefined) {
-    const { operationArgs, plan, expectHead } = splitEnvelopeFields(args);
-    const request = {
-      contribution: "operation",
-      id: descriptor.id,
-      version: String(descriptor.version),
-      input: operationArgs,
-    };
-    try {
-      const output = await runHandler(descriptor, operationArgs, {
-        ...context,
-        mode: plan ? "plan" : context.mode,
-        expectHead: expectHead ?? context.expectHead,
-      });
-      if (log !== undefined) {
-        await appendCall(log, context.workspace, request, { ok: true, output, diagnostics: [] });
-      }
-      return {
-        content: [{ type: "text", text: new TextDecoder().decode(canonicalBytes(output)) }],
-        structuredContent: output as Record<string, unknown>,
-      };
-    } catch (error) {
-      if (log !== undefined && isKernelError(error)) {
-        await appendCall(log, context.workspace, request, refusalToLogResponse(error));
-      }
-      throw error;
-    }
-  }
-
-  const { opened, projected } = await resolveContributionTool(context, toolName, args, log);
-  return callContributionTool(context, opened, projected, args, log, distribution.admitDrafts);
-}
-
-/** Re-reads the installed set on every call, so a module installed mid-session lists at once. A
- * session outside `lab` lists the distribution's public operations alone. */
-async function exposedTools(
-  distribution: McpDistribution,
-  lab: boolean,
-  extensionTools: readonly McpExtensionTool[],
-  context: OperationContext,
-): Promise<Tool[]> {
-  const offered = distribution.publicOperations;
-  const registry = operationsUnderClearance(distribution.registry, context.clearance);
-  if (!lab && offered !== undefined) {
-    return toolsFromRegistry(new Map([...registry].filter(([key]) => offered.has(key))));
-  }
-  const opened = await openWorkspace(context);
-  const manifests = await installedManifests(opened);
-  const merged = [...toolsFromRegistry(registry), ...toolsFromManifests(distribution.registry, manifests)];
-  const laidOver = merged.map(
-    (tool) => extensionTools.find((extension) => extension.tool.name === tool.name)?.tool ?? tool,
-  );
-  // An extension standing in for an operation the clearance withholds is withheld with it.
-  const withheld = [...distribution.registry]
-    .filter(([key]) => !registry.has(key))
-    .map(([, descriptor]) => toolNameFor(descriptor));
-  const joining = extensionTools
-    .filter((extension) => !merged.some((tool) => tool.name === extension.tool.name))
-    .filter((extension) => !withheld.includes(extension.tool.name))
-    .map((extension) => extension.tool);
-  return [...laidOver, ...joining];
+  return closingWorkspaces(async () => {
+    const found = () => targetNamed(tools, distribution, context, toolName);
+    const target = await resolveTarget(found, context, toolName, args, log);
+    return callTarget(target, distribution, context, args, log);
+  });
 }
 
 /** Only the two module kinds add or replace a manifest to project from. */
@@ -440,8 +656,12 @@ export async function checkForListChanges(
   context: OperationContext,
   cursor: string | undefined,
   mountsResources: boolean,
-): Promise<string> {
-  const opened = await openWorkspace(context);
+): Promise<string | undefined> {
+  // Left unset, the first check after `init` reads from the start and notifies what it installed.
+  if (await noWorkspaceAt(context.workspace)) {
+    return cursor;
+  }
+  using opened = await openWorkspace(context);
   let read: EventsSinceResult;
   let withdrawn = false;
   try {
@@ -480,6 +700,32 @@ function extensionServerOf(server: Server): McpExtensionServer {
   return Object.freeze(surface);
 }
 
+/** What a session keeps for the one log a workspace holds, each once-per-session row once per
+ * log; opened when the session first sees the workspace stand, so each session has its own file. */
+interface SessionLogState {
+  log: Promise<CallLog> | undefined;
+  readonly foldRefusals: Set<string>;
+  readonly collisions: Set<string>;
+  withholdingLogged: boolean;
+}
+
+function freshLogState(): SessionLogState {
+  return { log: undefined, foldRefusals: new Set(), collisions: new Set(), withholdingLogged: false };
+}
+
+/** The log a state opened is its workspace's identity: its name is random, so a workspace made
+ * again at the path holds none; a state that opened no log is bound to no workspace yet. */
+async function holdsLogOf(state: SessionLogState): Promise<boolean> {
+  const log = await state.log?.catch(() => undefined);
+  return (
+    log === undefined ||
+    access(log.path).then(
+      () => true,
+      () => false,
+    )
+  );
+}
+
 /** Built on the SDK's low-level `Server`, not `McpServer`, so tool schemas stay the registry's JSON
  * Schema rather than a hand-kept Zod copy. */
 export function createMcpServer(
@@ -487,43 +733,56 @@ export function createMcpServer(
   given: OperationContext,
   options: { readonly lab: boolean },
 ): Server {
-  // Opened on the first call; a second session opens a second file.
-  let logPromise: Promise<CallLog> | undefined;
-  function sessionLog(): Promise<CallLog> {
-    logPromise ??= openCallLog(given.workspace);
-    return logPromise;
+  let current = freshLogState();
+  // What each request began under, read by every entry it writes; an entry outside one is dropped.
+  const requestState = new AsyncLocalStorage<SessionLogState>();
+
+  /** A failed open is not kept, so the next request or entry tries again. */
+  function logOf(state: SessionLogState): Promise<CallLog> {
+    state.log ??= openCallLog(given.workspace).catch((error: unknown) => {
+      state.log = undefined;
+      throw error;
+    });
+    return state.log;
   }
 
-  // Every open of the workspace reports its refusals again, so each is logged once per session.
-  const loggedFoldRefusals = new Set<string>();
+  /** Opening the log would put a directory where `init` refuses anything, so none is opened until
+   * a workspace stands; an entry from a request begun under a retired log is dropped. */
+  async function requestLog(): Promise<CallLog | undefined> {
+    const state = requestState.getStore();
+    if (state !== current || (await noWorkspaceAt(given.workspace))) {
+      return undefined;
+    }
+    return logOf(state);
+  }
+
   const context: OperationContext = {
     ...given,
     reportRefusal: async (refusal) => {
       await given.reportRefusal?.(refusal);
+      const logged = requestState.getStore()?.foldRefusals;
       const key = `${refusal.commit}:${refusal.path}`;
-      if (loggedFoldRefusals.has(key)) {
+      if (logged === undefined || logged.has(key)) {
         return;
       }
-      loggedFoldRefusals.add(key);
+      logged.add(key);
       try {
-        await appendCall(await sessionLog(), given.workspace, foldRefusalRequest(refusal), {
+        await logCall(requestLog, given.workspace, foldRefusalRequest(refusal), {
           ok: false,
           error: { code: "fold-refused", data: null, message: refusal.reason },
         });
       } catch (error) {
         // A row that was not written is tried again at the next open.
-        loggedFoldRefusals.delete(key);
+        logged.delete(key);
         throw error;
       }
     },
     reportSubscription: async (trace) => {
       await given.reportSubscription?.(trace);
-      const request = subscriptionCallRequest(trace);
-      await appendCall(await sessionLog(), given.workspace, request, { ok: false, error: trace.error });
+      await logCall(requestLog, given.workspace, subscriptionCallRequest(trace), { ok: false, error: trace.error });
     },
   };
-  const extensionTools = distribution.extensions?.mcp?.tools ?? [];
-  const uncompilable = uncompilableToolSchemas(extensionTools);
+  const extensions = sessionExtensions(distribution.extensions?.mcp?.tools ?? []);
   const resources = distribution.extensions?.mcp?.resources;
   const server = new Server(
     { name: distribution.name, version: distribution.version },
@@ -531,11 +790,45 @@ export function createMcpServer(
   );
   const resourceSession: McpResourceSession = Object.freeze({ distribution, context });
   const toolSession: McpToolSession = Object.freeze({ ...resourceSession, server: extensionServerOf(server) });
+  async function logCollision(collision: ToolNameCollision, refusal: OperationError): Promise<void> {
+    const logged = requestState.getStore()?.collisions;
+    const key = JSON.stringify([collision.name, ...collision.claimants]);
+    if (logged === undefined || logged.has(key)) {
+      return;
+    }
+    const request = { contribution: "tool-name", id: collision.name, version: "0", input: collision.claimants };
+    await logCall(requestLog, context.workspace, request, refusalToLogResponse(refusal));
+    logged.add(key);
+  }
+  const tools = sessionTools(distribution, context, options.lab, extensions, toolSession, logCollision);
 
   // Unset until the first check, which reads from the start, so a fresh session notifies once.
   let cursor: string | undefined;
   // Set once any handler finds the scope's ref held; the ref's absence after it is a drop.
   let scopeSeen = false;
+  // Set once a request finds the workspace standing; its absence after it is a removal.
+  let workspaceSeen = false;
+
+  /** A workspace removed, or made again at its path, since the request before is a fresh one,
+   * served as at the session's start: a new log, and an init after removal reads from the start. */
+  async function asRequest<T>(work: (stands: boolean) => Promise<T>): Promise<T> {
+    // Read before the workspace is, so a request never adopts a state made after it began.
+    let state = current;
+    const stands = !(await noWorkspaceAt(context.workspace));
+    const retired = stands ? !(await holdsLogOf(state)) : workspaceSeen;
+    workspaceSeen = stands;
+    if (retired && state === current) {
+      state = freshLogState();
+      current = state;
+      cursor = undefined;
+      scopeSeen = false;
+    }
+    if (stands && state === current) {
+      // Opened at first sight, so a workspace made again holds no file of it; a failed open waits.
+      await logOf(state).catch(() => undefined);
+    }
+    return requestState.run(state, () => work(stands));
+  }
 
   /** Throws while the scope is gone, leaving the cursor where it was, so a remade scope reads on
    * from it, or as stale where its history no longer holds it. */
@@ -547,31 +840,76 @@ export function createMcpServer(
     }
   }
 
+  const makers = [...workspaceMakers(tools.operations).keys()];
+  const guardRead: ReadGuard = (read) =>
+    asRequest(async (stands) => {
+      if (!stands) {
+        return read(makers);
+      }
+      await refuseIfDropped();
+      return read(undefined);
+    });
+
   async function checkListChanges(): Promise<void> {
     cursor = await checkForListChanges(server, context, cursor, resources !== undefined);
   }
 
+  async function logWithheldTools(): Promise<void> {
+    const state = requestState.getStore();
+    if (state === undefined || state.withholdingLogged || extensions.uncompilable.size === 0) {
+      return;
+    }
+    const log = await requestLog();
+    if (log === undefined) {
+      return;
+    }
+    for (const [name, { tool }] of extensions.tools) {
+      const why = extensions.uncompilable.get(name);
+      if (why === undefined) {
+        continue;
+      }
+      const request = { contribution: "extension", id: name, version: "0", input: tool.inputSchema };
+      const leftOut = tools.leftOut.get(name);
+      const message =
+        leftOut === undefined
+          ? `withheld from tools/list: ${why}`
+          : `left out of tools/list, since ${leftOut}; its input schema does not compile either: ${why}`;
+      await appendCall(log, context.workspace, request, {
+        ok: false,
+        error: { code: "schema-uncompilable", data: null, message },
+      });
+    }
+    state.withholdingLogged = true;
+  }
+
   server.setRequestHandler(ListToolsRequestSchema, () =>
     closingWorkspaces(() =>
-      refusalCrossingAsRpcError(async () => {
-        await refuseIfDropped();
-        await checkListChanges();
-        return { tools: await exposedTools(distribution, options.lab, extensionTools, context) };
-      }),
+      refusalCrossingAsRpcError(() =>
+        asRequest(async (stands) => {
+          if (stands) {
+            await refuseIfDropped();
+          }
+          await checkListChanges();
+          await logWithheldTools();
+          return { tools: listedTools(await allTargets(tools, distribution, context)) };
+        }),
+      ),
     ),
   );
 
   server.setRequestHandler(CallToolRequestSchema, (request) =>
-    closingWorkspaces(async () => {
+    asRequest(async (stands) => {
       const args = request.params.arguments ?? {};
       try {
-        await refuseIfDropped();
+        if (stands) {
+          await refuseIfDropped();
+        }
       } catch (error) {
         if (!isKernelError(error)) {
           throw error;
         }
-        await appendCall(
-          await sessionLog(),
+        await logCall(
+          requestLog,
           context.workspace,
           unresolvedCallRequest(request.params.name, args),
           refusalToLogResponse(error),
@@ -581,12 +919,7 @@ export function createMcpServer(
       // A refusal from the list-change check concerns the session, so it stays a JSON-RPC error.
       await checkListChanges();
       try {
-        const extensionTool = extensionTools.find((extension) => extension.tool.name === request.params.name);
-        const log = await sessionLog();
-        if (extensionTool !== undefined) {
-          return await callExtensionTool(extensionTool, toolSession, args, log, uncompilable);
-        }
-        return await callTool(distribution, plainCallContext(context), request.params.name, args, log);
+        return await callTool(distribution, plainCallContext(context), request.params.name, args, requestLog, tools);
       } catch (error) {
         // MCP gives a failed call a result of its own; a throw that is no refusal is a defect.
         if (isKernelError(error)) {
@@ -598,9 +931,9 @@ export function createMcpServer(
   );
 
   if (resources !== undefined) {
-    registerResourceHandlers(server, resources, resourceSession, refuseIfDropped);
+    registerResourceHandlers(server, resources, resourceSession, guardRead);
   }
-  registerPromptHandlers(server, context, refuseIfDropped);
+  registerPromptHandlers(server, context, guardRead);
 
   return server;
 }

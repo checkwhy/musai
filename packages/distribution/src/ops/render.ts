@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { type OperationDescriptor, OperationError, openWorkspace, type Workspace } from "@musai/api-core";
 import { type RecordId, splitReceiptsSection, versionString } from "@musai/records";
-import { parseAnchors } from "../anchor/markdown.js";
+import { parseAnchors, REFERENCE_PATTERN } from "../anchor/markdown.js";
 import { decidingRun, labelledClaim } from "../claim.js";
 import { CHECK_CLAIM_TYPE, claimSlotNamed, shortIdOf } from "../claim-ref.js";
 import { markdownCommand, markdownText, markOf } from "../text.js";
@@ -55,7 +55,7 @@ async function checklist(opened: Workspace, workspace: string): Promise<RenderMa
       ...(status.label !== "open" && status.decidedOnStaleEvidence ? { decidedOnStaleEvidence: true } : {}),
     };
     claims.push(rendered);
-    const run = await decidingRun(opened, labelled);
+    const run = decidingRun(labelled);
     lines.push(checklistLine(rendered, run === null ? null : run.record.recipe.command));
   }
   return {
@@ -93,7 +93,7 @@ async function markedFile(opened: Workspace, file: string): Promise<string> {
   }
   const text = new TextDecoder().decode(bytes);
   const { body } = splitReceiptsSection(text);
-  const marked = body.replace(/\[\^([^\]]+)\](?!:)/g, (reference: string, label: string) => {
+  const marked = body.replace(REFERENCE_PATTERN, (reference: string, label: string) => {
     const mark = marks.get(label);
     return mark === undefined ? reference : `${mark}${reference}`;
   });

@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
-import { IndexDb } from "@musai/fold";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { type Admission, IndexDb } from "@musai/fold";
 import type { OperationPlan } from "@musai/modules";
 import {
+  type AttestationRecord,
   type Audience,
-  type CaseRecord,
   type ClaimRecord,
   type ComputedRunRecord,
   CURRENT_SCHEMA_VERSIONS,
@@ -21,6 +22,7 @@ import {
   recipeReadKey,
   recordId,
   recordPath,
+  sidecarPath,
   slotFor,
   slotReadKey,
   TRIPLE_CLAIM_TYPE,
@@ -28,11 +30,23 @@ import {
   timestamp,
   versionString,
 } from "@musai/records";
-import { assertScopeFree, createScope, type PutItem, Store } from "@musai/store";
+import {
+  assertScopeFree,
+  createScope,
+  type PutItem,
+  readTrustBranch,
+  readTrustTip,
+  Store,
+  scopeRefName,
+  scopeVerificationCachePath,
+} from "@musai/store";
 import {
   allowedSignersLine,
   commitAroundTheStore,
+  commitFilesAroundTheStore,
+  fixtureArtifact,
   fixtureBrief,
+  fixtureCase,
   fixtureRunRecord,
   generateTestKey,
   rowsHeld,
@@ -47,7 +61,8 @@ import type { WorkspaceRefusal } from "../src/context.js";
 import { runHandler } from "../src/handler.js";
 import { openWorkspace } from "../src/open-workspace.js";
 import { perform, realisePlan } from "../src/plan.js";
-import type { Workspace } from "../src/workspace.js";
+import { releaseStanding } from "../src/release.js";
+import { clearedFold, Workspace } from "../src/workspace.js";
 import { FIXTURE_CLOCK, fixtureWorkspace, fixtureWrite, refusalOf } from "./fixture-distribution.js";
 
 const PUBLISHER = "publisher@example.test";
@@ -60,7 +75,13 @@ const opensshAvailable = spawnSync("ssh-keygen", ["-Y", "check-novalidate"], { s
 
 type Attested =
   | { readonly purpose: "sealed"; readonly from: Audience; readonly extent?: "closure" }
-  | { readonly purpose: "released"; readonly to: Audience; readonly terms?: ReleaseTerms; readonly via?: "model" }
+  | {
+      readonly purpose: "released";
+      readonly to: Audience;
+      readonly terms?: ReleaseTerms;
+      readonly via?: "model";
+      readonly supersedes?: readonly RecordId[];
+    }
   | { readonly purpose: "revoked"; readonly supersedes: readonly RecordId[] }
   | { readonly purpose: "made" };
 
@@ -83,10 +104,17 @@ function atom(): ClaimRecord {
 }
 
 let key: TestKey;
+/** A second holder of publish, whose principal names no record the publisher signed. */
+let second: TestKey;
 
 beforeAll(async () => {
   key = await generateTestKey(PUBLISHER);
+  second = await generateTestKey("second@example.test");
 }, 60_000);
+
+afterAll(async () => {
+  await rm(second.dir, { recursive: true, force: true });
+});
 
 afterAll(async () => {
   await rm(key.dir, { recursive: true, force: true });
@@ -120,7 +148,11 @@ async function clearable() {
       ...(asked.purpose === "released"
         ? { release: { audience: asked.to, extent: "record" as const, terms: asked.terms ?? TERMS } }
         : {}),
-      ...(asked.purpose === "revoked" ? { supersedes: asked.supersedes } : {}),
+      ...(asked.purpose === "revoked" || asked.purpose === "released"
+        ? asked.supersedes === undefined
+          ? {}
+          : { supersedes: asked.supersedes }
+        : {}),
     });
     const signature = await signAttestation({ attestation: minted, keyPath: key.keyPath });
     return { kind: "attestation", value: minted.record, signature };
@@ -128,6 +160,21 @@ async function clearable() {
   const attest = async (subject: RecordId, asked: Attested): Promise<RecordId> => {
     const [id] = await workspace.store().putMany([await attestation(subject, asked)]);
     return id!;
+  };
+  /** Written around the store at an attestation version later than the kernel's, signed unless
+   * its sidecar is `stripped`. */
+  const attestLater = async (subject: RecordId, asked: Attested, supersedes: readonly RecordId[], stripped = false) => {
+    const value = (await attestation(subject, asked)).value as AttestationRecord;
+    const later = { ...value, schemaVersion: CURRENT_SCHEMA_VERSIONS.attestation + 1, supersedes };
+    const bytes = canonicalBytes(later);
+    const id = rawId(bytes);
+    const signed = { id, record: later as unknown as AttestationRecord };
+    const signature = stripped ? [] : [await signAttestation({ attestation: signed, keyPath: key.keyPath })];
+    await commitFilesAroundTheStore({ ctx: { gitDir }, scope: workspace.scope, now: FIXTURE_CLOCK }, [
+      { path: recordPath("attestation", id), bytes },
+      ...signature.map((text) => ({ path: sidecarPath(id), bytes: new TextEncoder().encode(text) })),
+    ]);
+    return id;
   };
   const opened = async (clearance?: Audience, reportRefusal?: (refusal: WorkspaceRefusal) => void) => {
     const workspaceOpened = await openWorkspace({
@@ -161,12 +208,28 @@ async function clearable() {
     write,
     attestation,
     attest,
+    attestLater,
     opened,
     cleared,
     author,
     clearedPath,
     commitRaw,
   };
+}
+
+/** A commit holding `commit`'s tree beside it, as a rewrite of the trust branch makes. */
+function commitBeside(gitDir: string, commit: string): string {
+  const identity = {
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+  };
+  const made = spawnSync("git", ["--git-dir", gitDir, "commit-tree", `${commit}^{tree}`, "-m", "rewritten"], {
+    env: { ...process.env, ...identity },
+    encoding: "utf8",
+  });
+  return made.stdout.trim();
 }
 
 /** Every row a reader of the fold can reach: not its stamp, nor how far its walk has gone. */
@@ -219,6 +282,173 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
 
     await attest(ids[1]!, { purpose: "revoked", supersedes: [release] });
     expect(held(await cleared(WRITER), ...ids)).toEqual([false, false, false]);
+  });
+
+  test("a release at a later attestation version takes away a release it supersedes, and a stripped revocation at one too", async () => {
+    const { write, attest, attestLater, cleared } = await clearable();
+    const { sealed, reader, next } = lineage();
+    const ids = await write(sealed, reader, next);
+    await attest(ids[0]!, { purpose: "sealed", from: WRITER });
+    const replaced = await attest(ids[1]!, { purpose: "released", to: WRITER });
+    const revoked = await attest(ids[1]!, { purpose: "released", to: CAST });
+    await attestLater(ids[1]!, { purpose: "released", to: WRITER }, [replaced]);
+    expect(held(await cleared(WRITER), ...ids)).toEqual([false, true, true]);
+
+    await attestLater(ids[1]!, { purpose: "revoked", supersedes: [revoked] }, [revoked], true);
+    expect(held(await cleared(WRITER), ...ids)).toEqual([false, false, false]);
+  });
+
+  test("a station reads the standing of a record it holds past an attestation at a later version, stripped or signed", async () => {
+    const { write, attest, attestLater, opened } = await clearable();
+    const [record] = await write(fixtureRunRecord("released, then withdrawn"));
+    const signed = await attest(record!, { purpose: "released", to: WRITER });
+    const stripped = await attest(record!, { purpose: "released", to: CAST });
+    await attestLater(record!, { purpose: "released", to: CREW }, [signed]);
+    await attestLater(record!, { purpose: "revoked", supersedes: [stripped] }, [stripped], true);
+
+    const station = await opened(WRITER);
+    expect(station.index.withdrawingBySubject(record!)).toHaveLength(2);
+    expect((await releaseStanding(station, record!)).standing).toEqual([]);
+  });
+
+  test("an attestation at a later version over a sealed record is withheld with it, its refusal and what it fixes alike", async () => {
+    const { write, attest, attestLater, cleared, author } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("the sealed record"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const later = await attestLater(sealed!, { purpose: "released", to: CREW }, []);
+
+    const station = await cleared(WRITER);
+    expect(station.withdrawingBySubject(sealed!)).toEqual([]);
+    expect(station.refusals().map((refusal) => refusal.id)).not.toContain(later);
+    const authored = await author();
+    expect(authored.withdrawingBySubject(sealed!).map((entry) => entry.id)).toEqual([later]);
+    expect(authored.refusals().map((refusal) => refusal.id)).toContain(later);
+  });
+
+  test("a later attestation a cleared fold keeps names no record it withholds, and still withdraws the release beside one", async () => {
+    const { write, attest, attestLater, opened } = await clearable();
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const release = await attest(shown!, { purpose: "released", to: WRITER });
+    await attestLater(shown!, { purpose: "revoked", supersedes: [release] }, [release, sealed!], true);
+
+    const station = await opened(WRITER);
+    expect(station.index.attestationsBySubject(shown!).map((entry) => entry.id)).toEqual([release]);
+    expect(station.index.withdrawingBySubject(shown!).map((entry) => entry.record.supersedes)).toEqual([[release]]);
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+  });
+
+  test("a revocation a cleared fold withholds for superseding a sealed record still withdraws, there, the release beside it", async () => {
+    const { write, attest, opened } = await clearable();
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const release = await attest(shown!, { purpose: "released", to: WRITER });
+    const revocation = await attest(shown!, { purpose: "revoked", supersedes: [release, sealed!] });
+
+    const station = await opened(WRITER);
+    expect(held(station.index, revocation)).toEqual([false]);
+    expect(station.index.attestationsBySubject(shown!).map((entry) => entry.id)).toEqual([release]);
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+    expect(JSON.stringify(station.index.withdrawingBySubject(shown!))).not.toContain(sealed!);
+  });
+
+  test("a release a cleared fold withholds for superseding a sealed record still replaces there the release beside it, granting nothing", async () => {
+    const { write, attest, opened } = await clearable();
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const replaced = await attest(shown!, { purpose: "released", to: WRITER });
+    const replacing = await attest(shown!, { purpose: "released", to: WRITER, supersedes: [replaced, sealed!] });
+
+    const station = await opened(WRITER);
+    expect(held(station.index, replacing)).toEqual([false]);
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+  });
+
+  test("a release on a sealed record still replaces, at a station, the shown release of another record it supersedes", async () => {
+    const { write, attest, opened } = await clearable();
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const replaced = await attest(shown!, { purpose: "released", to: WRITER });
+    await attest(sealed!, { purpose: "released", to: CREW, supersedes: [replaced] });
+
+    const station = await opened(WRITER);
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+    expect(JSON.stringify(station.index.withdrawingSuperseding(replaced))).not.toContain(sealed!);
+  });
+
+  test("a station's store answers a withheld attestation as absent, while its withdrawal still counts", async () => {
+    const { write, attest, opened } = await clearable();
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const replaced = await attest(shown!, { purpose: "released", to: WRITER });
+    const replacing = await attest(shown!, { purpose: "released", to: WRITER, supersedes: [replaced, sealed!] });
+
+    const station = await opened(WRITER);
+    await expect(station.store.read(replacing, "attestation")).rejects.toMatchObject({ reason: "no-such-record" });
+    await expect(station.store.readBytes(replacing, "attestation")).rejects.toMatchObject({
+      reason: "no-such-record",
+    });
+    await expect(station.store.readSidecar(replacing)).rejects.toMatchObject({ reason: "no-such-record" });
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+  });
+
+  test("a station's withdrawal row on a withheld subject names no principal, time or purpose of the attestation", async () => {
+    const { gitDir, write, attest, store, opened, clearedPath } = await clearable();
+    await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n${second.principal} owner any\n`);
+    await writeTrustFile({ gitDir }, "allowed-signers", allowedSignersLine(key) + allowedSignersLine(second));
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const replaced = await attest(shown!, { purpose: "released", to: WRITER });
+    const at = "2026-03-03T03:03:03.000Z";
+    for (const purpose of ["released", "revoked"] as const) {
+      const minted = mintAttestation({
+        subject: sealed!,
+        principal: second.principal,
+        principalClass: "person",
+        via: "tty",
+        purpose,
+        at: timestamp(at),
+        supersedes: [replaced],
+        ...(purpose === "released" ? { release: { audience: CREW, extent: "record" as const, terms: TERMS } } : {}),
+      });
+      const signature = await signAttestation({ attestation: minted, keyPath: second.keyPath });
+      await store().putMany([{ kind: "attestation", value: minted.record, signature }]);
+    }
+
+    const station = await opened(WRITER);
+    expect((await releaseStanding(station, shown!)).standing).toEqual([]);
+    expect(station.index.withdrawingAttestations()).toEqual([]);
+    const seen = JSON.stringify(rowsSeen(clearedPath(WRITER)));
+    expect(seen).not.toContain(second.principal);
+    expect(seen).not.toContain(at);
+  });
+
+  test("a station's withdrawal follows a trust move that makes the attestation behind it verify", async () => {
+    const { gitDir, write, attest, store, opened } = await clearable();
+    await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n${second.principal} owner any\n`);
+    const [shown, sealed] = await write(fixtureRunRecord("shown"), fixtureRunRecord("sealed"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    // To an audience beside the clearance, so its standing moves nothing else the admission names.
+    const replaced = await attest(shown!, { purpose: "released", to: CREW });
+    const minted = mintAttestation({
+      subject: sealed!,
+      principal: second.principal,
+      principalClass: "person",
+      via: "tty",
+      purpose: "released",
+      at: timestamp("2026-03-03T03:03:03.000Z"),
+      supersedes: [replaced],
+      release: { audience: CREW, extent: "record", terms: TERMS },
+    });
+    const signature = await signAttestation({ attestation: minted, keyPath: second.keyPath });
+    await store().putMany([{ kind: "attestation", value: minted.record, signature }]);
+    expect((await releaseStanding(await opened(WRITER), shown!)).standing.map((release) => release.id)).toEqual([
+      replaced,
+    ]);
+
+    await writeTrustFile({ gitDir }, "allowed-signers", allowedSignersLine(key) + allowedSignersLine(second));
+    expect((await releaseStanding(await opened(WRITER), shown!)).standing).toEqual([]);
+    expect((await releaseStanding(await opened(), shown!)).standing).toEqual([]);
   });
 
   test("a release relayed through a model lowers no run that read a sealed record", async () => {
@@ -274,6 +504,48 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     await writeTrustFile({ gitDir }, "roles", `${key.principal} delegate any\nowner@example.test owner any\n`);
 
     expect(held(await cleared(WRITER), sealed!)).toEqual([true]);
+  });
+
+  test("a seal whose verification cannot run refuses a cleared open rather than admit what it seals", async () => {
+    const { gitDir, scope, write, attest, opened, cleared } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: what the seal withholds"));
+    const seal = await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const bin = await mkdtemp(join(tmpdir(), "musai-faulting-ssh-keygen-"));
+    onTestFinished(() => rm(bin, { recursive: true, force: true }));
+    await writeFile(join(bin, "ssh-keygen"), "#!/bin/sh\nexit 255\n");
+    await chmod(join(bin, "ssh-keygen"), 0o755);
+    vi.stubEnv("PATH", `${bin}${delimiter}${process.env["PATH"] ?? ""}`);
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+
+    await expect(opened(WRITER)).rejects.toMatchObject({ reason: "tool-unavailable", about: [seal] });
+    vi.unstubAllEnvs();
+
+    const signers = rawId(new TextEncoder().encode((await readTrustBranch({ gitDir })).allowedSigners));
+    const cachePath = scopeVerificationCachePath(gitDir, scope, signers);
+    expect(await readFile(cachePath, "utf8").catch(() => "")).not.toContain(seal);
+    expect(held(await cleared(WRITER), sealed!, seal)).toEqual([false, false]);
+  });
+
+  test("a seal whose signer's allowed-signers line ssh-keygen cannot read refuses a cleared open rather than admit what it seals", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: what an unreadable line would let through"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const unread = allowedSignersLine(key, "bogus-opt").trimEnd();
+    await writeTrustFile({ gitDir }, "allowed-signers", `${unread}\n`);
+
+    await expect(opened(WRITER)).rejects.toThrow(`line 1: ${unread}`);
+  });
+
+  test("a seal whose signer's line negates its own key form refuses a cleared open rather than admit what it seals", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: what a negated principal would let through"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const negated = `${key.name},${key.principal},!${key.principal} ${key.pubKeyLine}`;
+    await writeTrustFile({ gitDir }, "allowed-signers", `${negated}\n`);
+
+    await expect(opened(WRITER)).rejects.toThrow(`line 1: ${negated}`);
   });
 
   test("a run that landed before the record it read, which then lands sealed, is absent, cold and warm alike", async () => {
@@ -359,7 +631,7 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     const workspace = await opened();
     const station: Workspace = Object.create(workspace, { index: { value: await cleared(WRITER) } });
 
-    const fold = await station.clearedFold(WRITER, await clearanceAdmission(station, workspace.index, WRITER));
+    const fold = await clearedFold(station, WRITER, await clearanceAdmission(station, workspace.index, WRITER));
     onTestFinished(() => fold.close());
 
     expect(held(fold, sealed!)).toEqual([false]);
@@ -373,14 +645,62 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     await attest(sealed!, { purpose: "sealed", from: WRITER });
     const station = await opened(WRITER);
 
-    const fold = await judging.clearedFold(WRITER, judgedBefore);
+    const fold = await clearedFold(judging, WRITER, judgedBefore);
     onTestFinished(() => fold.close());
 
     expect([held(fold, sealed!), held(station.index, sealed!)]).toEqual([[false], [false]]);
     await expect(station.store.readBytes(sealed!, "run")).rejects.toMatchObject({ reason: "no-such-record" });
   });
 
-  test("a fold judged under trust a station's fold has moved past is refused, and the station's stays", async () => {
+  test("a fold judged under a trust the branch has since advanced past holds only what the trust at its tip admits", async () => {
+    const { gitDir, write, attest, opened, clearedPath } = await clearable();
+    await writeTrustFile({ gitDir }, "roles", "");
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const judging = await opened();
+    const judgedBefore = await clearanceAdmission(judging, judging.index, WRITER);
+    await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n`);
+    const tip = (await opened()).matrix.commit;
+
+    const fold = await clearedFold(judging, WRITER, judgedBefore);
+    onTestFinished(() => fold.close());
+
+    const [stamp] = rowsHeld(clearedPath(WRITER))["schema_meta"]!;
+    expect([held(fold, sealed!), JSON.parse(stamp!).trust]).toEqual([[false], tip]);
+  });
+
+  test("a station opened after a trust advance reads nothing it withholds, though a fold walked the file under the trust before it", async () => {
+    const { gitDir, write, attest, opened, clearedPath } = await clearable();
+    await writeTrustFile({ gitDir }, "roles", "");
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const judging = await opened();
+    const judgedBefore = await clearanceAdmission(judging, judging.index, WRITER);
+    let advanced = false;
+    // The branch advances right after the fold's last read of its tip, before the walk.
+    const advancingOnRead: Admission = {
+      ...judgedBefore,
+      trustTip: async () => {
+        const tip = await judgedBefore.trustTip();
+        if (!advanced) {
+          advanced = true;
+          await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n`);
+        }
+        return tip;
+      },
+    };
+    const walked = await clearedFold(judging, WRITER, advancingOnRead);
+    onTestFinished(() => walked.close());
+    const [walkedStamp] = rowsHeld(clearedPath(WRITER))["schema_meta"]!;
+    expect(JSON.parse(walkedStamp!).trust).toBe(judging.matrix.commit);
+
+    const station = await opened(WRITER);
+
+    const [stamp] = rowsHeld(clearedPath(WRITER))["schema_meta"]!;
+    expect([held(station.index, sealed!), JSON.parse(stamp!).trust]).toEqual([[false], station.matrix.commit]);
+  });
+
+  test("a fold judged under trust a station's fold has moved past is judged again under the trust branch as it stands", async () => {
     const { gitDir, write, attest, opened } = await clearable();
     await writeTrustFile({ gitDir }, "roles", "");
     const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
@@ -390,10 +710,269 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n`);
     const station = await opened(WRITER);
 
-    await expect(judging.clearedFold(WRITER, judgedBefore)).rejects.toMatchObject({ reason: "head-moved" });
+    const fold = await clearedFold(judging, WRITER, judgedBefore);
+    onTestFinished(() => fold.close());
+
+    expect([held(fold, sealed!), held(station.index, sealed!)]).toEqual([[false], [false]]);
+  });
+
+  test("a re-judge under a trust that widens the audience a seal hides from refolds and withholds what it hides", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    await writeTrustFile({ gitDir }, "audiences", "writer\ncast\ncrew\n");
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: CAST });
+    const judging = await opened();
+    const judgedBefore = await clearanceAdmission(judging, judging.index, WRITER);
+    await writeTrustFile({ gitDir }, "audiences", "writer\ncast\ncrew\nextras\n");
+    expect(held((await opened(WRITER)).index, sealed!)).toEqual([true]);
+    await writeTrustFile({ gitDir }, "audiences", "writer\ncast includes writer\ncrew\nextras\n");
+
+    const fold = await clearedFold(judging, WRITER, judgedBefore);
+    onTestFinished(() => fold.close());
+
+    expect(held(fold, sealed!)).toEqual([false]);
+  });
+
+  test("a re-judge under a trust that takes publish from a seal's signer refolds and holds what that trust admits", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const judging = await opened();
+    const judgedBefore = await clearanceAdmission(judging, judging.index, WRITER);
+    await writeTrustFile({ gitDir }, "audiences", "writer\ncast includes writer\ncrew\nextras\n");
+    expect(held((await opened(WRITER)).index, sealed!)).toEqual([false]);
+    await writeTrustFile({ gitDir }, "roles", `${key.principal} delegate any\nowner@example.test owner any\n`);
+
+    const fold = await clearedFold(judging, WRITER, judgedBefore);
+    onTestFinished(() => fold.close());
+
+    expect(held(fold, sealed!)).toEqual([true]);
+  });
+
+  test("a rewind that drops a seal but keeps its record is refused at open, the author's fold refusing first", async () => {
+    const { gitDir, scope, write, attest, opened, cleared } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    const unsealed = (await opened()).index.watermark()!;
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    expect(held(await cleared(WRITER), sealed!)).toEqual([false]);
+    spawnSync("git", ["--git-dir", gitDir, "update-ref", scopeRefName(scope), unsealed]);
+
+    await expect(opened(WRITER)).rejects.toMatchObject({ reason: "record-corrupted" });
+  });
+
+  test("a cleared fold over a rewound trust branch refolds and holds only what the trust it stands at admits", async () => {
+    const { gitDir, write, attest, opened, cleared } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const standing = (await opened()).matrix.commit;
+    await writeTrustFile({ gitDir }, "roles", "");
+    expect(held(await cleared(WRITER), sealed!)).toEqual([true]);
+    spawnSync("git", ["--git-dir", gitDir, "update-ref", "refs/heads/main", standing]);
+
+    expect(held(await cleared(WRITER), sealed!)).toEqual([false]);
+  });
+
+  test.each([
+    ["rewound", (_: string, standing: string) => standing],
+    ["rewritten", (gitDir: string, standing: string) => commitBeside(gitDir, standing)],
+  ])(
+    "a fold judged under a trust commit a %s trust branch left is judged at its tip and resets no file",
+    async (_, leave) => {
+      const { gitDir, write, attest, opened, cleared, clearedPath } = await clearable();
+      const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+      await attest(sealed!, { purpose: "sealed", from: WRITER });
+      const base = (await opened()).matrix.commit;
+      await writeTrustFile({ gitDir }, "roles", "");
+      const judging = await opened();
+      const judgedLooser = await clearanceAdmission(judging, judging.index, WRITER);
+      spawnSync("git", ["--git-dir", gitDir, "update-ref", "refs/heads/main", leave(gitDir, base)]);
+      const station = await cleared(WRITER);
+      const before = rowsHeld(clearedPath(WRITER));
+
+      const fold = await clearedFold(judging, WRITER, judgedLooser);
+      onTestFinished(() => fold.close());
+
+      expect([held(fold, sealed!), held(station, sealed!), rowsHeld(clearedPath(WRITER))]).toEqual([
+        [false],
+        [false],
+        before,
+      ]);
+    },
+  );
+
+  test("a running process follows a rewound trust branch on its next write", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const base = (await opened()).matrix.commit;
+    await writeTrustFile({ gitDir }, "roles", "");
+    const station = await opened(WRITER);
+    expect(held(station.index, sealed!)).toEqual([true]);
+    spawnSync("git", ["--git-dir", gitDir, "update-ref", "refs/heads/main", base]);
+
+    const [written] = await station.put([{ kind: "run", value: fixtureRunRecord("written after the rewind") }]);
+
+    expect(held(station.index, sealed!, written!)).toEqual([false, true]);
+  });
+
+  test("a running process judges each write once, at the trust branch's tip", async () => {
+    const { gitDir, dir, scope, write, attest } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const judgedAt: string[] = [];
+    const station = await Workspace.open({
+      dir,
+      scope,
+      now: FIXTURE_CLOCK,
+      clearance: {
+        audience: WRITER,
+        admission: (author) => {
+          judgedAt.push(author.matrix.commit);
+          return clearanceAdmission(author, author.index, WRITER);
+        },
+      },
+    });
+    onTestFinished(() => station.close());
+    await writeTrustFile({ gitDir }, "audiences", "writer\ncast includes writer\ncrew\nextras\n");
+    const tip = await readTrustTip({ gitDir });
+    judgedAt.length = 0;
+
+    await station.put([{ kind: "run", value: fixtureRunRecord("written after the advance") }]);
+
+    expect(judgedAt).toEqual([tip]);
+  });
+
+  /** A station whose every admission records the workspace it judged in, closing included. */
+  async function adoptingStation() {
+    const { gitDir, dir, scope, opened } = await clearable();
+    const judgedIn: Workspace[] = [];
+    const closed = new Set<Workspace>();
+    const station = await Workspace.open({
+      dir,
+      scope,
+      now: FIXTURE_CLOCK,
+      clearance: {
+        audience: WRITER,
+        admission: (author) => {
+          if (!judgedIn.includes(author)) {
+            const close = author.close.bind(author);
+            vi.spyOn(author, "close").mockImplementation(() => {
+              closed.add(author);
+              close();
+            });
+          }
+          judgedIn.push(author);
+          return clearanceAdmission(author, author.index, WRITER);
+        },
+      },
+    });
+    onTestFinished(() => station.close());
+    const base = await readTrustTip({ gitDir });
+    let written = 0;
+    const writeTimes = async (times: number) => {
+      for (let n = 0; n < times; n += 1) {
+        written += 1;
+        await station.put([{ kind: "run", value: fixtureRunRecord(`write ${written}`) }]);
+      }
+    };
+    const moveTrust = async (audiences: string) => {
+      await writeTrustFile({ gitDir }, "audiences", audiences);
+      return readTrustTip({ gitDir });
+    };
+    return { gitDir, base, station, judgedIn, closed, writeTimes, moveTrust, opened };
+  }
+
+  test("a running process adopts the trust tip once per tip, not once per write", async () => {
+    const { judgedIn, writeTimes, moveTrust } = await adoptingStation();
+    const tip = await moveTrust("writer\ncast includes writer\ncrew\nextras\n");
+    judgedIn.length = 0;
+
+    await writeTimes(10);
+
+    expect(new Set(judgedIn).size).toBe(1);
+    expect(judgedIn[0]!.matrix.commit).toBe(tip);
+  });
+
+  test("a trust move closes the workspace adopted at the old tip", async () => {
+    const { station, judgedIn, closed, writeTimes, moveTrust } = await adoptingStation();
+    await moveTrust("writer\ncast includes writer\ncrew\nextras\n");
+    await writeTimes(1);
+    const adoptedFirst = judgedIn.at(-1)!;
+    const tip = await moveTrust("writer\ncast includes writer\ncrew\nextras\nstand-ins\n");
+
+    const [written] = await station.put([{ kind: "run", value: fixtureRunRecord("written after the second move") }]);
+
+    const adoptedNext = judgedIn.at(-1)!;
+    expect([closed.has(adoptedFirst), closed.has(adoptedNext)]).toEqual([true, false]);
+    expect(adoptedNext.matrix.commit).toBe(tip);
+    expect(held(station.index, written!)).toEqual([true]);
+  });
+
+  test("a trust branch returning to the commit a process opened at closes the workspace adopted past it", async () => {
+    const { gitDir, base, station, judgedIn, closed, writeTimes, moveTrust } = await adoptingStation();
+    await moveTrust("writer\ncast includes writer\ncrew\nextras\n");
+    await writeTimes(1);
+    const adopted = judgedIn.at(-1)!;
+    spawnSync("git", ["--git-dir", gitDir, "update-ref", "refs/heads/main", base]);
+
+    const [written] = await station.put([{ kind: "run", value: fixtureRunRecord("written after the rewind") }]);
+
+    expect(closed.has(adopted)).toBe(true);
+    expect(judgedIn.at(-1)!.matrix.commit).toBe(base);
+    expect(held(station.index, written!)).toEqual([true]);
+  });
+
+  test("closing a cleared workspace closes the workspace its author adopted", async () => {
+    const { station, judgedIn, closed, writeTimes, moveTrust } = await adoptingStation();
+    await moveTrust("writer\ncast includes writer\ncrew\nextras\n");
+    await writeTimes(1);
+
+    station.close();
+
+    expect(closed.has(judgedIn.at(-1)!)).toBe(true);
+  });
+
+  test("a workspace adopted at an earlier tip adopts a later one through the workspace that adopted it", async () => {
+    const { opened, moveTrust } = await adoptingStation();
+    const author = await opened();
+    await moveTrust("writer\ncast includes writer\ncrew\nextras\n");
+    const adopted = await author.atTrustTip(WRITER);
+    const tip = await moveTrust("writer\ncast includes writer\ncrew\nextras\nstand-ins\n");
+
+    const later = await adopted.atTrustTip(WRITER);
+
+    expect(later).toBe(await author.atTrustTip(WRITER));
+    expect(later.matrix.commit).toBe(tip);
+  });
+
+  test("a cleared fold whose trust commit was pruned refolds under the trust branch as it stands", async () => {
+    const { gitDir, write, attest, opened, cleared } = await clearable();
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: WRITER });
+    const base = (await opened()).matrix.commit;
+    await writeTrustFile({ gitDir }, "roles", "");
+    (await opened(WRITER)).close();
+    spawnSync("git", ["--git-dir", gitDir, "update-ref", "refs/heads/main", commitBeside(gitDir, base)]);
+    spawnSync("git", ["--git-dir", gitDir, "reflog", "expire", "--expire=now", "--all"]);
+    spawnSync("git", ["--git-dir", gitDir, "gc", "--quiet", "--prune=now"]);
+
+    expect(held(await cleared(WRITER), sealed!)).toEqual([false]);
+  });
+
+  test("a re-judge under a trust branch that no longer declares the clearance is refused, as an open under it is", async () => {
+    const { gitDir, write, attest, opened } = await clearable();
+    await writeTrustFile({ gitDir }, "roles", "");
+    const [sealed] = await write(fixtureRunRecord("canary: the sealed record's own words"));
+    await attest(sealed!, { purpose: "sealed", from: CAST });
+    const judging = await opened();
+    const judgedBefore = await clearanceAdmission(judging, judging.index, WRITER);
+    await writeTrustFile({ gitDir }, "roles", `${key.principal} owner any\n`);
+    const station = await opened(WRITER);
+    await writeTrustFile({ gitDir }, "audiences", "cast\ncrew\n");
+
+    await expect(clearedFold(judging, WRITER, judgedBefore)).rejects.toMatchObject({ reason: "invalid-input" });
 
     expect(held(station.index, sealed!)).toEqual([false]);
-    expect(held(await opened(WRITER).then((again) => again.index), sealed!)).toEqual([false]);
   });
 
   test("two admissions judged at one position agree, whatever lands while either is judged", async () => {
@@ -408,11 +987,11 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     // A judge racing the re-seal read its position before the re-seal folded in.
     const atBefore = Object.create(late.index, { watermark: { value: () => judgedBefore.through } });
     const judgedLate = await clearanceAdmission(late, atBefore, WRITER);
-    const fold = await late.clearedFold(WRITER, judgedLate);
+    const fold = await clearedFold(late, WRITER, judgedLate);
     onTestFinished(() => fold.close());
     const heldOnceFolded = held(fold, sealed!);
 
-    const older = await judging.clearedFold(WRITER, judgedBefore);
+    const older = await clearedFold(judging, WRITER, judgedBefore);
     onTestFinished(() => older.close());
 
     expect(judgedLate.digest).toBe(judgedBefore.digest);
@@ -429,7 +1008,7 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
     const late = await opened();
     const atBefore = Object.create(late.index, { watermark: { value: () => before } });
 
-    const fold = await late.clearedFold(WRITER, await clearanceAdmission(late, atBefore, WRITER));
+    const fold = await clearedFold(late, WRITER, await clearanceAdmission(late, atBefore, WRITER));
     onTestFinished(() => fold.close());
 
     expect(held(fold, sealed!)).toEqual([false]);
@@ -529,6 +1108,316 @@ describe.skipIf(!opensshAvailable)("a cleared fold holds every record of the sco
   });
 });
 
+/** A case to seal and one beside it, each with a draft and that draft's successor. */
+async function draftedCases(world: Awaited<ReturnType<typeof clearable>>) {
+  const [sealedCase, openCase] = await world.store().putMany([
+    { kind: "case", value: fixtureCase("sealed-with-its-drafts") },
+    { kind: "case", value: fixtureCase("open-with-its-drafts") },
+  ]);
+  const [sealedDraft, openDraft] = await world.store().putMany([
+    { kind: "artifact", value: fixtureArtifact(sealedCase!, "the sealed case's first draft") },
+    { kind: "artifact", value: fixtureArtifact(openCase!, "the open case's first draft") },
+  ]);
+  const [sealedNext, openNext] = await world.store().putMany([
+    { kind: "artifact", value: fixtureArtifact(sealedCase!, "the sealed case's next draft", [sealedDraft!]) },
+    { kind: "artifact", value: fixtureArtifact(openCase!, "the open case's next draft", [openDraft!]) },
+  ]);
+  return {
+    sealed: [sealedCase!, sealedDraft!, sealedNext!],
+    open: [openCase!, openDraft!, openNext!],
+  };
+}
+
+function draftsListed(index: IndexDb, caseId: RecordId): RecordId[] {
+  return index.artifactsOfCase(caseId).map(({ id }) => id);
+}
+
+describe.skipIf(!opensshAvailable)("a record is sealed with the case it names", () => {
+  test("a station cleared below a case's seal holds none of its drafts, by id or listed, and keeps an open case's", async () => {
+    const world = await clearable();
+    const { sealed, open } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: CAST });
+
+    const station = await world.cleared(WRITER);
+    expect(held(station, ...sealed)).toEqual([false, false, false]);
+    expect(draftsListed(station, sealed[0]!)).toEqual([]);
+    expect(held(station, ...open)).toEqual([true, true, true]);
+    expect(draftsListed(station, open[0]!)).toEqual([...open.slice(1)].sort());
+    const author = await world.author();
+    expect(held(author, ...sealed, ...open)).toEqual([true, true, true, true, true, true]);
+    expect(draftsListed(author, sealed[0]!)).toEqual([...sealed.slice(1)].sort());
+    expect(held(await world.cleared(CREW), ...sealed)).toEqual([true, true, true]);
+  });
+
+  test("a draft landed before its case's seal is withheld once the seal lands, cold and warm alike", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([true, true, true]);
+
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, false]);
+    const warm = rowsHeld(world.clearedPath(WRITER));
+    await rm(world.clearedPath(WRITER));
+    await world.cleared(WRITER);
+    expect(rowsHeld(world.clearedPath(WRITER))).toEqual(warm);
+  });
+
+  test("a successor released to a station lists none of the drafts of the sealed case it supersedes", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    const [successor] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("sealed-with-its-drafts", [], { supersedes: [sealed[0]!] }) }]);
+    await world.attest(successor!, { purpose: "released", to: WRITER });
+    const [successorDraft] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(successor!, "the successor's own draft") }]);
+
+    const station = await world.cleared(WRITER);
+    expect(held(station, successor!, successorDraft!, ...sealed)).toEqual([true, true, false, false, false]);
+    expect(draftsListed(station, successor!)).toEqual([successorDraft]);
+    expect(draftsListed(await world.author(), successor!)).toEqual([successorDraft!, ...sealed.slice(1)].sort());
+  });
+
+  test("a closure seal over one draft hides its case, and with it every other draft under the case", async () => {
+    const world = await clearable();
+    const { sealed, open } = await draftedCases(world);
+    const [beside] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(sealed[0]!, "a draft beside the others") }]);
+    await world.attest(beside!, { purpose: "sealed", from: WRITER, extent: "closure" });
+
+    expect(held(await world.cleared(WRITER), beside!, ...sealed, ...open)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  test("a release over the last draft of a sealed case brings it back, and revoking the release takes it away again", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, false]);
+
+    const release = await world.attest(sealed[2]!, { purpose: "released", to: WRITER });
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, true]);
+
+    await world.attest(sealed[2]!, { purpose: "revoked", supersedes: [release] });
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, false]);
+  });
+
+  test.each([
+    ["a retraction", "retracted"],
+    ["a redraft", "drafted"],
+  ] as const)(
+    "%s of a released draft of a sealed case withholds the draft from the station, cold and warm alike",
+    async (_, lifecycle) => {
+      const world = await clearable();
+      const { sealed } = await draftedCases(world);
+      await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+      await world.attest(sealed[2]!, { purpose: "released", to: WRITER });
+      expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, true]);
+
+      const replacing = { ...fixtureArtifact(sealed[0]!, "replacing the released draft", [sealed[2]!]), lifecycle };
+      const [replacingId] = await world.store().putMany([{ kind: "artifact", value: replacing }]);
+
+      expect(held(await world.cleared(WRITER), replacingId!, ...sealed)).toEqual([false, false, false, false]);
+      expect(held(await world.author(), replacingId!, ...sealed)).toEqual([true, true, true, true]);
+      const warm = rowsHeld(world.clearedPath(WRITER));
+      await rm(world.clearedPath(WRITER));
+      await world.cleared(WRITER);
+      expect(rowsHeld(world.clearedPath(WRITER))).toEqual(warm);
+    },
+  );
+
+  test("a release over a draft a successor withheld for its case already replaced brings nothing back", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+
+    await world.attest(sealed[1]!, { purpose: "released", to: WRITER });
+
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, false, false]);
+  });
+
+  test("a released draft goes once a draft under a case withheld for the sealed case it replaces replaces it", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    await world.attest(sealed[2]!, { purpose: "released", to: WRITER });
+    const [successor] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("sealed-with-its-drafts", [], { supersedes: [sealed[0]!] }) }]);
+
+    const [replacing] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(successor!, "the successor's redraft", [sealed[2]!]) }]);
+
+    expect(held(await world.cleared(WRITER), successor!, replacing!, sealed[2]!)).toEqual([false, false, false]);
+  });
+
+  test("a released draft stays where its successor's case is a released successor of the sealed case", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    await world.attest(sealed[2]!, { purpose: "released", to: WRITER });
+    const [successor] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("sealed-with-its-drafts", [], { supersedes: [sealed[0]!] }) }]);
+    await world.attest(successor!, { purpose: "released", to: WRITER });
+
+    const [replacing] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(successor!, "the successor's redraft", [sealed[2]!]) }]);
+
+    const station = await world.cleared(WRITER);
+    expect(held(station, successor!, replacing!, sealed[2]!)).toEqual([true, true, true]);
+    expect(station.successorsOf(sealed[2]!).map(({ successor: next }) => next)).toEqual([replacing]);
+  });
+
+  test("a draft a retired draft replaced goes with it, so nothing it replaced reads live in its place", async () => {
+    const world = await clearable();
+    const { open } = await draftedCases(world);
+    await world.attest(open[2]!, { purpose: "released", to: WRITER });
+    const [successor] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("open-with-its-drafts", [], { supersedes: [open[0]!] }) }]);
+    await world.attest(successor!, { purpose: "sealed", from: WRITER });
+    const before = await world.cleared(WRITER);
+    expect(before.successorsOf(open[1]!).map(({ successor: next }) => next)).toEqual([open[2]]);
+
+    await world
+      .store()
+      .putMany([
+        { kind: "artifact", value: fixtureArtifact(successor!, "redrafted under the sealed successor", [open[2]!]) },
+      ]);
+
+    const station = await world.cleared(WRITER);
+    expect(held(station, ...open)).toEqual([true, false, false]);
+    expect(draftsListed(station, open[0]!)).toEqual([]);
+    expect(held(await world.author(), ...open)).toEqual([true, true, true]);
+  });
+
+  test("released drafts of a sealed case stay while released successors replace them, and go once one is not", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    for (const draft of sealed.slice(1)) {
+      await world.attest(draft, { purpose: "released", to: WRITER });
+    }
+    expect(held(await world.cleared(WRITER), ...sealed)).toEqual([false, true, true]);
+
+    const [last] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(sealed[0]!, "the unreleased last draft", [sealed[2]!]) }]);
+
+    expect(held(await world.cleared(WRITER), last!, ...sealed)).toEqual([false, false, false, false]);
+  });
+
+  test("a release over a case withheld for the sealed case it replaces brings its drafts back", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    const [successor] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("sealed-with-its-drafts", [], { supersedes: [sealed[0]!] }) }]);
+    const [draft] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(successor!, "a draft of the successor") }]);
+    expect(held(await world.cleared(WRITER), successor!, draft!)).toEqual([false, false]);
+
+    await world.attest(successor!, { purpose: "released", to: WRITER });
+
+    expect(held(await world.cleared(WRITER), successor!, draft!)).toEqual([true, true]);
+  });
+
+  test("a case and its draft landing in one commit are judged together, cold and warm alike", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    await world.cleared(WRITER);
+    const successor = fixtureCase("sealed-with-its-drafts", [], { supersedes: [sealed[0]!] });
+    const [successorId, draft] = await world.store().putMany([
+      { kind: "case", value: successor },
+      { kind: "artifact", value: fixtureArtifact(recordId(successor), "a draft landing with its case") },
+    ]);
+
+    expect(held(await world.cleared(WRITER), successorId!, draft!)).toEqual([false, false]);
+    const warm = rowsHeld(world.clearedPath(WRITER));
+    await rm(world.clearedPath(WRITER));
+    await world.cleared(WRITER);
+    expect(rowsHeld(world.clearedPath(WRITER))).toEqual(warm);
+  });
+
+  test("a closure seal over a successor's draft reaches the cases it replaces, a station's own booking among them", async () => {
+    const world = await clearable();
+    const [authors] = await world.store().putMany([{ kind: "case", value: fixtureCase("booked-twice") }]);
+    const station = await world.opened(WRITER);
+    const [stations] = await station.put([{ kind: "case", value: fixtureCase("booked-twice"), salt: true }]);
+    const [stationsDraft] = await station.put([
+      { kind: "artifact", value: fixtureArtifact(stations!, "the station's draft under its booking") },
+    ]);
+    const kept = fixtureCase("booked-twice", [], { supersedes: [authors!, stations!] });
+    const [keptId] = await world.store().putMany([{ kind: "case", value: kept }]);
+    const [keptDraft] = await world
+      .store()
+      .putMany([{ kind: "artifact", value: fixtureArtifact(keptId!, "the kept case's draft") }]);
+    expect(held(await world.cleared(WRITER), keptId!, keptDraft!, stations!, stationsDraft!)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+
+    await world.attest(keptDraft!, { purpose: "sealed", from: WRITER, extent: "closure" });
+
+    expect(held(await world.cleared(WRITER), keptId!, keptDraft!, authors!, stations!, stationsDraft!)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  test("a station's own draft under its own booking of a slug sealed from it stays visible to it", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+    const station = await world.opened(WRITER);
+    const [booked] = await station.put([{ kind: "case", value: fixtureCase("sealed-with-its-drafts"), salt: true }]);
+    const [drafted] = await station.put([
+      { kind: "artifact", value: fixtureArtifact(booked!, "the station's own draft") },
+    ]);
+
+    expect(held(station.index, booked!, drafted!, ...sealed)).toEqual([true, true, false, false, false]);
+    expect(draftsListed(station.index, booked!)).toEqual([drafted]);
+    expect(held(await world.cleared(WRITER), booked!, drafted!)).toEqual([true, true]);
+  });
+
+  test("a station's own draft under a case sealed from it after is withheld from it, as the author's are", async () => {
+    const world = await clearable();
+    const { sealed } = await draftedCases(world);
+    const station = await world.opened(WRITER);
+    const [drafted] = await station.put([
+      { kind: "artifact", value: fixtureArtifact(sealed[0]!, "the station's draft of the author's case") },
+    ]);
+    expect(station.index.holds(drafted!)).toBe(true);
+
+    await world.attest(sealed[0]!, { purpose: "sealed", from: WRITER });
+
+    expect(held(await world.cleared(WRITER), drafted!, ...sealed)).toEqual([false, false, false, false]);
+    expect(held(await world.author(), drafted!)).toEqual([true]);
+  });
+});
+
 /** A run, a restatement citing it, and a run that read the first. */
 function cited(): { readonly first: RunRecord; readonly restated: RunRecord; readonly reader: RunRecord } {
   const first = fixtureRunRecord("cited by the restatement");
@@ -595,7 +1484,7 @@ describe.skipIf(!opensshAvailable)("a seal names its extent: its record alone, o
     const atBefore = Object.create(late.index, { watermark: { value: () => judgedBefore.through } });
 
     const judgedLate = await clearanceAdmission(late, atBefore, WRITER);
-    const fold = await late.clearedFold(WRITER, judgedLate);
+    const fold = await clearedFold(late, WRITER, judgedLate);
     onTestFinished(() => fold.close());
 
     expect(judgedLate.digest).toBe(judgedBefore.digest);
@@ -826,6 +1715,26 @@ describe.skipIf(!opensshAvailable)("a closure seal over a check a module's rule 
     expect(held(await cleared(WRITER), check, recordId(receipt))).toEqual([false, false]);
   });
 
+  test("withholds what an evaluation of the sealed claim reads, and nothing an evaluation of another claim at its slot reads", async () => {
+    const other: ClaimRecord = { ...ruleCheck(), conditions: { ...ruleCheck().conditions, [MODULE_RULE]: "[]" } };
+    const byOther = runOf("read-by-other", "read by the other claim's evaluation");
+    const bySealed = runOf("read-by-sealed", "read by the sealed claim's evaluation");
+    const { check, write, cleared } = await sealedRuleCheck((sealed) => [
+      byOther,
+      evaluationOf(recordId(other), byOther),
+      bySealed,
+      evaluationOf(sealed, bySealed),
+    ]);
+    const [otherAgain, sealedAgain] = [runOf("read-by-other", "landed later"), runOf("read-by-sealed", "landed later")];
+    await write(otherAgain, sealedAgain, evaluationElsewhere(check, otherAgain, sealedAgain));
+
+    const seen = held(
+      await cleared(WRITER),
+      ...[byOther, otherAgain, bySealed, sealedAgain].map((run) => recordId(run)),
+    );
+    expect(seen).toEqual([true, true, false, false]);
+  });
+
   test("leaves a station's rows byte-identical, and every receipt it held, when an evaluation it cannot see lands", async () => {
     const receipt = runOf("held", "held by the station");
     const { check, write, cleared, clearedPath } = await sealedRuleCheck(() => [receipt]);
@@ -879,19 +1788,9 @@ describe.skipIf(!opensshAvailable)("a closure seal over a check a module's rule 
     const read = runOf("read-earlier", "read by an evaluation of the earlier claim");
     await world.write(read, evaluationOf(earlierId!, read));
     const late = recordId(ruleCheck());
-    const citing: CaseRecord = {
-      kind: "case",
-      supersedes: [],
-      schemaVersion: CURRENT_SCHEMA_VERSIONS.case,
-      type: null,
-      slug: "cites-a-claim-yet-to-land",
-      claims: [late],
-      preset: { module: "musai.core", contribution: "musai.core/bare", moduleRecord: recordId({ marker: "bare" }) },
-      projectCommit: "0".repeat(40),
-      overrides: {},
-      evaluatorVersion: versionString("1"),
-    };
-    const [caseId] = await world.store().putMany([{ kind: "case", value: citing }]);
+    const [caseId] = await world
+      .store()
+      .putMany([{ kind: "case", value: fixtureCase("cites-a-claim-yet-to-land", [late]) }]);
     await world.attest(caseId!, { purpose: "sealed", from: WRITER, extent: "closure" });
     const [apart] = await world.write(runOf("apart", "landed apart before the claim"));
     expect(held(await world.cleared(WRITER), recordId(read), apart!)).toEqual([true, true]);

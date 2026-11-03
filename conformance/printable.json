@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "name": "plain text and letters beyond ASCII",
+      "text": "plain text \u00b7 with \u00e9 and \u4e2d",
+      "printed": "plain text \u00b7 with \u00e9 and \u4e2d"
+    },
+    {
+      "name": "an escape sequence",
+      "text": "a\u001b[2Kb",
+      "printed": "a\\u001b[2Kb"
+    },
+    {
+      "name": "a return, a line feed and a tab",
+      "text": "line\rover\nnext\ttab",
+      "printed": "line\\u000dover\\u000anext\\u0009tab"
+    },
+    {
+      "name": "delete and a C1 control",
+      "text": "del\u007f and c1\u0085 csi\u009b",
+      "printed": "del\\u007f and c1\\u0085 csi\\u009b"
+    },
+    {
+      "name": "the line and paragraph separators",
+      "text": "ls\u2028 ps\u2029",
+      "printed": "ls\\u2028 ps\\u2029"
+    },
+    {
+      "name": "every bidirectional formatting character",
+      "text": "alm\u061c lrm\u200e rlm\u200f lre\u202a rle\u202b pdf\u202c lro\u202d rlo\u202e lri\u2066 rli\u2067 fsi\u2068 pdi\u2069",
+      "printed": "alm\\u061c lrm\\u200e rlm\\u200f lre\\u202a rle\\u202b pdf\\u202c lro\\u202d rlo\\u202e lri\\u2066 rli\\u2067 fsi\\u2068 pdi\\u2069"
+    },
+    {
+      "name": "the characters beside those escaped, and a backslash",
+      "text": "zwj\u200d nnbsp\u202f \u2065 \u206a nbsp\u00a0 space  \\u0041",
+      "printed": "zwj\u200d nnbsp\u202f \u2065 \u206a nbsp\u00a0 space  \\u0041"
+    },
+    {
+      "name": "a character beyond the BMP",
+      "text": "grin \ud83d\ude00",
+      "printed": "grin \ud83d\ude00"
+    }
+  ]
+}

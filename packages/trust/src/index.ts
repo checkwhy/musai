@@ -36,6 +36,7 @@ export {
 export { isRole, parseRoles, ROLES, type Role, type RoleGrant } from "./roles.js";
 export { SIGNATURE_NAMESPACE, type SignAttestationInput, signAttestation } from "./sign.js";
 export {
+  heldKeyPrincipals,
   keyPrincipalAt,
   publicKeyBeside,
   type ResolvedSigningKey,
@@ -47,8 +48,11 @@ export {
   signerFilePath,
   writeSignerConfig,
 } from "./signing-key.js";
+export { trustFileFaults } from "./trust-file-faults.js";
 export { AttestationVerificationCache } from "./verification-cache.js";
 export {
+  type SignedAttestation,
+  sshSigningFault,
   type VerifyAttestationInput,
   type VerifyFailureReason,
   type VerifyResult,

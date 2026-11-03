@@ -1,5 +1,6 @@
 import { rmSync } from "node:fs";
 import { dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type {
   ArgumentRecord,
   ArtifactRecord,
@@ -9,6 +10,7 @@ import type {
   ContributionEntry,
   DigestSet,
   DimensionRegistry,
+  FixedAttestation,
   ModuleRecord,
   MusaiRecord,
   RecordKind,
@@ -28,6 +30,7 @@ import {
   type ReadEntry,
   type RecordId,
   RecordRefusedError,
+  readLaterAttestation,
   readStoredRecord,
   recipeOfReadKey,
   type Selector,
@@ -76,14 +79,15 @@ import type {
   IndexedRuling,
   IndexedRulingOnSlot,
   IndexedSuccessor,
+  IndexedWithdrawing,
   QueryDeclaration,
   RefusedRecordPath,
 } from "./rows.js";
 import { KERNEL_INDEX_TABLES } from "./schema.js";
-import { type IndexConnection, type IndexProvider, openIndexProvider } from "./sqlite-provider.js";
+import { type IndexConnection, type IndexProvider, isNotADatabase, openIndexProvider } from "./sqlite-provider.js";
 
 /** A stored index at another version is rebuilt from the records, never migrated. */
-export const INDEX_SCHEMA_VERSION = 23;
+export const INDEX_SCHEMA_VERSION = 28;
 
 /** Which records a fold holds; one built under another digest is refolded from nothing, and one
  * built under any is never folded without it. */
@@ -94,11 +98,17 @@ export interface Admission {
   readonly through: string | null;
   /** The trust branch's commit the rule's standing was judged under. */
   readonly trust: string;
+  /** The trust branch's tip as it now stands, which a fold places both trust commits against. */
+  readonly trustTip: () => Promise<string>;
   /** `admitted` answers for every record landed before this one, and beside it in its commit. A
    * rule admits no less as more is admitted, and asks about a record beside it only through it. */
   readonly admits: (record: IndexedRecordInput, admitted: (id: RecordId) => boolean) => boolean;
   /** Whether a path refused at `commit` names a record this fold withholds. */
   readonly withholds: (id: RecordId, commit: string, admitted: (id: RecordId) => boolean) => boolean;
+  /** Whether an attestation the fold keeps only to withdraw verified where its bytes are read. */
+  readonly verifies: (id: RecordId) => boolean;
+  /** Whether a release replaces what it supersedes, judged where its bytes and trust are read. */
+  readonly replaces: (id: RecordId) => boolean;
   /** The rule judged afresh against what it was judged against, as that now stands. */
   readonly judgedAgain: () => Promise<Admission>;
 }
@@ -114,22 +124,66 @@ function sameStamp(a: Stamp, b: Stamp): boolean {
   return a.digest === b.digest && a.through === b.through && a.trust === b.trust;
 }
 
-/** Whether `stamped` lies past `judged` along a history that only grows. */
-async function liesPast(store: RecordStore, stamped: string | null, judged: string | null): Promise<boolean> {
-  return stamped !== null && stamped !== judged && (judged === null || (await store.descends(judged, stamped)));
+function stampOf(admission: Admission): Stamp {
+  return { digest: admission.digest, through: admission.through, trust: admission.trust };
 }
 
-/** Whether `stamp` was judged past `admission`, on the scope's log or on the trust branch. */
-async function stampPasses(store: RecordStore, stamp: Stamp, admission: Admission): Promise<boolean> {
-  return (
-    (await liesPast(store, stamp.through, admission.through)) || (await liesPast(store, stamp.trust, admission.trust))
-  );
+/** Whether a rewind, a rewrite or a prune took `trust` off the trust branch ending at `tip`. */
+async function leftTrust(store: RecordStore, trust: string, tip: string): Promise<boolean> {
+  return trust !== tip && !(await store.descends(trust, tip));
+}
+
+/** Where a stamp's position lies against a judgement's: on its history, or on another one. */
+type Placing = "at" | "behind" | "past" | "apart";
+
+async function placing(store: RecordStore, stamped: string | null, judged: string | null): Promise<Placing> {
+  if (stamped === judged) {
+    return "at";
+  }
+  if (stamped === null) {
+    return "behind";
+  }
+  if (judged === null) {
+    return "past";
+  }
+  if (await store.descends(stamped, judged)) {
+    return "behind";
+  }
+  if (!(await store.holdsCommit(stamped))) {
+    return "apart";
+  }
+  return (await store.descends(judged, stamped)) ? "past" : "apart";
 }
 
 /** What a commit leaves in a fold: the records it admits and the refusals it keeps. */
 interface Judged {
   readonly added: readonly FoldedRecord[];
   readonly refused: readonly RefusedRecordPath[];
+  readonly withdrawing: readonly IndexedWithdrawing[];
+  readonly replaced: readonly RecordId[];
+}
+
+/** What every version fixes of each later attestation among the refused paths, verified on read. */
+function laterAmong(refused: readonly RefusedRecordPath[]): IndexedWithdrawing[] {
+  return refused.flatMap(({ id, later }) =>
+    id === null || later === null ? [] : [{ id, record: later, verified: null }],
+  );
+}
+
+/** What every version fixes, of an attestation held whole. */
+function fixedOf(record: AttestationRecord): FixedAttestation {
+  const { schemaVersion, subject, principal, via, purpose, at, supersedes } = record;
+  return { schemaVersion, subject, principal, via, purpose, at, supersedes };
+}
+
+function withdrawingRows(rows: readonly { id: string; record_json: string; verified: number | null }[]) {
+  return rows.map(
+    (row): IndexedWithdrawing => ({
+      id: row.id as RecordId,
+      record: JSON.parse(row.record_json) as FixedAttestation,
+      verified: row.verified === null ? null : row.verified === 1,
+    }),
+  );
 }
 
 /** Where a record landed in the log: its commit's place. */
@@ -153,8 +207,6 @@ function landAfterFailure(db: IndexConnection): void {
   }
 }
 
-/** A group and no group are not ambiguous: silence never outranks a declared menu. */
-
 const ID_PREFIX = "sha256:";
 const RECORD_FILE_HEX = /\/([0-9a-f]{64})\.json$/;
 
@@ -166,17 +218,24 @@ function inWrittenOrder<T extends { readonly path: string }>(paths: readonly T[]
   return [...paths].sort((a, b) => rankOf(a) - rankOf(b) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-export class AmbiguousExclusiveGroupError extends KernelError {
-  constructor(slot: string, groups: readonly string[]) {
-    super({
-      reason: "declaration-conflict",
-      detail:
-        `refusing to resolve a representative claim at slot ${slot}: its contributors declare ` +
-        `different exclusive groups (${groups.join(", ")}), and nothing names which one governs`,
-      about: [slot, ...groups],
-    });
-    this.name = "AmbiguousExclusiveGroupError";
-  }
+function groupOf(contributor: IndexedClaim): string | null {
+  return (contributor.record as ClaimRecord).exclusiveGroup;
+}
+
+/** Silence never outranks a declared menu, so one group's members alone govern the slot; where
+ * contributors name different groups, every one governs it. */
+function governingOf(contributors: readonly IndexedClaim[]): IndexedClaim[] {
+  const groups = new Set(contributors.map(groupOf).filter((group) => group !== null));
+  const [group] = groups;
+  return groups.size === 1 ? contributors.filter((contributor) => groupOf(contributor) === group) : [...contributors];
+}
+
+function judgedApart(contributors: readonly IndexedClaim[]): boolean {
+  const [first, ...rest] = contributors.map(({ record }) => {
+    const { conditions, exclusiveGroup } = record as ClaimRecord;
+    return { conditions, exclusiveGroup };
+  });
+  return rest.some((judge) => !isDeepStrictEqual(judge, first));
 }
 
 /** A superseded rule record is not live, so a correction is never this conflict. */
@@ -193,74 +252,95 @@ export class RuleRecordConflictError extends KernelError {
   }
 }
 
+/** `undefined` where no stamp can be read, which the schema's reset answers. */
+function schemaVersionOf(db: IndexConnection): number | undefined {
+  try {
+    const stamped = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'").get();
+    return stamped === undefined
+      ? undefined
+      : (db.prepare("SELECT version FROM schema_meta WHERE id = 0").get() as { version: number } | undefined)?.version;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every table goes, a contribution's with the kernel's, so no row outlives the admission it was
+ * folded under; a contributed table is rebuilt by the fold that reconciles it. */
+function resetSchema(db: IndexConnection, admission?: Admission): void {
+  const held = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) != 'sqlite_'")
+    .all() as Array<{ name: string }>;
+  for (const table of new Set([...KERNEL_INDEX_TABLES.keys(), ...held.map(({ name }) => name)])) {
+    // Read from the file, not rendered by the kernel, so it is quoted whatever it holds.
+    db.exec(`DROP TABLE IF EXISTS "${table.replaceAll('"', '""')}";`);
+  }
+  for (const statements of KERNEL_INDEX_TABLES.values()) {
+    for (const statement of statements) {
+      db.exec(statement);
+    }
+  }
+  db.prepare("INSERT INTO schema_meta (id, version, admission, through, trust) VALUES (0, ?, ?, ?, ?)").run(
+    INDEX_SCHEMA_VERSION,
+    admission?.digest ?? null,
+    admission?.through ?? null,
+    admission?.trust ?? null,
+  );
+  db.prepare("INSERT INTO watermark (id, commit_sha) VALUES (0, NULL)").run();
+  db.prepare("INSERT INTO walked (id, commit_sha) VALUES (0, NULL)").run();
+}
+
 /** A disposable fold over one scope's records, rebuilt from git rather than migrated. */
 export class IndexDb {
   private db: IndexConnection;
   private reader: IndexConnection | undefined;
   private readonly provider: IndexProvider;
   private readonly location: string;
+  private closed = false;
 
   constructor(location: string = ":memory:") {
     this.location = location;
     this.provider = openIndexProvider();
-    this.db = this.openDatabase();
-    this.ensureSchema();
-  }
-
-  private openDatabase(): IndexConnection {
     try {
-      return this.provider.open(this.location);
-    } catch {
-      // A file that is not a SQLite database is rebuilt, as a schema-version mismatch is.
-      if (this.location !== ":memory:") {
-        rmSync(this.location, { force: true });
+      this.db = this.openAtCurrentSchema();
+    } catch (error) {
+      if (location === ":memory:" || !isNotADatabase(error)) {
+        throw error;
       }
-      return this.provider.open(this.location);
+      // A fold is disposable, so a file that is not a SQLite database is removed and folded anew.
+      rmSync(location, { force: true });
+      this.db = this.openAtCurrentSchema();
     }
   }
 
-  private ensureSchema(): void {
-    let versionRow: { version: number } | undefined;
+  private openAtCurrentSchema(): IndexConnection {
+    const db = this.provider.open(this.location);
     try {
-      const tableExists = this.db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'")
-        .get();
-      versionRow = tableExists
-        ? (this.db.prepare("SELECT version FROM schema_meta WHERE id = 0").get() as { version: number } | undefined)
-        : undefined;
-    } catch {
-      versionRow = undefined;
-    }
-    if (versionRow !== undefined && versionRow.version === INDEX_SCHEMA_VERSION) {
-      return;
-    }
-    this.resetSchema();
-  }
-
-  /** Empties the index to the current schema with no watermark; the next fold refills it. */
-  rebuild(): void {
-    this.resetSchema();
-  }
-
-  private resetSchema(admission?: Admission): void {
-    for (const table of KERNEL_INDEX_TABLES.keys()) {
-      this.db.exec(`DROP TABLE IF EXISTS ${table};`);
-    }
-    for (const statements of KERNEL_INDEX_TABLES.values()) {
-      for (const statement of statements) {
-        this.db.exec(statement);
+      if (schemaVersionOf(db) !== INDEX_SCHEMA_VERSION) {
+        resetSchema(db);
+        // A page freed before secure_delete held keeps its bytes until a vacuum rewrites the file.
+        db.exec("VACUUM");
       }
+      return db;
+    } catch (error) {
+      db.close();
+      throw error;
     }
-    this.db
-      .prepare("INSERT INTO schema_meta (id, version, admission, through, trust) VALUES (0, ?, ?, ?, ?)")
-      .run(INDEX_SCHEMA_VERSION, admission?.digest ?? null, admission?.through ?? null, admission?.trust ?? null);
-    this.db.prepare("INSERT INTO watermark (id, commit_sha) VALUES (0, NULL)").run();
-    this.db.prepare("INSERT INTO walked (id, commit_sha) VALUES (0, NULL)").run();
   }
 
   close(): void {
-    this.reader?.close();
-    this.db.close();
+    if (this.closed) {
+      return;
+    }
+    try {
+      this.reader?.close();
+    } finally {
+      this.db.close();
+      this.closed = true;
+    }
+  }
+
+  [Symbol.dispose](): void {
+    this.close();
   }
 
   /** `scratch` is this engine but not this file, so a declaration cannot reach the fold. */
@@ -275,6 +355,9 @@ export class IndexDb {
   /** Runs on a read-only connection, so a write fails at the engine; an omitted parameter binds
    * `NULL`. A surface passing a caller's values through validates them against the schema first. */
   runQuery(declaration: QueryDeclaration, parameters: Record<string, unknown>): unknown[] {
+    if (this.closed) {
+      throw new Error(`the index at ${this.location} is closed, so it answers no query`);
+    }
     this.reader ??= this.provider.openReadOnly(this.location);
     const bound = Object.fromEntries(
       Object.keys(declaration.parameters).map((name) => [name, parameters[name] ?? null]),
@@ -337,6 +420,19 @@ export class IndexDb {
     );
   }
 
+  /** Whether `id` is a later version's attestation refused in `commit` or in a commit before it. */
+  laterLandedBy(id: RecordId, commit: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM withdrawing_attestations JOIN refusals ON refusals.id = withdrawing_attestations.id " +
+            "JOIN commits ON commits.sha = refusals.commit_sha " +
+            "WHERE withdrawing_attestations.id = ? AND commits.seq <= (SELECT seq FROM commits WHERE sha = ?)",
+        )
+        .get(id, commit) !== undefined
+    );
+  }
+
   /** The commit `id` landed in, or `undefined` where this fold holds no such record. */
   commitOf(id: RecordId): string | undefined {
     const row = this.db.prepare("SELECT commit_sha FROM records WHERE id = ?").get(id) as
@@ -356,10 +452,30 @@ export class IndexDb {
     return { id, record: JSON.parse(row.record_json) as MusaiRecord };
   }
 
-  /** Of two refusals claiming one id, the first by commit then path answers. */
+  /** Every record the fold holds whose id begins with `hex`, by id. */
+  recordsWithHexPrefix(hex: string): IndexedRecord[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json FROM records WHERE id LIKE ? ORDER BY id ASC")
+      .all(`sha256:${hex}%`) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as MusaiRecord }));
+  }
+
+  /** Every id a refusal names that begins with `hex`, by id. */
+  refusedIdsWithHexPrefix(hex: string): RecordId[] {
+    const rows = this.db
+      .prepare("SELECT DISTINCT id FROM refusals WHERE id LIKE ? ORDER BY id ASC")
+      .all(`sha256:${hex}%`) as Array<{ id: string }>;
+    return rows.map((row) => row.id as RecordId);
+  }
+
+  /** Of two refusals claiming one id, the first in the log answers, then by path. */
   refusalFor(id: RecordId): IndexedRefusal | undefined {
     const row = this.db
-      .prepare("SELECT commit_sha, path, reason FROM refusals WHERE id = ? ORDER BY commit_sha ASC, path ASC LIMIT 1")
+      .prepare(
+        "SELECT refusals.commit_sha AS commit_sha, refusals.path AS path, refusals.reason AS reason FROM refusals " +
+          "JOIN commits ON commits.sha = refusals.commit_sha WHERE refusals.id = ? " +
+          "ORDER BY commits.seq ASC, refusals.path ASC LIMIT 1",
+      )
       .get(id) as { commit_sha: string; path: string; reason: string } | undefined;
     if (row === undefined) {
       return undefined;
@@ -404,26 +520,32 @@ export class IndexDb {
     return rows.map((row) => row.slot);
   }
 
-  /** The contributor whose exclusive group governs the slot, else the lowest id; a declared group
-   * outranks none, and two different groups throw. */
+  /** The lowest id of the contributors governing the slot, an order every clone folds alike. */
   claimAtSlot(slot: string): IndexedClaim | undefined {
-    const contributors = this.contributorsAtSlot(slot);
-    if (contributors.length === 0) {
-      return undefined;
-    }
-    const groups = new Set(
-      contributors
-        .map((contributor) => (contributor.record as ClaimRecord).exclusiveGroup)
-        .filter((group): group is string => group !== null),
-    );
-    if (groups.size > 1) {
-      throw new AmbiguousExclusiveGroupError(slot, [...groups].sort());
-    }
-    if (groups.size === 0) {
-      return contributors[0];
-    }
-    const governingGroup = [...groups][0]!;
-    return contributors.find((contributor) => (contributor.record as ClaimRecord).exclusiveGroup === governingGroup);
+    return this.governingAtSlot(slot)[0];
+  }
+
+  /** The contributors governing the slot where their conditions or groups differ, else none: a
+   * fork names no claim as current, since no order says which one judges the slot. */
+  forkAtSlot(slot: string): IndexedClaim[] {
+    const governing = this.governingAtSlot(slot);
+    return judgedApart(governing) ? governing : [];
+  }
+
+  /** Every slot whose governing contributors are judged differently, in slot order. */
+  forkedSlots(): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT slot FROM claims WHERE id NOT IN (SELECT predecessor FROM succession) " +
+          "GROUP BY slot HAVING COUNT(*) > 1 ORDER BY slot ASC",
+      )
+      .all() as Array<{ slot: string }>;
+    return rows.map((row) => row.slot).filter((slot) => judgedApart(this.governingAtSlot(slot)));
+  }
+
+  /** Those of the slot's live contributors a declared group governs, else all, by id. */
+  private governingAtSlot(slot: string): IndexedClaim[] {
+    return governingOf(this.contributorsAtSlot(slot));
   }
 
   /** Live contributors by id; a superseded claim stays reachable through `successorsOf`. */
@@ -443,15 +565,16 @@ export class IndexDb {
     }));
   }
 
-  /** Confirmed against each slot's governing claim: a contributor's own column may be outdated. */
+  /** Confirmed against the contributors governing each slot: a contributor's own column may be
+   * outdated. */
   claimsInGroup(group: string): IndexedClaim[] {
     const rows = this.db
       .prepare("SELECT DISTINCT slot FROM claims WHERE exclusive_group = ? ORDER BY slot ASC")
       .all(group) as Array<{ slot: string }>;
     const claims: IndexedClaim[] = [];
     for (const row of rows) {
-      const claim = this.claimAtSlot(row.slot);
-      if (claim !== undefined && (claim.record as ClaimRecord).exclusiveGroup === group) {
+      const claim = this.governingAtSlot(row.slot).find((contributor) => groupOf(contributor) === group);
+      if (claim !== undefined) {
         claims.push(claim);
       }
     }
@@ -709,38 +832,59 @@ export class IndexDb {
     return rows.map((row) => ({ label: row.label, fullId: row.full_id as RecordId }));
   }
 
-  /** Ordered by id, so which of two cases sharing a slug answers is fixed by the records. */
-  caseBySlug(slug: string): IndexedCase | undefined {
-    const row = this.db.prepare("SELECT id, record_json FROM cases WHERE slug = ? ORDER BY id ASC LIMIT 1").get(slug) as
-      | { id: string; record_json: string }
-      | undefined;
-    if (row === undefined) {
-      return undefined;
-    }
-    return { id: row.id as RecordId, record: JSON.parse(row.record_json) as CaseRecord };
+  /** The live cases under a slug, by id; two fork it, since no order says which is current. */
+  casesAtSlug(slug: string): IndexedCase[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, record_json FROM cases WHERE slug = ? " +
+          "AND id NOT IN (SELECT predecessor FROM succession) ORDER BY id ASC",
+      )
+      .all(slug) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as CaseRecord }));
   }
 
-  /** The case pinning the claim, else one pinning a record it descends from, so a successor finds
-   * its case. */
-  caseForClaim(claimId: RecordId): IndexedCase | undefined {
-    const row = this.db
+  /** Every case whose id begins with `hex`, by id. */
+  casesWithHexPrefix(hex: string): IndexedCase[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json FROM cases WHERE id LIKE ? ORDER BY id ASC")
+      .all(`sha256:${hex}%`) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as CaseRecord }));
+  }
+
+  /** Every slug more than one live case holds, in slug order. */
+  forkedSlugs(): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT slug FROM cases WHERE id NOT IN (SELECT predecessor FROM succession) " +
+          "GROUP BY slug HAVING COUNT(*) > 1 ORDER BY slug ASC",
+      )
+      .all() as Array<{ slug: string }>;
+    return rows.map((row) => row.slug);
+  }
+
+  /** The live cases pinning the claim, else those pinning a record it descends from, so a successor
+   * finds its case; by id, and more than one where nothing says which is the claim's. */
+  casesForClaim(claimId: RecordId): IndexedCase[] {
+    const rows = this.db
       .prepare(
         "WITH RECURSIVE lineage(id) AS (SELECT ? UNION " +
-          "SELECT succession.predecessor FROM succession JOIN lineage ON succession.successor = lineage.id) " +
-          "SELECT cases.id AS id, cases.record_json AS record_json FROM cases " +
+          "SELECT succession.predecessor FROM succession JOIN lineage ON succession.successor = lineage.id), " +
+          "citing AS (SELECT cases.id AS id, cases.record_json AS record_json, " +
+          "MAX(case_claims.claim_id = ?) AS direct FROM cases " +
           "JOIN case_claims ON case_claims.case_id = cases.id " +
           "WHERE case_claims.claim_id IN (SELECT id FROM lineage) " +
-          "ORDER BY (case_claims.claim_id = ?) DESC, cases.id ASC LIMIT 1",
+          "AND cases.id NOT IN (SELECT predecessor FROM succession) GROUP BY cases.id) " +
+          "SELECT id, record_json FROM citing WHERE direct = (SELECT MAX(direct) FROM citing) ORDER BY id ASC",
       )
-      .get(claimId, claimId) as { id: string; record_json: string } | undefined;
-    if (row === undefined) {
-      return undefined;
-    }
-    return { id: row.id as RecordId, record: JSON.parse(row.record_json) as CaseRecord };
+      .all(claimId, claimId) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as CaseRecord }));
   }
 
+  /** The live cases, by id. */
   cases(): IndexedCase[] {
-    const rows = this.db.prepare("SELECT id, record_json FROM cases ORDER BY id ASC").all() as Array<{
+    const rows = this.db
+      .prepare("SELECT id, record_json FROM cases WHERE id NOT IN (SELECT predecessor FROM succession) ORDER BY id ASC")
+      .all() as Array<{
       id: string;
       record_json: string;
     }>;
@@ -752,10 +896,15 @@ export class IndexDb {
     return rows.map((row) => row.slug);
   }
 
-  /** Superseded artifacts included: the caller derives the open heads from the whole set. */
+  /** Those drafted under the case or a case it replaces, superseded artifacts included: the caller
+   * derives the open heads from the whole set. */
   artifactsOfCase(caseId: RecordId): IndexedArtifact[] {
     const rows = this.db
-      .prepare("SELECT id, record_json FROM artifacts WHERE case_id = ? ORDER BY id ASC")
+      .prepare(
+        "WITH RECURSIVE lineage(id) AS (SELECT ? UNION " +
+          "SELECT succession.predecessor FROM succession JOIN lineage ON succession.successor = lineage.id) " +
+          "SELECT id, record_json FROM artifacts WHERE case_id IN (SELECT id FROM lineage) ORDER BY id ASC",
+      )
       .all(caseId) as Array<{ id: string; record_json: string }>;
     return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as ArtifactRecord }));
   }
@@ -776,6 +925,67 @@ export class IndexDb {
       )
       .all(subject, principal ?? null, principal ?? null) as Array<{ id: string; record_json: string }>;
     return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as AttestationRecord }));
+  }
+
+  /** Every attestation naming `id` in its `supersedes`, whatever its subject. */
+  attestationsSuperseding(id: RecordId): IndexedAttestation[] {
+    const rows = this.db
+      .prepare(
+        "SELECT attestations.id AS id, attestations.record_json AS record_json FROM succession " +
+          "JOIN attestations ON attestations.id = succession.successor WHERE succession.predecessor = ? " +
+          "ORDER BY attestations.id ASC",
+      )
+      .all(id) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as AttestationRecord }));
+  }
+
+  /** Every attestation kept only to withdraw that names `id` in `supersedes`, on any subject. */
+  withdrawingSuperseding(id: RecordId): IndexedWithdrawing[] {
+    const rows = this.db
+      .prepare(
+        "SELECT DISTINCT withdrawing.id AS id, withdrawing.record_json AS record_json, " +
+          "withdrawing.verified AS verified FROM withdrawing_attestations AS withdrawing, " +
+          "json_each(withdrawing.record_json, '$.supersedes') AS named WHERE named.value = ? ORDER BY withdrawing.id ASC",
+      )
+      .all(id) as Array<{ id: string; record_json: string; verified: number | null }>;
+    return withdrawingRows(rows);
+  }
+
+  /** Whether a release the fold withholds, with its subject, replaces `id`. */
+  replacedWithheld(id: RecordId): boolean {
+    return this.db.prepare("SELECT 1 FROM withheld_replacements WHERE id = ?").get(id) !== undefined;
+  }
+
+  /** Every attestation kept only to withdraw, in id order. */
+  withdrawingAttestations(): IndexedWithdrawing[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json, verified FROM withdrawing_attestations ORDER BY id ASC")
+      .all() as Array<{ id: string; record_json: string; verified: number | null }>;
+    return withdrawingRows(rows);
+  }
+
+  /** Each kept only to withdraw: a later version's refused, or one a clearance withholds whole. */
+  withdrawingBySubject(subject: RecordId): IndexedWithdrawing[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json, verified FROM withdrawing_attestations WHERE subject = ? ORDER BY id ASC")
+      .all(subject) as Array<{ id: string; record_json: string; verified: number | null }>;
+    return withdrawingRows(rows);
+  }
+
+  /** Every attestation the fold holds whole whose id begins with `hex`, by id. */
+  attestationsWithHexPrefix(hex: string): IndexedAttestation[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json FROM attestations WHERE id LIKE ? ORDER BY id ASC")
+      .all(`sha256:${hex}%`) as Array<{ id: string; record_json: string }>;
+    return rows.map((row) => ({ id: row.id as RecordId, record: JSON.parse(row.record_json) as AttestationRecord }));
+  }
+
+  /** Every attestation kept only to withdraw whose id begins with `hex`, by id. */
+  withdrawingWithHexPrefix(hex: string): IndexedWithdrawing[] {
+    const rows = this.db
+      .prepare("SELECT id, record_json, verified FROM withdrawing_attestations WHERE id LIKE ? ORDER BY id ASC")
+      .all(`sha256:${hex}%`) as Array<{ id: string; record_json: string; verified: number | null }>;
+    return withdrawingRows(rows);
   }
 
   /** Every ruling on the slot's live claims, each with the records that name it as a predecessor;
@@ -854,7 +1064,11 @@ export class IndexDb {
   /** Recorded rather than thrown: one bad path must not stop every later read, nor disappear. */
   refusals(): IndexedRefusal[] {
     const rows = this.db
-      .prepare("SELECT commit_sha, path, id, reason FROM refusals ORDER BY commit_sha ASC, path ASC")
+      .prepare(
+        "SELECT refusals.commit_sha AS commit_sha, refusals.path AS path, refusals.id AS id, " +
+          "refusals.reason AS reason FROM refusals JOIN commits ON commits.sha = refusals.commit_sha " +
+          "ORDER BY commits.seq ASC, refusals.path ASC",
+      )
       .all() as Array<{ commit_sha: string; path: string; id: string | null; reason: string }>;
     return rows.map((row) => ({
       id: row.id as RecordId | null,
@@ -951,11 +1165,8 @@ export class IndexDb {
       return;
     }
 
-    const cursor = this.walked();
-    if (cursor !== null && cursor !== tip && !(await store.descends(cursor, tip))) {
-      throw this.historyMoved(cursor, tip);
-    }
-    if (cursor !== tip) {
+    let cursor = this.walked();
+    if (await this.walksOn(store, cursor, tip, judged)) {
       // A table about to be rebuilt needs no per-record invocation.
       const current =
         contributions === undefined
@@ -965,7 +1176,10 @@ export class IndexDb {
         contributions !== undefined && current.length > 0 ? await contributions.extensions(current) : undefined;
       try {
         forgetFoldTablesOutside(this.db, loaded?.extensions ?? []);
-        await this.walk(store, cursor, tip, loaded?.extensions ?? [], onStep, judged);
+        do {
+          await this.walk(store, cursor, tip, loaded?.extensions ?? [], onStep, judged);
+          cursor = this.walked();
+        } while (await this.walksOn(store, cursor, tip, judged));
       } finally {
         await loaded?.close();
       }
@@ -976,28 +1190,73 @@ export class IndexDb {
     }
   }
 
+  /** Whether a walk from `cursor` has anything left to fold: none where another fold under this
+   * admission walked the file past `tip` along the scope's history. */
+  private async walksOn(
+    store: RecordStore,
+    cursor: string | null,
+    tip: string,
+    admission: Admission | undefined,
+  ): Promise<boolean> {
+    if (cursor === tip) {
+      return false;
+    }
+    if (cursor === null || (await store.descends(cursor, tip))) {
+      return true;
+    }
+    const head = await store.tip();
+    if (head !== null && (await store.descends(cursor, head)) && (await store.descends(tip, cursor))) {
+      this.assertTakenOver(admission);
+      return false;
+    }
+    throw this.historyMoved(cursor, tip);
+  }
+
   /** Stamps this file with the admission it folds under, judged again once where the stamp lies
-   * past it: folding under an older judgement would bring back what a newer one withholds. */
+   * past it or the trust branch moved past its trust; a stamp either history left is forgotten. */
   private async stampFor(store: RecordStore, admission: Admission | undefined): Promise<Admission | undefined> {
+    if (admission === undefined) {
+      if (this.stamp().digest !== null) {
+        throw new Error(
+          `refusing to fold ${this.location} without an admission: it was built under one, and a ` +
+            "fold without it would hold every record",
+        );
+      }
+      return undefined;
+    }
     let judged = admission;
     let again = false;
     for (;;) {
       const stamp = this.stamp();
-      if (judged !== undefined && (await stampPasses(store, stamp, judged))) {
-        if (again) {
-          throw this.judgedBehind(judged);
-        }
+      const trustTip = await judged.trustTip();
+      const trustLeft = stamp.trust !== null && (await leftTrust(store, stamp.trust, trustTip));
+      const through = await placing(store, stamp.through, judged.through);
+      const moved = through === "past" || through === "apart" || trustLeft;
+      const passes = moved || judged.trust !== trustTip;
+      if (passes && !again) {
         judged = await judged.judgedAgain();
         again = true;
-      } else if (this.swapStamp(stamp, judged)) {
+        continue;
+      }
+      if (judged.trust !== trustTip) {
+        throw this.trustShort(judged.trust, trustTip, await leftTrust(store, judged.trust, trustTip));
+      }
+      const forget = moved && judged.through === (await store.tip());
+      if (moved && !forget) {
+        throw this.judgedBehind(judged, trustLeft ? "trust" : through === "apart" ? "scope" : undefined);
+      }
+      if (this.swapStamp(stamp, judged, forget)) {
         return judged;
       }
     }
   }
 
-  /** Checked against the stamp read before it and set in one transaction, so two folds under
-   * different admissions cannot both reset and then fill one file. */
-  private swapStamp(seen: Stamp, admission: Admission | undefined): boolean {
+  /** Set against the stamp read before it in one transaction, so two folds under different
+   * admissions cannot both reset and fill one file; a stamp already set takes no lock. */
+  private swapStamp(seen: Stamp, admission: Admission, forget: boolean): boolean {
+    if (!forget && sameStamp(seen, stampOf(admission))) {
+      return true;
+    }
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const stamp = this.stamp();
@@ -1005,15 +1264,8 @@ export class IndexDb {
         this.db.exec("ROLLBACK");
         return false;
       }
-      if (admission === undefined) {
-        if (stamp.digest !== null) {
-          throw new Error(
-            `refusing to fold ${this.location} without an admission: it was built under one, and a ` +
-              "fold without it would hold every record",
-          );
-        }
-      } else if (stamp.digest !== admission.digest) {
-        this.resetSchema(admission);
+      if (forget || stamp.digest !== admission.digest) {
+        resetSchema(this.db, admission);
       } else {
         this.db
           .prepare("UPDATE schema_meta SET through = ?, trust = ? WHERE id = 0")
@@ -1027,12 +1279,40 @@ export class IndexDb {
     }
   }
 
-  private judgedBehind(admission: Admission): KernelError {
+  private judgedBehind(admission: Admission, left: "scope" | "trust" | undefined): KernelError {
+    const stamped =
+      left === "scope"
+        ? "on a history the scope has left"
+        : left === "trust"
+          ? "under a trust commit the trust branch has left, which only a judgement at its tip and the scope's refolds"
+          : "past it";
     return new KernelError({
       reason: "head-moved",
-      detail: `refusing to fold ${this.location} under an admission judged at ${admission.through ?? "an empty scope"}: the file was folded under one judged past it, and judged again it is still behind; open the workspace again`,
+      detail: `refusing to fold ${this.location} under an admission judged at ${admission.through ?? "an empty scope"}: the file was folded under one judged ${stamped}, and judged again it is still behind; open the workspace again`,
       about: [this.location],
     });
+  }
+
+  /** A judgement short of the trust branch's tip may admit what the branch now withholds. */
+  private trustShort(trust: string, tip: string, left: boolean): KernelError {
+    const moved = left ? "has left it for" : "has moved past it to";
+    return new KernelError({
+      reason: "head-moved",
+      detail: `refusing to fold ${this.location} under the trust commit ${trust}: the trust branch ${moved} ${tip}, so it may admit what the branch now withholds; open the workspace again, which reads the trust branch as it stands`,
+      about: [this.location, trust],
+    });
+  }
+
+  /** A file another fold walked further is read as it stands only under this fold's admission. */
+  private assertTakenOver(admission: Admission | undefined): void {
+    const stamp = this.stamp();
+    if (stamp.digest !== (admission?.digest ?? null) || (admission !== undefined && stamp.trust !== admission.trust)) {
+      throw new KernelError({
+        reason: "head-moved",
+        detail: `refusing to read ${this.location} as it stands: another fold walked it past this one under another admission`,
+        about: [this.location],
+      });
+    }
   }
 
   /** Another fold restamped this file between two batches; folding on would mix two admissions. */
@@ -1070,6 +1350,7 @@ export class IndexDb {
     admission?: Admission,
   ): Promise<void> {
     const refusedTables = new Set<string>();
+    let position = cursor;
     let grouped = 0;
     let open = false;
     const land = () => {
@@ -1080,7 +1361,7 @@ export class IndexDb {
       }
     };
     try {
-      for await (const { commit, committedAt, order, changed } of store.changesSince(cursor)) {
+      for await (const { commit, committedAt, order, changed } of store.changesSince(cursor, tip)) {
         onStep?.({ commit, phase: "before-commit" });
         const recordPaths = inWrittenOrder(
           changed.filter(({ path }) => path.startsWith("records/") && !isSidecarPath(path)),
@@ -1094,7 +1375,12 @@ export class IndexDb {
             id = idFromPath(path);
             kindFromPath(path);
           } catch (error) {
-            refused.push({ id: null, path, reason: error instanceof Error ? error.message : String(error) });
+            refused.push({
+              id: null,
+              path,
+              reason: error instanceof Error ? error.message : String(error),
+              later: null,
+            });
             continue;
           }
           if (bytes === null) {
@@ -1110,10 +1396,14 @@ export class IndexDb {
             if (!(error instanceof RecordRefusedError)) {
               throw error;
             }
-            refused.push({ id, path, reason: error.because });
+            const later = kindFromPath(path) === "attestation" ? readLaterAttestation(bytes, id) : null;
+            refused.push({ id, path, reason: error.because, later });
           }
         }
-        const judged = admission === undefined ? { added, refused } : this.judge(added, refused, commit, admission);
+        const judged =
+          admission === undefined
+            ? { added, refused, withdrawing: laterAmong(refused), replaced: [] }
+            : this.judge(added, refused, commit, admission);
         const contributed: ContributedRows[] = [];
         const takenDown: Array<{ table: FoldTable; refusal: FoldRefusal | undefined }> = [];
         for (const { id, record, position } of judged.added) {
@@ -1148,8 +1438,16 @@ export class IndexDb {
           this.db.exec("BEGIN IMMEDIATE");
           open = true;
           this.assertStamp(admission);
+          if (this.walked() !== position) {
+            // Another fold walked this file on between two batches; the caller reads where to.
+            this.db.exec("ROLLBACK");
+            open = false;
+            return;
+          }
         }
-        if (judged.added.length === 0 && judged.refused.length === 0 && admission !== undefined) {
+        const moves =
+          judged.added.length + judged.refused.length + judged.withdrawing.length + judged.replaced.length > 0;
+        if (!moves && admission !== undefined) {
           // A commit of withheld records alone leaves no row, so it moves nothing a reader sees.
           this.db.prepare("UPDATE walked SET commit_sha = ? WHERE id = 0").run(commit);
         } else {
@@ -1158,10 +1456,13 @@ export class IndexDb {
             { sha: commit, committedAt },
             judged.added,
             judged.refused,
+            judged.withdrawing,
+            judged.replaced,
             contributed.filter(({ table }) => !refusedTables.has(table.name)),
             onStep,
           );
         }
+        position = commit;
         grouped += 1;
         if (grouped === COMMITS_PER_TRANSACTION) {
           land();
@@ -1216,9 +1517,39 @@ export class IndexDb {
       }
     }
     const held = (id: RecordId) => admitted.has(id) || this.holds(id);
+    const withheld = (id: RecordId) => admission.withholds(id, commit, held);
+    // A withdrawal outlives what withholds its attestation, and names nothing the fold withholds.
+    const withdrawing: IndexedWithdrawing[] = [];
+    const replaced: RecordId[] = [];
+    const withdrawal = (id: RecordId, fixed: FixedAttestation): void => {
+      const supersedes = fixed.supersedes.filter((other) => !withheld(other));
+      if (supersedes.length === 0 || (fixed.purpose !== "revoked" && fixed.purpose !== "released")) {
+        return;
+      }
+      if (!withheld(fixed.subject)) {
+        withdrawing.push({ id, record: { ...fixed, supersedes }, verified: admission.verifies(id) });
+      } else if (fixed.purpose === "released" && admission.replaces(id)) {
+        // A revocation withdraws on its own subject alone, so on a withheld one it leaves nothing.
+        replaced.push(...supersedes);
+      }
+    };
+    for (const { id, later } of refused) {
+      if (id !== null && later !== null) {
+        withdrawal(id, later);
+      }
+    }
+    for (const { id, record } of added) {
+      if (!admitted.has(id) && record.kind === "attestation") {
+        withdrawal(id, fixedOf(record));
+      }
+    }
     return {
       added: added.filter(({ id }) => admitted.has(id)),
-      refused: refused.filter(({ id }) => id === null || !admission.withholds(id, commit, held)),
+      refused: refused.filter(
+        ({ id, later }) => (id === null || !withheld(id)) && (later === null || !withheld(later.subject)),
+      ),
+      withdrawing,
+      replaced,
     };
   }
 }

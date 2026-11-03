@@ -74,7 +74,7 @@ async function install(repo: FixtureRepo, name: string, version: string, contrib
     recordId({ marker: `build-for-${name}-${version}` }),
     new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }),
     blobStoreOf(repo.workspace),
-    await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now })),
+    repo.keep(await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }))),
   );
 }
 
@@ -95,7 +95,7 @@ describe("a point a module contributes", () => {
     await writeModule(repo, "greeter", [
       pointEntry("greeter/greets", { input: GREETING_SCHEMA, output: { type: "string" }, role: "invoke" }),
     ]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(pointFor("greeter/greets", index)).toEqual({
       name: "greeter/greets",
@@ -110,7 +110,7 @@ describe("a point a module contributes", () => {
     const input = { $id: "https://example.test/greeting-input", ...GREETING_SCHEMA };
     const output = { $id: "https://example.test/greeting-output", type: "string" };
     await writeModule(repo, "greeter", [pointEntry("greeter/greets", { input, output, role: "invoke" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     const expected = { name: "greeter/greets", input, output, role: "invoke" };
 
     expect(pointFor("greeter/greets", index)).toEqual(expected);
@@ -120,7 +120,7 @@ describe("a point a module contributes", () => {
   it("resolves to nothing when neither the kernel table nor the fold holds its name", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "greeter", [pointEntry("greeter/greets", { input: true, output: true, role: "invoke" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(pointFor("greeter/waves", index)).toBeUndefined();
   });
@@ -130,7 +130,7 @@ describe("a kernel point", () => {
   it("resolves from the table without the fold being read, even where the fold holds a malformed point", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "broken", [pointEntry("broken/p", { input: true, output: true })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(pointFor("rule", index)).toBe(kernelPoint("rule"));
     expect(() => pointFor("broken/p", index)).toThrow(PointRefusedError);
@@ -144,7 +144,7 @@ describe("one point name declared twice", () => {
       pointEntry("twice/p", { input: true, output: true, role: "invoke" }, "1"),
       pointEntry("twice/p", { input: true, output: true, role: "data" }, "2"),
     ]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(expect.objectContaining({ about: ["twice/p", "twice"] }));
@@ -154,7 +154,7 @@ describe("one point name declared twice", () => {
     const repo = await trackedRepo();
     await writeModule(repo, "a", [pointEntry("a/b/p", { input: true, output: true, role: "invoke" })]);
     await writeModule(repo, "a/b", [pointEntry("a/b/p", { input: true, output: true, role: "invoke" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(expect.objectContaining({ about: ["a/b/p", "a", "a/b"] }));
@@ -165,7 +165,7 @@ describe("a malformed point declaration", () => {
   it("is refused by name when its input lacks the role", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "broken", [pointEntry("broken/p", { input: true, output: true })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(/broken\/p/);
@@ -174,7 +174,7 @@ describe("a malformed point declaration", () => {
   it("is refused by name when it declares a role outside the two the kernel closes", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "broken", [pointEntry("broken/p", { input: true, output: true, role: "stream" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(/broken\/p/);
@@ -183,7 +183,7 @@ describe("a malformed point declaration", () => {
   it("is refused by name when an operand it declares is not a schema that compiles", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "broken", [pointEntry("broken/p", { input: 5, output: true, role: "invoke" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(/broken\/p/);
@@ -192,7 +192,7 @@ describe("a malformed point declaration", () => {
   it("is refused by name when its own id carries whitespace", async () => {
     const repo = await trackedRepo();
     await writeModule(repo, "broken", [pointEntry("broken/p q", { input: true, output: true, role: "invoke" })]);
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(() => readPointDeclarations(index)).toThrow(PointRefusedError);
     expect(() => readPointDeclarations(index)).toThrow(/broken\/p q.*must carry no whitespace/);
@@ -212,7 +212,7 @@ describe("a contribution is installed after its point", () => {
       answeringAt("waver/greets", "waver/waves"),
     ]);
 
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords().map((installed) => installed.id)).toEqual(
       expect.arrayContaining([contributionFirst.moduleRecordId, pointFirst.moduleRecordId]),
     );
@@ -236,7 +236,7 @@ describe("a contribution is installed after its point", () => {
 
     const result = await install(repo, "responder", "1.0.0", [answeringAt("greeter/greets", "responder/answers")]);
 
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords().map((installed) => installed.id)).toContain(result.moduleRecordId);
   });
 
@@ -250,7 +250,9 @@ describe("a contribution is installed after its point", () => {
     expect(refusal).toBeInstanceOf(PointRefusedError);
     expect((refusal as PointRefusedError).about).toEqual(["twice/p", "twice"]);
     expect(
-      (await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }))).installedModuleRecords(),
+      repo
+        .keep(await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now })))
+        .installedModuleRecords(),
     ).toEqual([]);
     await expect(blobStoreOf(repo.workspace).read(rawId(bundleFor("twice", "1.0.0")))).rejects.toThrow(
       "blob not found",
@@ -285,7 +287,9 @@ describe("a contribution is installed after its point", () => {
       await expect(blobStoreOf(repo.workspace).read(rawId(bundleFor(name, "1.0.0")))).rejects.toThrow("blob not found");
     }
     expect(
-      (await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }))).installedModuleRecords(),
+      repo
+        .keep(await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now })))
+        .installedModuleRecords(),
     ).toEqual([]);
   });
 
@@ -300,7 +304,9 @@ describe("a contribution is installed after its point", () => {
       "blob not found",
     );
     expect(
-      (await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }))).installedModuleRecords(),
+      repo
+        .keep(await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now })))
+        .installedModuleRecords(),
     ).toEqual([]);
   });
 
@@ -310,7 +316,7 @@ describe("a contribution is installed after its point", () => {
 
     const repinned = await install(repo, "greeter", "2.0.0", [GREETS]);
 
-    const index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
+    using index = await foldedIndex(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
     expect(index.installedModuleRecords()).toEqual([
       { id: repinned.moduleRecordId, name: "greeter", version: "2.0.0" },
     ]);

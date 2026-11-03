@@ -55,7 +55,7 @@ interface Globals {
 /** Streams from the beginning, since a one-shot process holds no cursor, and on stderr, since
  * stdout carries only the operation's output. */
 async function streamEvents(context: OperationContext): Promise<void> {
-  const opened = await openWorkspace(context);
+  using opened = await openWorkspace(context);
   const { events } = await eventsSince(opened);
   for (const event of events) {
     process.stderr.write(`${renderEventLine(event)}\n`);

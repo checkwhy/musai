@@ -42,8 +42,10 @@ describe("a release is a person's, never a model's relay", () => {
     const claim = booked.minted.find((item) => item.kind === "claim")!.id;
     const store = new Store({ ctx: { gitDir }, scope: "default", now });
     const relayed: OperationContext = { ...context, via: "model" };
-    const standing = async () =>
-      (await releaseStanding(await openWorkspace(context), claim)).standing.map((release) => release.id);
+    const standing = async () => {
+      using opened = await openWorkspace(context);
+      return (await releaseStanding(opened, claim)).standing.map((release) => release.id);
+    };
     return { workspace, context, relayed, claim, store, standing };
   }
 

@@ -90,6 +90,8 @@ export interface ClaimEvaluationInput {
   readonly ruling: ClaimRulingOutcome | null;
   /** A verifying trace found this claim's reads meeting a moved input, whatever its rulings. */
   readonly stale?: boolean;
+  /** Its slot's live contributors are judged differently, so nothing here decides which judges. */
+  readonly forked?: boolean;
 }
 
 /** `nodeIds` and `defeats` must already include every supporting argument every claim names. */
@@ -143,6 +145,9 @@ function labelOneClaim(
   }
   if (claim.stale === true) {
     reasons.add("stale");
+  }
+  if (claim.forked === true) {
+    reasons.add("forked-slot");
   }
 
   let baseLabel: "holds" | "fails" = "holds";

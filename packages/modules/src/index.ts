@@ -78,6 +78,7 @@ export {
   type InvokedContribution,
   isErrorCode,
   isPointRole,
+  KERNEL_POINT_TABLE,
   kernelPoint,
   type Need,
   needId,

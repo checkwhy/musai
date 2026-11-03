@@ -21,7 +21,6 @@ export {
 } from "./fold-extension.js";
 export {
   type Admission,
-  AmbiguousExclusiveGroupError,
   INDEX_SCHEMA_VERSION,
   IndexDb,
   RuleRecordConflictError,
@@ -49,6 +48,7 @@ export type {
   IndexedRuling,
   IndexedRulingOnSlot,
   IndexedSuccessor,
+  IndexedWithdrawing,
   QueryDeclaration,
 } from "./rows.js";
 export { isSafeSqlIdentifier, KERNEL_INDEX_TABLES, QUERYABLE_KERNEL_TABLES } from "./schema.js";

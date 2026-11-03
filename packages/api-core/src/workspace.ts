@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   ageLimitMsFromSlot,
@@ -27,10 +27,12 @@ import type { Audience, Clock, DimensionRegistry, MusaiRecord, RecordId } from "
 import {
   type ClaimTypes,
   claimTypesFrom,
+  hexOfRecordId,
   isPlainObject,
   KernelError,
   parseAudience,
   RecordRefusedError,
+  rawId,
   TRIPLE_DECLARATION,
 } from "@musai/records";
 import {
@@ -53,11 +55,14 @@ import {
   projectLayerSlots,
   RecordNotFoundError,
   readTrustBranch,
+  readTrustTip,
   Store,
   scopeClearedIndexPath,
   scopeIndexPath,
   scopeRefName,
   scopeVerificationCachePath,
+  type TrustBranch,
+  writeWhole,
 } from "@musai/store";
 import {
   type AllowedSigner,
@@ -134,20 +139,24 @@ function declaredBy(index: IndexDb) {
   };
 }
 
+/** Whether a workspace may be cleared to `clearance`: `public`, or an audience the file names. */
+export function declaresClearance(audiences: Audiences, clearance: string): boolean {
+  const declared = [...audiences.names.values()];
+  return (
+    parseAudience(clearance).form === "public" ||
+    audiences.names.has(clearance) ||
+    declared.some((audience) => audience.members.has(clearance))
+  );
+}
+
 /** A clearance nothing declares would open a station no seal hides anything from. */
 function refuseUndeclared(audiences: Audiences, clearance: string): void {
-  let form: string;
   try {
-    form = parseAudience(clearance).form;
+    parseAudience(clearance);
   } catch (error) {
     throw new KernelError({ reason: "invalid-input", about: [clearance], detail: (error as Error).message });
   }
-  const declared = [...audiences.names.values()];
-  if (
-    form === "public" ||
-    audiences.names.has(clearance) ||
-    declared.some((audience) => audience.members.has(clearance))
-  ) {
+  if (declaresClearance(audiences, clearance)) {
     return;
   }
   throw new KernelError({
@@ -157,18 +166,66 @@ function refuseUndeclared(audiences: Audiences, clearance: string): void {
   });
 }
 
+/** Named by its bytes and written whole, so a verifier reads neither another trust commit's
+ * signers nor a file half written. */
+async function materialisedSigners(localDir: string, bytes: Uint8Array, digest: RecordId): Promise<string> {
+  const path = join(localDir, `allowed-signers-${hexOfRecordId(digest)}`);
+  await writeWhole(path, bytes);
+  return path;
+}
+
+/** Every field a workspace reads from the trust branch, as it stands at `trust.commit`. */
+async function trustedAt(
+  ctx: GitContext,
+  scope: string,
+  now: Clock,
+  claimTypes: ClaimTypes,
+  blobs: GitBlobStore,
+  trust: TrustBranch,
+) {
+  const allowedSigners = parseAllowedSigners(trust.allowedSigners);
+  const localDir = join(ctx.gitDir, LOCAL_DIR);
+  const allowedSignersBytes = new TextEncoder().encode(trust.allowedSigners);
+  const allowedSignersDigest = rawId(allowedSignersBytes);
+  return {
+    store: new Store({ ctx, scope, now, claimTypes, config: trust.config }),
+    fetchStore: { blobs, config: trust.config.values },
+    matrix: roleMatrix(allowedSigners, parseRoles(trust.roles), trust.commit),
+    audiences: parseAudiences(trust.audiences),
+    floor: floorFrom(trust.config),
+    signingLevel: signingLevelOf(trust.config),
+    projectSlots: projectLayerSlots(trust.config),
+    layerDeclarations: layerDeclarationsFromConfig(trust.config),
+    tools: workspaceToolsFromConfig(trust.config),
+    localDir,
+    allowedSigners,
+    allowedSignersPath: await materialisedSigners(localDir, allowedSignersBytes, allowedSignersDigest),
+    attestationVerification: await AttestationVerificationCache.open(
+      scopeVerificationCachePath(ctx.gitDir, scope, allowedSignersDigest),
+      allowedSignersBytes,
+      writeWhole,
+    ),
+  };
+}
+
 /** Names the `init` verb, never a binary, since every distribution's command line prints it. */
 async function adoptOrRefuse(dir: string, gitDir: string): Promise<void> {
   const found = await adoptWorkspace(gitDir);
   if (found === "adopted") {
     return;
   }
+  if (found === "absent") {
+    throw new KernelError({
+      reason: "workspace-incomplete",
+      detail: `there is no workspace at ${dir}: ${gitDir} is absent or empty, and \`init ${dir}\` makes one there`,
+      about: [dir],
+    });
+  }
+  const foreign = `there is no workspace at ${dir}: ${gitDir} is no bare repository holding main, and nothing there was changed`;
+  const movable = (await stat(dir).catch(() => null))?.isDirectory() === true;
   throw new KernelError({
     reason: "workspace-incomplete",
-    detail:
-      found === "absent"
-        ? `there is no workspace at ${dir}: ${gitDir} is absent or empty, and \`init ${dir}\` makes one there`
-        : `there is no workspace at ${dir}: ${gitDir} is no bare repository holding main, and nothing there was changed`,
+    detail: movable ? `${foreign}; move ${gitDir} aside and \`init ${dir}\` makes one there` : foreign,
     about: [dir],
   });
 }
@@ -197,7 +254,7 @@ export interface WorkspaceOptions {
 /** The author's workspace a cleared one folds after a write and judges what it admits against. */
 interface Author {
   readonly workspace: Workspace;
-  readonly admission: WorkspaceClearance["admission"];
+  readonly clearance: WorkspaceClearance;
 }
 
 type WorkspaceFields = Pick<
@@ -277,9 +334,13 @@ export class Workspace {
   /** Set with `clearance`: what every run performed here is held to. */
   readonly station?: Station;
   readonly #author: Author | undefined;
+  /** Set where this workspace is another's at a later trust tip, reading that one's fold. */
+  readonly #adopter: Workspace | undefined;
+  /** Held while the trust tip it was adopted at stands, and closed when the tip moves. */
+  #adopted: Workspace | undefined;
   #closed = false;
 
-  private constructor(fields: WorkspaceFields, author?: Author) {
+  private constructor(fields: WorkspaceFields, author?: Author, adopter?: Workspace) {
     this.ctx = fields.ctx;
     this.store = fields.store;
     this.blobs = fields.blobs;
@@ -307,6 +368,7 @@ export class Workspace {
     this.clearance = fields.clearance;
     this.station = fields.station;
     this.#author = author;
+    this.#adopter = adopter;
   }
 
   /** Answers from the fold as it stands, never refolding on a miss, so a read spawns no process. */
@@ -340,7 +402,7 @@ export class Workspace {
       return;
     }
     await author.workspace.refold();
-    const admission = await author.admission(author.workspace);
+    const admission = await author.clearance.admission(await author.workspace.atTrustTip(author.clearance.audience));
     await this.index.fold(author.workspace.store, undefined, this.foldContributions, admission);
   }
 
@@ -386,29 +448,50 @@ export class Workspace {
     return tip;
   }
 
-  /** The scope's fold as `audience` is cleared to read it, kept beside the scope's own: folded
-   * under `admission` up to the commit it was judged at, and from nothing when its digest moves. */
-  async clearedFold(audience: Audience, admission: Admission): Promise<IndexDb> {
-    const path = scopeClearedIndexPath(this.ctx.gitDir, this.store.scope, audience);
-    await makeDirectory(dirname(path));
-    const cleared = new IndexDb(path);
-    try {
-      await cleared.fold(this.store, undefined, foldContributionsOver(cleared, this.blobs), admission);
-    } catch (error) {
-      cleared.close();
-      throw error;
+  /** This workspace as the trust branch now stands, rewound or rewritten too, since a fold holds
+   * no judgement short of that tip; a trust that no longer declares `clearance` is refused. */
+  async atTrustTip(clearance: Audience): Promise<Workspace> {
+    if (this.#adopter !== undefined) {
+      return this.#adopter.atTrustTip(clearance);
     }
-    return cleared;
+    const tip = await readTrustTip(this.ctx);
+    if (tip === this.matrix.commit) {
+      this.#adopt(undefined);
+      return this;
+    }
+    let adopted = this.#adopted;
+    if (adopted?.matrix.commit !== tip) {
+      const trust = await readTrustBranch(this.ctx);
+      const trusted = await trustedAt(this.ctx, this.store.scope, this.now, this.claimTypes, this.blobs, trust);
+      adopted = new Workspace({ ...this, ...trusted }, undefined, this);
+      this.#adopt(adopted);
+    }
+    refuseUndeclared(adopted.audiences, clearance);
+    return adopted;
   }
 
-  /** Closes every fold this workspace holds open, the author's too where it reads a cleared one. */
+  #adopt(adopted: Workspace | undefined): void {
+    this.#adopted?.close();
+    this.#adopted = adopted;
+  }
+
+  /** Closes every fold this workspace holds open, the author's where it reads a cleared one, and
+   * the workspace it adopted at the trust tip. */
   close(): void {
     if (this.#closed) {
       return;
     }
     this.#closed = true;
-    this.index.close();
+    this.#adopted?.close();
+    // An adopted workspace reads its adopter's fold, which only the adopter closes.
+    if (this.#adopter === undefined) {
+      this.index.close();
+    }
     this.#author?.workspace.close();
+  }
+
+  [Symbol.dispose](): void {
+    this.close();
   }
 
   /** What a run here may spawn: what the installed modules declare. */
@@ -528,45 +611,11 @@ export class Workspace {
         }
       }
       const trust = await readTrustBranch(ctx);
-      const store = new Store({
-        ctx,
-        scope: options.scope,
-        now: options.now,
-        claimTypes: declared.claimTypes,
-        config: trust.config,
-      });
-      const allowedSigners = parseAllowedSigners(trust.allowedSigners);
-      const matrix = roleMatrix(allowedSigners, parseRoles(trust.roles), trust.commit);
-      const floor = floorFrom(trust.config);
-      const signingLevel = signingLevelOf(trust.config);
-      const projectSlots = projectLayerSlots(trust.config);
-      const layerDeclarations = layerDeclarationsFromConfig(trust.config);
-      const tools = workspaceToolsFromConfig(trust.config);
-      const localDir = join(gitDir, LOCAL_DIR);
-      const allowedSignersPath = join(localDir, "allowed-signers");
-      const allowedSignersBytes = new TextEncoder().encode(trust.allowedSigners);
-      await writeFile(allowedSignersPath, allowedSignersBytes);
-      const attestationVerification = await AttestationVerificationCache.open(
-        scopeVerificationCachePath(gitDir, options.scope),
-        allowedSignersBytes,
-      );
       author = new Workspace({
         ctx,
-        store,
         blobs,
-        fetchStore: { blobs, config: trust.config.values },
         index,
-        matrix,
-        audiences: parseAudiences(trust.audiences),
-        floor,
-        signingLevel,
-        projectSlots,
-        layerDeclarations,
-        tools,
-        allowedSignersPath,
-        localDir,
-        allowedSigners,
-        attestationVerification,
+        ...(await trustedAt(ctx, options.scope, options.now, declared.claimTypes, blobs, trust)),
         ...declared,
         now: options.now,
         foldContributions,
@@ -590,7 +639,7 @@ export class Workspace {
     stationImage: Station["image"],
   ): Promise<Workspace> {
     refuseUndeclared(this.audiences, clearance.audience);
-    const index = await this.clearedFold(clearance.audience, await clearance.admission(this));
+    const index = await clearedFold(this, clearance.audience, await clearance.admission(this));
     let declared: ReturnType<typeof declaredBy>;
     try {
       declared = declaredBy(index);
@@ -621,9 +670,24 @@ export class Workspace {
         clearance: clearance.audience,
         station: { clearance: clearance.audience, image: stationImage, musaiDir: this.ctx.gitDir },
       },
-      { workspace: this, admission: clearance.admission },
+      { workspace: this, clearance },
     );
   }
+}
+
+/** The scope's fold as `audience` is cleared to read it, kept beside the scope's own: folded
+ * under `admission` up to the commit it was judged at, and from nothing when its digest moves. */
+export async function clearedFold(workspace: Workspace, audience: Audience, admission: Admission): Promise<IndexDb> {
+  const path = scopeClearedIndexPath(workspace.ctx.gitDir, workspace.store.scope, audience);
+  await makeDirectory(dirname(path));
+  const cleared = new IndexDb(path);
+  try {
+    await cleared.fold(workspace.store, undefined, foldContributionsOver(cleared, workspace.blobs), admission);
+  } catch (error) {
+    cleared.close();
+    throw error;
+  }
+  return cleared;
 }
 
 function eventNamedBy(inputSchema: unknown): string | undefined {

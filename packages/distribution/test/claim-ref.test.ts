@@ -1,8 +1,8 @@
 import { runHandler } from "@musai/api-core";
 import type { RecordId } from "@musai/records";
-import { fixedClock, makeCheckout } from "@musai/test-support";
+import { fixedClock, makeCheckout, splitByShell } from "@musai/test-support";
 import { describe, expect, onTestFinished, test } from "vitest";
-import { type ClaimLookup, claimSlotNamed } from "../src/claim-ref.js";
+import { type ClaimLookup, checkSpelling, claimSlotNamed } from "../src/claim-ref.js";
 import { checkRun } from "../src/ops/check.js";
 import { claimStatus } from "../src/ops/claim.js";
 import { claimWhy } from "../src/ops/why.js";
@@ -19,6 +19,8 @@ const REPLACED = `sha256:${"e".repeat(64)}` as RecordId;
 const twoSlots: ClaimLookup = {
   claimAtSlot: (slot) =>
     slot === SLOT_A ? ({ id: CLAIM_A } as never) : slot === SLOT_B ? ({ id: CLAIM_B } as never) : undefined,
+  contributorsAtSlot: (slot) =>
+    slot === SLOT_A ? [{ id: CLAIM_A } as never] : slot === SLOT_B ? [{ id: CLAIM_B } as never] : [],
   recordById: () => undefined,
   claimsWithHexPrefix: (hex) =>
     [
@@ -68,4 +70,12 @@ describe("naming a claim by less than its slot", () => {
     expect(status.label).toBe("holds");
     expect(JSON.stringify(why)).toContain(checked.claim);
   }, 120_000);
+});
+
+describe("how a claim is checked by a rule", () => {
+  test("pastes back naming a rule whose id holds a space and shell metacharacters as one word", async () => {
+    const rule = "a-module/a rule $HOME;x";
+
+    expect(await splitByShell(checkSpelling(rule))).toEqual(["check", "<sentence>", "--rule", rule]);
+  });
 });

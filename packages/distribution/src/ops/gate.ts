@@ -11,16 +11,16 @@ import {
   type WriteResult,
 } from "@musai/api-core";
 import type { ClaimStatus } from "@musai/evaluate";
-import { type ComputedRunRecord, conditionString, type RecordId, type RunRecord, versionString } from "@musai/records";
+import { conditionString, type RecordId, versionString } from "@musai/records";
 import { citedClaims } from "../cases.js";
-import { applicabilityAt, applyingMembers, groupHolder, labelledClaim, vouchedRulingsFor } from "../claim.js";
-import { movedReadLine, movedReadsDiff } from "../gate/diff.js";
+import { forkRemedy, shortIdOf } from "../claim-ref.js";
+import { gateStanding } from "../gate/awaiting.js";
 import { askMenu, type MenuOption } from "../gate/menu.js";
 import { mintRuling } from "../gate/ruling-mint.js";
 import { GATE_CLASSES, type GateClass, isGateClass } from "../gate-classes.js";
 import type { PendingRecord } from "../pending.js";
 import { pendingFor } from "../pending.js";
-import { briefRender } from "./brief.js";
+import { briefRender, CLAIM_CASE_SCHEMA } from "./brief.js";
 
 const MENU_OPTION_SCHEMA = {
   type: "object",
@@ -52,6 +52,10 @@ export interface PendingGate {
   readonly case: string;
   readonly claim: RecordId;
   readonly gateClass: GateClass;
+  /** The live cases forking the slug, which `gate ask` refuses to brief until a keep closes it. */
+  readonly forked?: readonly RecordId[];
+  /** The slugs whose cases cite the gate, where more than one does, each one `gate ask` takes. */
+  readonly shared?: readonly string[];
 }
 
 export interface GatePendingOutput {
@@ -63,7 +67,13 @@ export interface GatePendingOutput {
 }
 
 function renderGatePendingText(output: GatePendingOutput): string {
-  const line = (gate: PendingGate) => `${gate.case} ${gate.claim} (${gate.gateClass})`;
+  const forked = (gate: PendingGate) =>
+    gate.forked === undefined
+      ? ""
+      : `, the slug forked between ${gate.forked.map(shortIdOf).join(", ")}: ${forkRemedy("case")}`;
+  const shared = (gate: PendingGate) =>
+    gate.shared === undefined ? "" : `, shared by the cases ${gate.shared.join(", ")}: ask names one as --case`;
+  const line = (gate: PendingGate) => `${gate.case} ${gate.claim} (${gate.gateClass})${forked(gate)}${shared(gate)}`;
   const flagged = (output.flagged ?? []).map((gate) => `${line(gate)} answered on stale evidence`);
   if (output.gates.length === 0) {
     return [output.unlisted ?? "no gates await an answer", ...flagged].join("\n");
@@ -71,25 +81,30 @@ function renderGatePendingText(output: GatePendingOutput): string {
   return [...output.gates.map(line), ...flagged].join("\n");
 }
 
-type Answered = "pending" | "answered" | "flagged";
-
-/** A vouched ruling settles a binary gate either way, unless tied rulings contest it. */
-async function bareGateAnswered(opened: Workspace, slot: string): Promise<Answered> {
-  if ((await vouchedRulingsFor(opened, slot)).length === 0) {
-    return "pending";
-  }
-  return answeredAs((await labelledClaim(opened, slot, "none")).status);
+function answeredOnStaleEvidence(status: ClaimStatus): boolean {
+  return status.label !== "open" && status.decidedOnStaleEvidence === true;
 }
 
-function answeredAs(status: ClaimStatus): Answered {
-  if (status.label === "open") {
-    return "pending";
-  }
-  return status.decidedOnStaleEvidence ? "flagged" : "answered";
+/** The case a gate's row names: the slug asked for, else the first by slug of those citing it,
+ * never the first case by id, with its fork and every citing slug where more than one cites it. */
+function gateRow(
+  opened: Workspace,
+  claimId: RecordId,
+  named: string | undefined,
+  own: string,
+): Pick<PendingGate, "case" | "forked" | "shared"> {
+  const slugs = [...new Set(opened.index.casesForClaim(claimId).map(({ record }) => record.slug))].sort();
+  const slug = slugs.length > 1 ? (named ?? slugs[0]!) : own;
+  const live = opened.index.casesAtSlug(slug);
+  return {
+    case: slug,
+    ...(live.length > 1 ? { forked: live.map(({ id }) => id) } : {}),
+    ...(slugs.length > 1 ? { shared: slugs } : {}),
+  };
 }
 
-/** `gate.pending@1`: every gate claim awaiting an answer. A menu is listed once, by its first
- * applying member, until any member holds, on grounds this view holds or not. */
+/** `gate.pending@1`: every gate claim awaiting an answer, as `gateStanding` names it, so a menu
+ * is listed once, until any member holds, on grounds this view holds or not. */
 export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutput> = {
   id: "gate.pending",
   version: versionString("1"),
@@ -115,6 +130,8 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
             case: { type: "string" },
             claim: { type: "string" },
             gateClass: { enum: [...GATE_CLASSES] },
+            forked: { type: "array", items: { type: "string" } },
+            shared: { type: "array", items: { type: "string" } },
           },
         },
       },
@@ -128,6 +145,8 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
             case: { type: "string" },
             claim: { type: "string" },
             gateClass: { enum: [...GATE_CLASSES] },
+            forked: { type: "array", items: { type: "string" } },
+            shared: { type: "array", items: { type: "string" } },
           },
         },
       },
@@ -150,6 +169,8 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
   async handler(input, context) {
     const opened = await openWorkspace(context);
     const seenGroups = new Set<string>();
+    // Two cases, of a forked slug or under different slugs, cite the same gates.
+    const seenClaims = new Set<RecordId>();
     const gates: PendingGate[] = [];
     const flagged: PendingGate[] = [];
     let namedCaseFound = input.case === undefined;
@@ -167,30 +188,23 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
         if (!isGateClass(gateClass)) {
           continue;
         }
+        if (seenClaims.has(claimId)) {
+          continue;
+        }
+        seenClaims.add(claimId);
         const group = claimRecord.exclusiveGroup;
         if (group !== null) {
           if (seenGroups.has(group)) {
             continue;
           }
           seenGroups.add(group);
-          const [representative] = applyingMembers(opened, group);
-          if (representative === undefined) {
-            continue;
-          }
-          const holder = await groupHolder(opened, group);
-          if (holder === null) {
-            gates.push({ case: caseRecord.slug, claim: representative.id, gateClass });
-          } else if (answeredAs((await labelledClaim(opened, holder.slot, "none")).status) === "flagged") {
-            flagged.push({ case: caseRecord.slug, claim: opened.index.claimAtSlot(holder.slot)!.id, gateClass });
-          }
-          continue;
         }
-        if (applicabilityAt(opened, claimRecord.slot, claimRecord).outcome !== "valid") {
-          continue;
-        }
-        const answered = await bareGateAnswered(opened, claimRecord.slot);
-        if (answered !== "answered") {
-          (answered === "pending" ? gates : flagged).push({ case: caseRecord.slug, claim: claimId, gateClass });
+        const standing = await gateStanding(opened, { id: claimId, record: claimRecord });
+        const row = { ...gateRow(opened, claimId, input.case, caseRecord.slug), gateClass };
+        if (standing.awaiting !== null) {
+          gates.push({ ...row, claim: standing.awaiting });
+        } else if (standing.answered !== null && answeredOnStaleEvidence(await standing.answered.status())) {
+          flagged.push({ ...row, claim: standing.answered.claim });
         }
       }
     }
@@ -212,6 +226,7 @@ export const gatePending: OperationDescriptor<GatePendingInput, GatePendingOutpu
 export interface GateAskInput {
   readonly claim: string;
   readonly budget?: number;
+  readonly case?: string;
 }
 
 export interface GateAskOutput extends WriteResult {
@@ -241,6 +256,7 @@ export const gateAsk: OperationDescriptor<GateAskInput, GateAskOutput> = {
     properties: {
       claim: { type: "string" },
       budget: { type: "integer", minimum: 0 },
+      case: CLAIM_CASE_SCHEMA,
     },
   },
   output: {
@@ -258,12 +274,12 @@ export const gateAsk: OperationDescriptor<GateAskInput, GateAskOutput> = {
   effect: "write",
   authority: null,
   plans: true,
-  reasons: ["no-such-record", "over-budget", "head-moved", "declaration-conflict", "invalid-input"],
+  reasons: ["no-such-record", "over-budget", "head-moved", "declaration-conflict", "invalid-input", "stale"],
   documentation: "Renders the brief for a gate claim and offers the menu it answers through.",
   cli: {
     verb: "ask",
     positional: ["claim"],
-    flags: ["budget"],
+    flags: ["budget", "case"],
     describe: "render a gate's brief and offer the menu that answers it",
   },
   renderText: renderGateAskText,
@@ -274,7 +290,11 @@ export const gateAsk: OperationDescriptor<GateAskInput, GateAskOutput> = {
     const opened = await openWorkspace(context);
     const { options } = askMenu(opened, gateClaimId);
 
-    const briefResult = await runHandler(briefRender, { claim: input.claim, budget: input.budget }, context);
+    const briefResult = await runHandler(
+      briefRender,
+      { claim: input.claim, budget: input.budget, case: input.case },
+      context,
+    );
 
     const pending = pendingFor(`disposition for ${gateClaimId}`, GATE_ANSWER_KEY, {
       pending: gateClaimId,
@@ -327,31 +347,20 @@ const gateAnswerHandler: OperationHandler<GateAnswerInput, GateAnswerOutput> = {
 
     const verdict: "holds" | "fails" = group === null ? (chosen.value === "fails" ? "fails" : "holds") : "holds";
 
-    const briefId = input.brief as RecordId;
-    const asked = opened.read(briefId);
-    // What is not a brief reaches `mintRuling`, which refuses it by name.
-    const moved =
-      asked.kind === "run" && (asked as RunRecord).runKind === "brief"
-        ? await movedReadsDiff(opened, asked as ComputedRunRecord)
-        : [];
-    if (moved.length > 0) {
-      throw new OperationError({
-        reason: "stale",
-        about: moved.map((entry) => entry.id),
-        detail: `refusing to answer against ${briefId}: evidence moved since it was rendered:\n${moved.map(movedReadLine).join("\n")}`,
-      });
-    }
-
-    const planned = await mintRuling(opened, {
-      claim: chosen.claim,
-      verdict,
-      reason: input.reason,
-      brief: input.brief as RecordId,
-      supersedes: [],
-      via,
-      principal,
-      salt: input.salt,
-    });
+    const planned = await mintRuling(
+      opened,
+      {
+        claim: chosen.claim,
+        verdict,
+        reason: input.reason,
+        brief: input.brief as RecordId,
+        supersedes: [],
+        via,
+        principal,
+        salt: input.salt,
+      },
+      context,
+    );
 
     return {
       plan: { put: planned.put, attest: planned.attest, needs: [] },

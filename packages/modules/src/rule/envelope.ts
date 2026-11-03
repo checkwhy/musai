@@ -649,7 +649,7 @@ const QUERY_OUTPUT_SCHEMA: JsonSchema = {
 };
 
 /** Every point the kernel ships; `point` is among them, or nothing would validate a `role`. */
-const KERNEL_POINT_TABLE: readonly ContributionPoint[] = [
+export const KERNEL_POINT_TABLE: readonly ContributionPoint[] = [
   { name: "rule", role: "invoke", input: RULE_INPUT_SCHEMA, output: RULE_OUTPUT_SCHEMA },
   { name: "parser", role: "invoke", input: UNCONSTRAINED_SCHEMA, output: UNCONSTRAINED_SCHEMA },
   { name: "slot", role: "data", input: UNCONSTRAINED_SCHEMA, output: UNCONSTRAINED_SCHEMA },
@@ -657,7 +657,6 @@ const KERNEL_POINT_TABLE: readonly ContributionPoint[] = [
   { name: "template", role: "invoke", input: UNCONSTRAINED_SCHEMA, output: UNCONSTRAINED_SCHEMA },
   { name: "subscription", role: "invoke", input: EVENT_SCHEMA, output: RULE_OUTPUT_SCHEMA },
   { name: "requirement", role: "data", input: REQUIREMENT_INPUT_SCHEMA, output: REQUIREMENT_OUTPUT_SCHEMA },
-  { name: "view", role: "invoke", input: UNCONSTRAINED_SCHEMA, output: UNCONSTRAINED_SCHEMA },
   { name: "kind", role: "invoke", input: KIND_INPUT_SCHEMA, output: KIND_OUTPUT_SCHEMA },
   { name: "operation", role: "invoke", input: UNCONSTRAINED_SCHEMA, output: OPERATION_PLAN_SCHEMA },
   { name: "point", role: "data", input: POINT_INPUT_SCHEMA, output: POINT_OUTPUT_SCHEMA },

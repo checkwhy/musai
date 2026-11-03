@@ -60,8 +60,8 @@ function plan(overrides: Partial<OperationPlan>): OperationPlan {
   return { put: [], attest: [], needs: [], ...overrides };
 }
 
-function opened(workspace: FixtureWorkspace, now = FIXTURE_CLOCK): Promise<Workspace> {
-  return openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now });
+async function opened(workspace: FixtureWorkspace, now = FIXTURE_CLOCK): Promise<Workspace> {
+  return workspace.keep(await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now }));
 }
 
 describe("admitPlan and realisePlan, the gates every operation's plan passes", () => {

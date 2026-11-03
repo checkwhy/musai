@@ -1,15 +1,9 @@
 import { join } from "node:path";
 import type { OperationDescriptor } from "@musai/api-core";
 import { OperationError, openWorkspace } from "@musai/api-core";
-import {
-  buildModule,
-  type Mismatch,
-  runModuleTests,
-  scaffoldModule,
-  type TemplateReference,
-  type TestReport,
-} from "@musai/devkit";
+import type { buildModule, Mismatch, TemplateReference, TestReport } from "@musai/devkit";
 import { exitCodeForClass, isKernelError, versionString } from "@musai/records";
+import { commandLine } from "@musai/run";
 import { MUSAI_DIR, Store } from "@musai/store";
 import { defaultPluginDir, syncSkills } from "../plugin/sync.js";
 
@@ -137,11 +131,12 @@ export const moduleNew: OperationDescriptor<ModuleNewInput, ModuleNewOutput> = {
     [
       output.targetDir,
       output.created ? "scaffolded, built and tested" : "already scaffolded by an earlier run",
-      `install it in this workspace: musai lab module build ${output.targetDir}`,
+      `install it in this workspace: ${commandLine(["musai", "lab", "module", "build", output.targetDir])}`,
     ].join("\n"),
   exitCode: (output) => (output.testReport !== null && !output.testReport.ok ? exitCodeForClass("unheld") : 0),
   async handler(input, context) {
     const template = input.template === undefined ? undefined : parseTemplateReference(input.template);
+    const { scaffoldModule } = await import("@musai/devkit");
     return scaffoldModule(input.dir, { template, now: context.now });
   },
 };
@@ -201,6 +196,7 @@ export const moduleBuild: OperationDescriptor<ModuleBuildInput, ModuleBuildOutpu
     const opened = await openWorkspace({ ...context, reportRefusal: undefined });
     let result: Awaited<ReturnType<typeof buildModule>>;
     try {
+      const { buildModule } = await import("@musai/devkit");
       result = await buildModule(input.dir, store, {
         blobs: opened.blobs,
         index: opened.index,
@@ -291,6 +287,7 @@ export const moduleTest: OperationDescriptor<ModuleTestInput, TestReport> = {
   renderText: renderModuleTestText,
   exitCode: (output) => (output.ok ? 0 : exitCodeForClass("unheld")),
   async handler(input, context) {
+    const { runModuleTests } = await import("@musai/devkit");
     return runModuleTests(input.dir, { record: input.record, update: input.update, now: context.now });
   },
 };

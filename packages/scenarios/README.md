@@ -13,9 +13,9 @@ A step's `args` may use `$WORKSPACE`, `$REPO`, `$SCENARIO` for the three directo
 `${step.path}` for a dotted field of an earlier step's parsed JSON output —
 `${book.minted.1.record.slot}` reads the slot `book` minted second.
 
-A scenario's workspace is a directory under the OS temp dir named for the clone's absolute path
-and the scenario, so two clones running the suite at once share nothing; `normalise` spells it
-`<workspace>` in every recorded byte.
+A scenario's workspace is named for the scenario inside a fresh directory under the OS temp dir,
+one per run and shared by its two passes, so two runs at once, from one clone or two, share
+nothing; `normalise` spells it `<workspace>` in every recorded byte.
 
 `$KEYS` is a copy of the scenario's own `keys/`, made owner-only beside the workspace, since git
 keeps no file mode and `ssh-keygen` refuses a key others may read. An Ed25519 signature is

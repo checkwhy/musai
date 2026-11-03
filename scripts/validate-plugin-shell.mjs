@@ -6,12 +6,15 @@ import { fileURLToPath } from "node:url";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginDir = join(repoRoot, "plugin");
 
+/** @type {string[]} */
 const failures = [];
 
+/** @param {string} message */
 function fail(message) {
   failures.push(message);
 }
 
+/** @param {string} path */
 async function exists(path) {
   try {
     await access(path);
@@ -31,7 +34,8 @@ async function checkManifest() {
   }
 }
 
-/** Resolved as the host does: the plugin's own directory, and the repository a session opens. */
+/** Resolved as the host does: the plugin's own directory, and the repository a session opens.
+ * @param {string} raw */
 function resolveTemplatedPath(raw) {
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a placeholder Claude Code's plugin loader resolves, not a template
   const substituted = raw.replaceAll("${CLAUDE_PLUGIN_ROOT}", pluginDir).replaceAll("${CLAUDE_PROJECT_DIR}", repoRoot);
@@ -51,6 +55,7 @@ async function checkMcpRegistration() {
     const server = servers[name];
     const args = Array.isArray(server.args) ? server.args : [];
     const entryArg = args.find(
+      /** @param {unknown} arg */
       (arg) => typeof arg === "string" && arg.includes("packages/distribution/dist/bin/mcp.js"),
     );
     if (entryArg === undefined) {

@@ -32,7 +32,6 @@ const FIXED_NOW = fixedClock("2026-08-30T00:00:00.000Z");
 async function coreModuleRegistries(): Promise<{
   readonly registry: SlotRegistry;
   readonly presets: PresetRegistry;
-  readonly index: IndexDb;
   cleanup(): Promise<void>;
 }> {
   const dir = await mkdtemp(join(tmpdir(), "musai-core-module-slots-"));
@@ -40,7 +39,7 @@ async function coreModuleRegistries(): Promise<{
   const ctx: GitContext = { gitDir };
   const store = new Store({ ctx, scope: "slots", now: FIXED_NOW });
   const sourceGitDir = await repoGitDir();
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   await buildModule(CORE_MODULE_DIR, store, {
     blobs: blobStoreOf(dir),
@@ -53,7 +52,6 @@ async function coreModuleRegistries(): Promise<{
   return {
     registry,
     presets: readPresetDeclarations(index, registry),
-    index,
     async cleanup() {
       await rm(dir, { recursive: true, force: true });
     },
@@ -65,7 +63,7 @@ async function coreModuleSlotRegistry(): Promise<{ readonly registry: SlotRegist
   return { registry, cleanup };
 }
 
-describe("the core module's own eight slots", () => {
+describe("the core module's own seven slots", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
@@ -74,7 +72,7 @@ describe("the core module's own eight slots", () => {
     }
   });
 
-  it("declares eight settings and no more", async () => {
+  it("declares seven settings and no more", async () => {
     const { registry, cleanup } = await coreModuleSlotRegistry();
     cleanups.push(cleanup);
     expect([...registry.keys()].sort()).toEqual(
@@ -86,12 +84,11 @@ describe("the core module's own eight slots", () => {
         PACK_IRREVERSIBLE_SLOT_ID,
         "musai.core/resolution-age",
         "musai.core/signing-level",
-        "musai.core/staleness-policy",
       ].sort(),
     );
   });
 
-  it("holds no kernel-side default for any of the eight: resolving with an empty project layer and empty preset matches the slot's own declared default", async () => {
+  it("holds no kernel-side default for any of the seven: resolving with an empty project layer and empty preset matches the slot's own declared default", async () => {
     const { registry, cleanup } = await coreModuleSlotRegistry();
     cleanups.push(cleanup);
     const limits = resolveSlot("musai.core/invocation-limits", registry, {}).value as {
@@ -103,7 +100,6 @@ describe("the core module's own eight slots", () => {
     expect(resolveSlot("musai.core/resolution-age", registry, {}).value).toBe(0);
     expect(resolveSlot("musai.core/need-concurrency", registry, {}).value).toBe(1);
     expect(resolveSlot("musai.core/signing-level", registry, {}).value).toBe("off");
-    expect(resolveSlot("musai.core/staleness-policy", registry, {}).value).toBe("strict");
     expect(resolveSlot("musai.core/brief-budget", registry, {}).value).toBe(20000);
     expect(resolveSlot(PACK_IRREVERSIBLE_SLOT_ID, registry, {}).value).toBe(false);
   });
@@ -142,7 +138,7 @@ describe("the core module's own eight slots", () => {
   });
 });
 
-const ALL_EIGHT_SLOT_IDS = [
+const ALL_SEVEN_SLOT_IDS = [
   "musai.core/brief-budget",
   "musai.core/invocation-limits",
   "musai.core/isolation-policy",
@@ -150,7 +146,6 @@ const ALL_EIGHT_SLOT_IDS = [
   PACK_IRREVERSIBLE_SLOT_ID,
   "musai.core/resolution-age",
   "musai.core/signing-level",
-  "musai.core/staleness-policy",
 ];
 
 describe("the core module's three shipped presets", () => {
@@ -174,7 +169,7 @@ describe("the core module's three shipped presets", () => {
     const interactive = presets.get("musai.core/interactive")!;
     const ci = presets.get("musai.core/ci")!;
 
-    for (const slotId of ALL_EIGHT_SLOT_IDS) {
+    for (const slotId of ALL_SEVEN_SLOT_IDS) {
       const interactiveValue = interactive.assignments[slotId];
       const ciValue = ci.assignments[slotId];
       if (slotId === "musai.core/isolation-policy" || slotId === "musai.core/resolution-age") {
@@ -206,10 +201,10 @@ describe("the core module's three shipped presets", () => {
     }
   });
 
-  it("leave a workspace whose project layer assigns nothing resolving every one of the eight slots through the defaults layer", async () => {
+  it("leave a workspace whose project layer assigns nothing resolving every one of the seven slots through the defaults layer", async () => {
     const { registry, cleanup } = await coreModuleRegistries();
     cleanups.push(cleanup);
-    for (const slotId of ALL_EIGHT_SLOT_IDS) {
+    for (const slotId of ALL_SEVEN_SLOT_IDS) {
       const resolution = resolveSlot(slotId, registry, {});
       expect(resolution.layer).toBe("pack-defaults");
     }

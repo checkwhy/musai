@@ -10,3 +10,8 @@ stdout '^verified: 5 records'
 
 exec musai-verify trace --source $WORKSPACE 921e892d
 stdout 'made by florin via tty · unsigned'
+
+# A trust commit holding no allowed-signers is an invocation to fix, never every signature unknown.
+! exec musai-verify verify --trust scope/default $WORKSPACE
+stderr 'scope/default \([0-9a-f]{40}\) holds no allowed-signers file'
+! stdout .

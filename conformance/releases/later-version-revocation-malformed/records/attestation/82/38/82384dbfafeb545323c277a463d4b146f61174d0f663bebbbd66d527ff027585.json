@@ -1,0 +1,1 @@
+{"kind":"attestation","principal":"key:SHA256:v7xjWVYg2reXpc1uMDt9ueydj7ANfkI6gYUxTDesC7U","principalClass":"person","purpose":"revoked","schemaVersion":7.5,"subject":"sha256:42eb14cc43763a1d89f80dd81def025b9bda99a2e7b4d0b128d06569ba365b28","supersedes":["sha256:4ff65fa4ba284ff6cd6cd78e217c039cde83c9cf85358d985adb48ede9f37b05","not a record id"],"via":7}

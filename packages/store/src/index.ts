@@ -4,6 +4,7 @@ export {
   type MainFileContent,
   projectLayerSlots,
   readTrustBranch,
+  readTrustTip,
   readWorkspaceConfig,
   SLOTS_CONFIG_KEY,
   type TrustBranch,
@@ -40,6 +41,8 @@ export {
 } from "./git.js";
 export {
   adoptWorkspace,
+  CALL_LOG_DIR,
+  initHolders,
   initWorkspace,
   LOCAL_DIR,
   MUSAI_DIR,
@@ -48,6 +51,7 @@ export {
   scopeVerificationCachePath,
   type WorkspaceAdoption,
   type WorkspaceInit,
+  workspaceAbsent,
 } from "./init.js";
 export {
   currentKey,
@@ -106,3 +110,4 @@ export {
   type ViewWorktree,
   WorktreeBoundaryError,
 } from "./worktree.js";
+export { writeWhole } from "./write-whole.js";

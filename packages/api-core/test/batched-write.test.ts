@@ -52,7 +52,7 @@ test(
   "a plan of ten thousand claims lands through perform in one commit, and the fold then holds every one",
   async () => {
     repo = await makeFixtureRepo("canon", [CLAIM_DECLARATION]);
-    const view = await openWorkspace({ workspace: repo.workspace, scope: "canon", now: repo.now });
+    using view = await openWorkspace({ workspace: repo.workspace, scope: "canon", now: repo.now });
     const before = await commitCount(repo, "canon");
     const plan: OperationPlan = {
       put: claims("planned").map((value) => ({ kind: "claim", value })),
@@ -81,7 +81,7 @@ test(
       new Store({ ctx: repo!.ctx, scope, now: repo!.now, claimTypes: repo!.claimTypes });
     const canon = storeOf("canon");
     await canon.put("claim", claimAt("base"));
-    await (await openWorkspace({ workspace: repo.workspace, scope: "canon", now: repo.now })).fork("fork");
+    await repo.keep(await openWorkspace({ workspace: repo.workspace, scope: "canon", now: repo.now })).fork("fork");
     await storeOf("fork").putMany(claims("forked").map((value) => ({ kind: "claim" as const, value })));
     const before = await commitCount(repo, "canon");
 

@@ -15,9 +15,18 @@ import (
 //go:embed roles.json
 var embeddedRoles []byte
 
-type roleTable struct {
+// RoleTable is the kernel's role table: the actions each role grants at
+// scope any, and those an empty trust branch grants everyone.
+type RoleTable struct {
 	Roles        map[string][]string `json:"roles"`
 	EmptyDefault []string            `json:"emptyDefault"`
+}
+
+// LoadRoleTable decodes the role table this verifier embeds.
+func LoadRoleTable() (RoleTable, error) {
+	var table RoleTable
+	err := json.Unmarshal(embeddedRoles, &table)
+	return table, err
 }
 
 // Grant is one line of a roles file: a principal holds a role at a scope.
@@ -33,14 +42,14 @@ type Roles struct {
 	Grants []Grant
 	// NoSigners is true where the allowed-signers file names nobody.
 	NoSigners bool
-	table     roleTable
+	table     RoleTable
 }
 
 // ParseRoles parses a roles file as the kernel does: one principal, role
 // and scope per line, `#` starting a comment, a role the table names.
 func ParseRoles(text string, noSigners bool) (Roles, error) {
-	var table roleTable
-	if err := json.Unmarshal(embeddedRoles, &table); err != nil {
+	table, err := LoadRoleTable()
+	if err != nil {
 		return Roles{}, err
 	}
 	roles := Roles{NoSigners: noSigners, table: table}

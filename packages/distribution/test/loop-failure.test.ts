@@ -85,9 +85,10 @@ afterAll(async () => {
 async function failingCheck(mode: string): Promise<World & { readonly check: RecordId }> {
   const world = await emptyWorld(key, scratch);
   for (const dir of [CORE_MODULE_DIR, FAILS_AFTER_RUNS_MODULE_DIR]) {
+    using folded = await foldedIndex(world.store);
     await buildModule(dir, world.store, {
       blobs: blobStoreOf(world.workspace),
-      index: await foldedIndex(world.store),
+      index: folded,
       now,
     });
   }

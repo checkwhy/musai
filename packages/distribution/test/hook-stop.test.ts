@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
-import { type Checkout, fixedClock, makeCheckout } from "@musai/test-support";
+import { type Checkout, fixedClock, makeCheckout, splitByShell } from "@musai/test-support";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { lastTurn } from "../src/hook/transcript.js";
 import { checkRun } from "../src/ops/check.js";
@@ -202,7 +202,8 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
   }
 
   async function receipts(context: OperationContext): Promise<readonly string[]> {
-    return (await openWorkspace(context)).index.receiptStarts();
+    using opened = await openWorkspace(context);
+    return opened.index.receiptStarts();
   }
 
   test("mints the claim by the check the turn ran at the repository's root", async () => {
@@ -260,7 +261,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.decision).toBe("block");
-    expect(output.reason).toContain('musai check "The build is clean." -- rm -rf build');
+    expect(output.reason).toContain("musai check 'The build is clean.' -- rm -rf build");
     expect((await stat(join(dir, "build"))).isDirectory()).toBe(true);
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
@@ -277,7 +278,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.reason).toContain(
-      'with no receipt minted this turn. Mint one, or say what was not run: musai check "All tests pass." -- vitest',
+      "with no receipt minted this turn. Mint one, or say what was not run: musai check 'All tests pass.' -- vitest",
     );
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
@@ -293,7 +294,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "All tests pass." -- git push origin test');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- git push origin test");
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
 
@@ -308,7 +309,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "All tests pass." -- make test deploy');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- make test deploy");
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
 
@@ -332,7 +333,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
       const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-      expect(output.reason).toContain(`musai check "All tests pass." -- ${command}`);
+      expect(output.reason).toContain(`musai check 'All tests pass.' -- ${command}`);
       expect(await receipts(context)).toEqual(before);
     },
     60_000,
@@ -350,7 +351,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "All tests pass." -- vitest');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- vitest");
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
 
@@ -366,7 +367,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "All tests pass." -- vitest');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- vitest");
     expect(await receipts(context)).toEqual(before);
   }, 60_000);
 
@@ -381,9 +382,10 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.reason).toBe(
-      'You said "All tests pass." with no receipt minted this turn, and checking it would add vitest to the workspace\'s tools. Mint one, or say what was not run: musai check "All tests pass." -- vitest',
+      "You said \"All tests pass.\" with no receipt minted this turn, and checking it would add vitest to the workspace's tools. Mint one, or say what was not run: musai check 'All tests pass.' -- vitest",
     );
-    expect((await openWorkspace(context)).tools).not.toContain("vitest");
+    using opened = await openWorkspace(context);
+    expect(opened.tools).not.toContain("vitest");
   }, 60_000);
 
   test("proposes re-checking a sentence already claimed by another command, never replacing it", async () => {
@@ -435,7 +437,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.decision).toBe("block");
-    expect(output.reason).toContain('musai check "All tests pass now." -- pnpm test');
+    expect(output.reason).toContain("musai check 'All tests pass now.' -- pnpm test");
   }, 60_000);
 
   test("proposes the check where the command the turn ran is one only a shell reads", async () => {
@@ -449,7 +451,37 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.decision).toBe("block");
-    expect(output.reason).toContain('musai check "All tests pass." -- pnpm test 2>&1 | tail -5');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- pnpm test 2>&1 | tail -5");
+  }, 60_000);
+
+  test("proposes a check that pastes into a shell with the sentence as one argument, as said", async () => {
+    const { dir, context } = await workspace();
+    const sentence = `All tests pass under $HOME's "a\\b" $(id) build.`;
+    const path = await transcript(dir, [
+      person("make the suite green", "2026-10-05T12:00:00.000Z"),
+      ...ran("./test.sh", "2026-10-05T12:00:30.000Z", dir),
+      said(sentence, "2026-10-05T12:01:00.000Z"),
+    ]);
+
+    const { reason } = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
+
+    const proposal = reason!.slice(reason!.indexOf("musai check "));
+    expect(await splitByShell(proposal)).toEqual(["musai", "check", sentence, "--", "./test.sh"]);
+  }, 60_000);
+
+  test("proposes a check whose sentence holds a control or a bidirectional character as a $'…' word", async () => {
+    const { dir, context } = await workspace();
+    const path = await transcript(dir, [
+      person("make the suite green", "2026-10-05T12:00:00.000Z"),
+      ...ran("./test.sh", "2026-10-05T12:00:30.000Z", dir),
+      said("All tests pass\u001b[2K in \u202eredro.", "2026-10-05T12:01:00.000Z"),
+    ]);
+
+    const { reason } = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
+
+    expect(reason).toContain("musai check $'All tests pass\\033[2K in \\342\\200\\256redro.' -- ./test.sh");
+    expect(reason).not.toContain("\u001b");
+    expect(reason).not.toContain("\u202e");
   }, 60_000);
 
   test("proposes the check where the command the turn ran names a program by its path", async () => {
@@ -463,7 +495,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
     expect(output.decision).toBe("block");
-    expect(output.reason).toContain('musai check "All tests pass." -- ./test.sh');
+    expect(output.reason).toContain("musai check 'All tests pass.' -- ./test.sh");
   }, 60_000);
 
   test("passes when a receipt was minted after the person's last message", async () => {
@@ -526,7 +558,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "Lint is clean." -- pnpm lint');
+    expect(output.reason).toContain("musai check 'Lint is clean.' -- pnpm lint");
   }, 60_000);
 
   test("names a placeholder command when the turn ran none", async () => {
@@ -538,7 +570,7 @@ describe("the Stop hook: a pass sentence with no receipt this turn is checked or
 
     const output = await runHandler(hookStop, { hook: { transcript_path: path } }, context);
 
-    expect(output.reason).toContain('musai check "The tests passed." -- <command>');
+    expect(output.reason).toContain("musai check 'The tests passed.' -- <command>");
   }, 60_000);
 
   test("ignores a pass sentence in an earlier turn", async () => {

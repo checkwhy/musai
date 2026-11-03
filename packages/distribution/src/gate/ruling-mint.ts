@@ -1,10 +1,11 @@
-import type { Workspace } from "@musai/api-core";
+import type { OperationContext, Workspace } from "@musai/api-core";
 import { OperationError, principalClassForVia, retirementOf, saltAsked } from "@musai/api-core";
 import { authorityOf, type CheckedAuthority, type RulingAuthority } from "@musai/evaluate";
 import type { OperationPlan } from "@musai/modules";
 import {
   ANY_SCOPE,
   type ClaimRecord,
+  type ComputedRunRecord,
   CURRENT_SCHEMA_VERSIONS,
   isRelayedChannel,
   type RecordId,
@@ -12,7 +13,10 @@ import {
   type RunRecord,
   type ViaChannel,
 } from "@musai/records";
-import { applicabilityAt, groupHolder, missingClaimDetail } from "../claim.js";
+import { briefClearanceOf } from "../brief/recipe.js";
+import { applicabilityAt, briefedClaim, briefedEvaluationMove, groupHolder, missingClaimDetail } from "../claim.js";
+import { statusAdvice } from "../claim-ref.js";
+import { movedReadLine, movedReadsDiff } from "./diff.js";
 
 /** What minting a ruling needs. It carries no principal class: the channel is the check. */
 export interface RulingMintInput {
@@ -37,6 +41,7 @@ function declaredTierForVia(via: ViaChannel): RulingAuthority {
 export async function mintRuling(
   view: Workspace,
   input: RulingMintInput,
+  context: OperationContext,
 ): Promise<Pick<OperationPlan, "put" | "attest">> {
   const principalClass = principalClassForVia(input.via);
   const declared = declaredTierForVia(input.via);
@@ -75,6 +80,27 @@ export async function mintRuling(
       about: [input.brief],
       detail: `${input.brief} is ${what}, and a ruling is made against a brief`,
     });
+  }
+  const brief = asked as ComputedRunRecord;
+  const movedSince = await movedReadsDiff(view, brief, context, input.brief);
+  if (movedSince.length > 0) {
+    throw new OperationError({
+      reason: "stale",
+      about: movedSince.map((entry) => entry.id),
+      detail: `refusing to rule over the brief ${input.brief}: evidence moved since it was rendered:\n${movedSince.map(movedReadLine).join("\n")}`,
+    });
+  }
+  const briefed = briefedClaim(view, brief);
+  if (briefed !== undefined) {
+    const rendered = briefClearanceOf(brief.recipe);
+    const moved = await briefedEvaluationMove(view, briefed, rendered);
+    if (moved !== null) {
+      throw new OperationError({
+        reason: "stale",
+        about: [input.brief],
+        detail: `refusing to rule over the brief ${input.brief}: ${moved}, so the receipts it packs no longer stand; run ${statusAdvice(briefed.slot, rendered, view.clearance)} and render the brief again`,
+      });
+    }
   }
 
   // Finer than the action every plan is gated on: the channel's tier itself must be granted.

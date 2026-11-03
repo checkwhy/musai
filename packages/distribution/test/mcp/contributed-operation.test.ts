@@ -126,7 +126,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
     await fixWorkspaceKey(workspace);
     context = { workspace, scope, now, via: "model", principalName: "a-client" };
     const { stdout } = await execa("git", ["rev-parse", "--absolute-git-dir"], { cwd: STAMPER_FIXTURE_DIR });
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await buildModule(CORE_MODULE_DIR, opened.store, {
       blobs: blobStoreOf(workspace),
       index: opened.index,
@@ -152,12 +152,13 @@ describe("a pack's operation contribution called as a tool answers with a plan t
   });
 
   async function tip(): Promise<string | null> {
-    return (await openWorkspace({ workspace, scope, now })).store.tip();
+    using opened = await openWorkspace({ workspace, scope, now });
+    return await opened.store.tip();
   }
 
   /** A stored ruling over a stored claim, decided against a brief run. */
   async function aRuling(): Promise<{ readonly claim: RecordId; readonly ruling: RecordId }> {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const [claimId, briefId] = await opened.put([
       { kind: "claim", value: claimDraft("ruled") },
       { kind: "run", value: fixtureBrief("the brief a fixture ruling cites") },
@@ -204,7 +205,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
     const performed = await callTool(MUSAI, context, "stamper_answers", { answer });
 
     expect(performed.structuredContent).toEqual(planned.structuredContent);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     expect(await opened.store.tip()).not.toBe(before);
     for (const item of (performed.structuredContent as { minted: Minted[] }).minted) {
       expect(await opened.store.read(item.id, item.kind as "claim" | "attestation")).toEqual(item.record);
@@ -284,7 +285,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
 
     /** The argument `challenge.file` would mint against a stored claim and receipt. */
     async function anAdmissibleArgument(): Promise<Record<string, unknown>> {
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const [claimId, runId] = await opened.put([
         { kind: "claim", value: claimDraft("challenged") },
         { kind: "run", value: commandRun() },
@@ -354,7 +355,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
     test("a pack's draft citing a run whose attestation carries no signature refuses workspace-incomplete, naming the attestation", async () => {
       const argument = await anAdmissibleArgument();
       const [edge] = argument["evidence"] as { run: RecordId }[];
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const [attestationId] = await opened.put([
         {
           kind: "attestation",
@@ -457,7 +458,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
       expect(minted[0]!.record).not.toHaveProperty("injected");
       expect(minted[0]!.id).toBe(recordId(claimDraft("injected")));
       expect(minted[1]!.record).toMatchObject({ subject: minted[0]!.id });
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       expect(await opened.store.read(minted[0]!.id, "claim")).toEqual(minted[0]!.record);
     });
 
@@ -473,7 +474,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
         const { minted } = result.structuredContent as { minted: Minted[] };
         expect(minted[0]!.id).toBe(booked!.id);
       }
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       expect(await opened.store.read(booked!.id, "claim")).toEqual(booked!.record);
     });
 
@@ -530,14 +531,14 @@ describe("a pack's operation contribution called as a tool answers with a plan t
 
       const { minted } = performed.structuredContent as { minted: Minted[] };
       expect(minted[0]!.record["evidence"]).toEqual([edge]);
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const stored = await opened.store.read(minted[0]!.id, "argument");
       expect(recordId(stored)).toBe(minted[0]!.id);
     });
 
     test("a draft whose own kind differs from the entry putting it is refused in either mode, and nothing is written", async () => {
       const { ruling } = await aRuling();
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const rulingRecord = await opened.store.read(ruling, "ruling");
       const before = await tip();
 
@@ -618,14 +619,14 @@ describe("a pack's operation contribution called as a tool answers with a plan t
       });
 
       const { minted } = performed.structuredContent as { minted: Minted[] };
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       expect(await opened.store.read(minted[0]!.id, "claim")).toEqual(claim);
     });
 
     test("an artifact standing in for an artifact of its own case is written as the pack drafted it", async () => {
       const booked = await callTool(MUSAI, context, "case_book", { slug: "superseded", about: [] });
       const caseId = (booked.structuredContent as { case: RecordId }).case;
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const [predecessor] = await opened.put([{ kind: "artifact", value: artifactCiting(caseId, caseId) }]);
       const successor = { ...artifactCiting(caseId, caseId), supersedes: [predecessor!] };
 
@@ -634,14 +635,14 @@ describe("a pack's operation contribution called as a tool answers with a plan t
       });
 
       const { minted } = performed.structuredContent as { minted: Minted[] };
-      const reopened = await openWorkspace({ workspace, scope, now });
+      using reopened = await openWorkspace({ workspace, scope, now });
       expect(await reopened.store.read(minted[0]!.id, "artifact")).toEqual(successor);
     });
 
     test("an artifact standing in for anything but one artifact of its own case is refused in either mode, and nothing is written", async () => {
       const booked = await callTool(MUSAI, context, "case_book", { slug: "superseding-elsewhere", about: [] });
       const caseId = (booked.structuredContent as { case: RecordId }).case;
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const [first, second] = await opened.put([
         { kind: "artifact", value: artifactCiting(caseId, caseId) },
         { kind: "artifact", value: { ...artifactCiting(caseId, caseId), format: "text" } },
@@ -736,13 +737,13 @@ describe("a pack's operation contribution called as a tool answers with a plan t
 
       const { minted } = performed.structuredContent as { minted: Minted[] };
       expect(minted[0]!.record["exclusiveGroup"]).toBe(`${slug}/disposition`);
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       expect(await opened.store.read(minted[0]!.id, "claim")).toEqual(disposition);
     });
 
     test("a claim naming an exclusive group at a slot a live contributor already holds is refused in either mode, and that slot still reads open", async () => {
       const group = "a-menu-the-pack-did-not-open";
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       const [member, briefId] = await opened.put([
         { kind: "claim", value: { ...claimDraft("the-answered-member"), exclusiveGroup: group } },
         { kind: "run", value: fixtureBrief("the brief a fixture ruling cites") },
@@ -879,7 +880,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
       test("a booking whose kind puts a grouped claim at a slot a person's claim holds is refused in either mode, and the person's claim still reads open", async () => {
         const slug = "a-slot-a-person-spoke-for";
         const derived = await aDispositionClaim(slug);
-        const opened = await openWorkspace({ workspace, scope, now });
+        using opened = await openWorkspace({ workspace, scope, now });
         await opened.put([
           {
             kind: "claim",
@@ -1024,7 +1025,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
         "attestation",
       ]);
       expect(minted[1]!.id).toBe(caseId);
-      const opened = await openWorkspace({ workspace, scope, now });
+      using opened = await openWorkspace({ workspace, scope, now });
       for (const item of minted) {
         expect(await opened.store.read(item.id, item.kind as "argument")).toEqual(item.record);
       }
@@ -1064,7 +1065,7 @@ describe("a pack's operation contribution called as a tool answers with a plan t
     if (claim === undefined || attestation === undefined) {
       throw new Error("asserts-and-runs minted neither a claim nor an attestation to check");
     }
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
 
     // The id realisePlan computed over the draft is the id the store persisted, by construction.
     const storedClaim = await opened.store.read(claim.id, "claim");

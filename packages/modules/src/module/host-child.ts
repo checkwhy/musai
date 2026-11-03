@@ -52,7 +52,7 @@ function stripTypesQuietly(source: string): string {
   }
 }
 
-/** Compiled strict as the build compiles, every line in place. It mirrors `rule/sandbox-worker.ts`
+/** Compiled strict as the build compiles, every line in place. It mirrors `rule/host.ts`
  * rather than importing it: a spawned child maps no `.js` specifier to its `.ts` sibling. */
 function compileModuleScript(source: string, modulePath: string): Script {
   const stripped = stripTypesQuietly(source);

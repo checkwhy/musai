@@ -26,7 +26,7 @@ function textContents(uri: string, mimeType: string, text: string): ReadResource
 }
 
 async function readCaseResource(uri: string, slug: string, context: OperationContext): Promise<ReadResourceResult> {
-  const opened = await openWorkspace(context);
+  using opened = await openWorkspace(context);
   const found = await findCaseRecord(opened, slug);
   if (found === null) {
     throw new OperationError({ reason: "no-such-record", about: [uri], detail: `no case named ${slug}` });

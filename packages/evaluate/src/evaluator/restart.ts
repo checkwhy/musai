@@ -24,6 +24,7 @@ import {
 import type {
   DigestSet,
   FetchRecipe,
+  PerformedRunRecord,
   ReadEntry,
   Reason,
   RecordId,
@@ -52,6 +53,7 @@ import {
   bindDeclaredNames,
   type CheckoutBindings,
   checkoutBindingsFor,
+  commandLine,
   commitTree,
   insideCheckout,
   type LayerDeclaration,
@@ -127,7 +129,7 @@ class RunTimedOutError extends KernelError {
     super({
       reason: "over-budget",
       about: [command[0]!],
-      detail: `the run of ${command.join(" ")} outlived its ${timeoutMs} ms deadline and was ended, with no receipt recorded`,
+      detail: `the run of ${commandLine(command)} outlived its ${timeoutMs} ms deadline and was ended, with no receipt recorded`,
     });
     this.name = "RunTimedOutError";
   }
@@ -365,6 +367,11 @@ async function refuseStationRuns(
   }
 }
 
+/** The recipe a run need is performed, reused and filed under: under a station, the station's. */
+function askedRecipe(recipe: RunRecipe, station: Station | undefined): RunRecipe {
+  return station === undefined ? recipe : stationRecipe(recipe, station);
+}
+
 /** Binaries are authorised before a receipt is reused, since a pinned one has no age; an invoke
  * records nothing, so mutual invokes form no chain. */
 async function performNeed(
@@ -391,7 +398,7 @@ async function performNeed(
     const resolved = await resolveReference({ declared }, ctx.resolutionTable ?? new Map(), {
       index: ctx.index,
       store: ctx.store,
-      method: { kind: "fetch", recipe: need.recipe },
+      fetch: need.recipe,
       ageLimitMs: ctx.ageLimitMs,
       localDir: ctx.localDir,
       layerDeclarations: ctx.layerDeclarations,
@@ -456,8 +463,8 @@ async function performNeed(
   if (ctx.requirementRegistry !== undefined) {
     authorisedProgram(need.recipe, ctx.requirementRegistry);
   }
-  const asked = ctx.station === undefined ? need.recipe : stationRecipe(need.recipe, ctx.station);
-  const askedId = ctx.station === undefined ? id : needId({ kind: "run", recipe: asked });
+  const asked = askedRecipe(need.recipe, ctx.station);
+  const askedId = needId({ kind: "run", recipe: asked });
   if (ctx.performRun !== undefined) {
     return { kind: "satisfied", recordId: await ctx.performRun(asked, askedId) };
   }
@@ -686,6 +693,8 @@ export interface RestartLoopResult {
   readonly invocations: number;
   /** Each id once, under the first run or fetch need that answered it, else under `record`. */
   readonly receipts: readonly { readonly id: RecordId; readonly need: Need["kind"] }[];
+  /** Each run or fetch receipt the loop read to hand the rule as evidence. */
+  readonly runs: ReadonlyMap<RecordId, PerformedRunRecord>;
   readonly readLog: ReadLog;
   /** What the kernel handed the rule, keyed as a read-set is. */
   readonly readSet: readonly ReadEntry[];
@@ -706,6 +715,7 @@ export async function runRestartLoop(options: RestartLoopOptions): Promise<Resta
   let input = options.input;
   let invocations = 0;
   const receipts: { readonly id: RecordId; readonly need: Need["kind"] }[] = [];
+  const runs = new Map<RecordId, PerformedRunRecord>();
   const reads = new Set<string>();
   const rounds: RestartRound[] = [];
   const recipes = new Map<RecordId, RecordId>();
@@ -713,6 +723,7 @@ export async function runRestartLoop(options: RestartLoopOptions): Promise<Resta
     verdict,
     invocations,
     receipts,
+    runs,
     readLog: recordRead(input.claimId, reads),
     readSet: handedReads(
       input,
@@ -807,7 +818,9 @@ export async function runRestartLoop(options: RestartLoopOptions): Promise<Resta
         // A run or fetch need's answer is always a run; a record need's is whatever it names.
         receipts[listed] = { id: outcome.recordId, need: need.kind };
       }
-      if (need.kind === "run" || need.kind === "fetch") {
+      if (need.kind === "run") {
+        recipes.set(outcome.recordId, needId({ kind: "run", recipe: askedRecipe(need.recipe, options.station) }));
+      } else if (need.kind === "fetch") {
         recipes.set(outcome.recordId, id);
       }
       if (
@@ -819,6 +832,7 @@ export async function runRestartLoop(options: RestartLoopOptions): Promise<Resta
           outcome.recordId,
           (await options.store.read(outcome.recordId, "run")) as RunRecord,
         );
+        runs.set(outcome.recordId, receiptValue);
         evidence.push({
           runId: outcome.recordId,
           exitCode: receiptValue.observation.exitCode,

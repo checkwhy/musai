@@ -1,0 +1,1415 @@
+{
+  "cases": [
+    {
+      "name": "a container run at the root of its checkout",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "go",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint go golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "a nested working directory, literals out of order and declared names, one secret",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": "pkg/sub/",
+          "environment": {
+            "ZED": "last",
+            "ALPHA": "a value",
+            "A+B": "plus"
+          },
+          "declared": [
+            {
+              "name": "TOKEN",
+              "secret": true
+            },
+            {
+              "name": "REGION",
+              "secret": false
+            }
+          ],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [
+            {
+              "name": "TOKEN",
+              "secret": true,
+              "layer": "bindings",
+              "value": null,
+              "keyedHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "keyId": "k1"
+            },
+            {
+              "name": "REGION",
+              "secret": false,
+              "layer": "bindings",
+              "value": "eu-west-1",
+              "keyedHash": null,
+              "keyId": null
+            }
+          ],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}/pkg/sub/:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "-e",
+        "A+B=plus",
+        "-e",
+        "ALPHA=a value",
+        "-e",
+        "ZED=last",
+        "-e",
+        "TOKEN",
+        "-e",
+        "REGION",
+        "--entrypoint",
+        "go",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\"/pkg/sub/:/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' -e 'A+B=plus' -e 'ALPHA=a value' -e 'ZED=last' -e TOKEN -e REGION --entrypoint go golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "a tagged image on a registry with a port, and a command a shell would split",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "sh",
+            "-c",
+            "echo \"$HOME\" && ls 'a b'"
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "registry.example:5000/team/image:v2",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "registry.example:5000/team/image:v2",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "sh -c 'echo \"$HOME\" && ls '\\''a b'\\'''",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "sh",
+        "registry.example:5000/team/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "-c",
+        "echo \"$HOME\" && ls 'a b'"
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint sh registry.example:5000/team/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f -c 'echo \"$HOME\" && ls '\\''a b'\\'''"
+    },
+    {
+      "name": "a command holding a backtick, a backslash, a quote and an empty argument",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "printf",
+            "%s\\n",
+            "`id`",
+            "a\\b",
+            "it's",
+            ""
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "printf '%s\\n' '`id`' 'a\\b' 'it'\\''s' ''",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "printf",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "%s\\n",
+        "`id`",
+        "a\\b",
+        "it's",
+        ""
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint printf golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f '%s\\n' '`id`' 'a\\b' 'it'\\''s' ''"
+    },
+    {
+      "name": "an absolute working directory and no checkout",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": "/srv/app",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "uri": "example/image",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "uri": "example/image",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "/srv/app:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "go",
+        "example/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v /srv/app:/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint go example/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "a command whose own arguments follow -v and spell both placeholders",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "grep",
+            "-v",
+            "$(mktemp -d)x",
+            "-v",
+            "${MUSAI_CHECKOUT:?set it to your checkout}y",
+            "."
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "grep -v '$(mktemp -d)x' -v '${MUSAI_CHECKOUT:?set it to your checkout}y' .",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "grep",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "-v",
+        "$(mktemp -d)x",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}y",
+        "."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint grep golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f -v '$(mktemp -d)x' -v '${MUSAI_CHECKOUT:?set it to your checkout}y' ."
+    },
+    {
+      "name": "literal names integer-like and beyond the BMP, in UTF-16 order",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": ".",
+          "environment": {
+            "9": "nine",
+            "10": "ten",
+            "\uff5e": "tilde",
+            "\ud83d\ude00": "grin"
+          },
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "-e",
+        "10=ten",
+        "-e",
+        "9=nine",
+        "-e",
+        "\ud83d\ude00=grin",
+        "-e",
+        "\uff5e=tilde",
+        "--entrypoint",
+        "go",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' -e '10=ten' -e '9=nine' -e '\ud83d\ude00=grin' -e '\uff5e=tilde' --entrypoint go golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "a name declared twice, and a declared name that is also a literal",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": ".",
+          "environment": {
+            "SHARED": "literal"
+          },
+          "declared": [
+            {
+              "name": "TOKEN",
+              "secret": true
+            },
+            {
+              "name": "SHARED",
+              "secret": false
+            },
+            {
+              "name": "TOKEN",
+              "secret": false
+            }
+          ],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [
+            {
+              "name": "TOKEN",
+              "secret": true,
+              "layer": "bindings",
+              "value": null,
+              "keyedHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "keyId": "k1"
+            },
+            {
+              "name": "SHARED",
+              "secret": false,
+              "layer": "bindings",
+              "value": "eu-west-1",
+              "keyedHash": null,
+              "keyId": null
+            },
+            {
+              "name": "TOKEN",
+              "secret": false,
+              "layer": "bindings",
+              "value": "eu-west-1",
+              "keyedHash": null,
+              "keyId": null
+            }
+          ],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "-e",
+        "SHARED",
+        "-e",
+        "TOKEN",
+        "--entrypoint",
+        "go",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' -e SHARED -e TOKEN --entrypoint go golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "a working directory above the working root, with no checkout",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": "../sibling",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "uri": "example/image",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "uri": "example/image",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}/../sibling:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "--entrypoint",
+        "go",
+        "example/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "test",
+        "./..."
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\"/../sibling:/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' --entrypoint go example/image@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f test ./..."
+    },
+    {
+      "name": "an image declared, its run held under hygiene by a degrading policy",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "hygiene",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": null,
+      "engineShell": null
+    },
+    {
+      "name": "a run declaring no image",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "go",
+            "test",
+            "./..."
+          ],
+          "workingDirectory": ".",
+          "environment": {},
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            }
+          ],
+          "isolation": "hygiene"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            }
+          ],
+          "isolationHeld": "hygiene",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "go test ./...",
+      "engine": null,
+      "engineShell": null
+    },
+    {
+      "name": "a command and a literal holding a line feed, a tab, a bidirectional override, = and %",
+      "record": {
+        "kind": "run",
+        "schemaVersion": 4,
+        "runKind": "run",
+        "performer": {
+          "kind": "runner",
+          "version": "1"
+        },
+        "determinism": "nondeterministic",
+        "recipe": {
+          "command": [
+            "printf",
+            "a\nb\tc",
+            "\u202eexe.txt",
+            "A=b",
+            "%d",
+            "it's \\"
+          ],
+          "workingDirectory": ".",
+          "environment": {
+            "NOTE": "line\nnext"
+          },
+          "declared": [],
+          "substrates": [
+            {
+              "name": "tree",
+              "uri": "musai:tree"
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {},
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolation": "container"
+        },
+        "observation": {
+          "resolved": [
+            {
+              "name": "tree",
+              "uri": "musai:tree",
+              "digest": {
+                "gitTree": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+              }
+            },
+            {
+              "uri": "golang:1.25",
+              "digest": {
+                "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f"
+              },
+              "mediaType": "application/vnd.oci.image.manifest.v1+json"
+            }
+          ],
+          "isolationHeld": "container",
+          "binaries": [],
+          "bindings": [],
+          "output": "",
+          "outputLossy": false,
+          "exitCode": 0,
+          "scrubbed": [],
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "finishedAt": "2026-01-01T00:00:00.000Z",
+          "reads": [],
+          "cost": {}
+        },
+        "supersedes": []
+      },
+      "shell": "printf $'a\\nb\\tc' $'\\342\\200\\256exe.txt' 'A=b' '%d' 'it'\\''s \\'",
+      "engine": [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-v",
+        "${MUSAI_CHECKOUT:?set it to your checkout}:/musai/tree:ro",
+        "-v",
+        "$(mktemp -d):/musai/scratch:rw",
+        "--tmpfs",
+        "/musai/private/home:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/tmp:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-config:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-cache:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-data:exec,mode=1777",
+        "--tmpfs",
+        "/musai/private/xdg-state:exec,mode=1777",
+        "-w",
+        "/musai/tree",
+        "-e",
+        "HOME=/musai/private/home",
+        "-e",
+        "TMPDIR=/musai/private/tmp",
+        "-e",
+        "TEMP=/musai/private/tmp",
+        "-e",
+        "TMP=/musai/private/tmp",
+        "-e",
+        "XDG_CONFIG_HOME=/musai/private/xdg-config",
+        "-e",
+        "XDG_CACHE_HOME=/musai/private/xdg-cache",
+        "-e",
+        "XDG_DATA_HOME=/musai/private/xdg-data",
+        "-e",
+        "XDG_STATE_HOME=/musai/private/xdg-state",
+        "-e",
+        "SSH_AUTH_SOCK=",
+        "-e",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "-e",
+        "GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config",
+        "-e",
+        "NOTE=line\nnext",
+        "--entrypoint",
+        "printf",
+        "golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "a\nb\tc",
+        "\u202eexe.txt",
+        "A=b",
+        "%d",
+        "it's \\"
+      ],
+      "engineShell": "docker run --rm --network none -v \"${MUSAI_CHECKOUT:?set it to your checkout}\":/musai/tree:ro -v \"$(mktemp -d)\":/musai/scratch:rw --tmpfs '/musai/private/home:exec,mode=1777' --tmpfs '/musai/private/tmp:exec,mode=1777' --tmpfs '/musai/private/xdg-config:exec,mode=1777' --tmpfs '/musai/private/xdg-cache:exec,mode=1777' --tmpfs '/musai/private/xdg-data:exec,mode=1777' --tmpfs '/musai/private/xdg-state:exec,mode=1777' -w /musai/tree -e 'HOME=/musai/private/home' -e 'TMPDIR=/musai/private/tmp' -e 'TEMP=/musai/private/tmp' -e 'TMP=/musai/private/tmp' -e 'XDG_CONFIG_HOME=/musai/private/xdg-config' -e 'XDG_CACHE_HOME=/musai/private/xdg-cache' -e 'XDG_DATA_HOME=/musai/private/xdg-data' -e 'XDG_STATE_HOME=/musai/private/xdg-state' -e 'SSH_AUTH_SOCK=' -e 'GIT_CONFIG_NOSYSTEM=1' -e 'GIT_CONFIG_GLOBAL=/musai/scratch/unwritten-global-config' -e $'NOTE=line\\nnext' --entrypoint printf golang@sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f $'a\\nb\\tc' $'\\342\\200\\256exe.txt' 'A=b' '%d' 'it'\\''s \\'"
+    }
+  ]
+}

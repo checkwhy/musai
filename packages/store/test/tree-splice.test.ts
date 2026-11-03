@@ -112,7 +112,13 @@ describe("a tree spliced from the trees a write touches", () => {
         ...batch,
       ]);
 
-      expect({ seed, tree: await gitSpliceTree(ctx, baseCommit, batch) }).toEqual({ seed, tree: whole });
+      const baseTree = (await execa("git", ["--git-dir", ctx.gitDir, "rev-parse", `${baseCommit}^{tree}`])).stdout;
+      const spliced = await gitSpliceTree(ctx, baseCommit, batch);
+      expect({ seed, tree: spliced.sha, changed: spliced.changed }).toEqual({
+        seed,
+        tree: whole,
+        changed: whole !== baseTree,
+      });
     }
   });
 
@@ -120,7 +126,20 @@ describe("a tree spliced from the trees a write touches", () => {
     const random = seeded(CASES + 1);
     const batch = Array.from({ length: 10 }, () => ({ path: recordShapedPath(random), sha: pick(random, blobs) }));
 
-    expect(await gitSpliceTree(ctx, null, batch)).toBe(await gitBuildTree(ctx, batch));
+    expect(await gitSpliceTree(ctx, null, batch)).toEqual({ sha: await gitBuildTree(ctx, batch), changed: true });
+  });
+
+  test("a splice that places every file where the base already holds it reports no change", async () => {
+    const random = seeded(CASES + 2);
+    const base = Array.from({ length: 8 }, () => ({ path: recordShapedPath(random), sha: pick(random, blobs) }));
+    const baseCommit = await commitOf(base);
+    const baseTree = (await execa("git", ["--git-dir", ctx.gitDir, "rev-parse", `${baseCommit}^{tree}`])).stdout;
+    const replaced = { path: base[0]!.path, sha: blobs.find((blob) => blob !== base[0]!.sha)! };
+
+    expect(await gitSpliceTree(ctx, baseCommit, [replaced, base[0]!, base[1]!])).toEqual({
+      sha: baseTree,
+      changed: false,
+    });
   });
 
   test("a base holding an entry the store never writes is refused, naming the entry", async () => {

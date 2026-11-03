@@ -132,7 +132,7 @@ describe("open, hand-edit, save — against the built binary", () => {
     expect(artifact.record.supersedes).toEqual([]);
 
     // The anchor resolves from the artifact's bytes; a fold of this check's own reads it in memory.
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: { gitDir: join(workspace, MUSAI_DIR) }, scope: "default", now }));
     const anchors = index.anchorsOf(artifact.id as `sha256:${string}`);
     expect(anchors).toHaveLength(1);

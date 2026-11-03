@@ -1,6 +1,7 @@
-import { recordId } from "@musai/records";
+import { type Reason, recordId } from "@musai/records";
 import { fixtureRunRecord } from "@musai/test-support";
 import { describe, expect, test } from "vitest";
+import { OperationError } from "../src/errors.js";
 import { runHandler } from "../src/handler.js";
 import type { OperationDescriptor } from "../src/registry.js";
 import {
@@ -82,6 +83,40 @@ describe("runHandler, the one entry point every surface calls an operation throu
       about: ["fixture.misanswers@1"],
     });
     expect(refusal.message).toContain("data/answer must be string");
+  });
+
+  test("reports a refusal its handler raises outside the declared reasons as a defect, naming the reason", async () => {
+    const workspace = await fixtureWorkspace();
+    const refusing = (reason: Reason): OperationDescriptor<LabelInput, unknown> => ({
+      ...fixtureTool,
+      handler: async () => {
+        throw new OperationError({ reason, about: ["the label"], detail: "refused by the handler" });
+      },
+    });
+
+    const undeclared = await refusalOf(() =>
+      runHandler(refusing("no-such-record"), { label: "x" }, workspace.context()),
+    );
+
+    expect(undeclared).toMatchObject({ reason: "invalid-output", code: "bug", about: ["fixture.tool@1"] });
+    expect(undeclared.message).toContain("fixture.tool@1 refused no-such-record, which it does not declare");
+    expect(undeclared.cause).toMatchObject({ reason: "no-such-record", about: ["the label"] });
+  });
+
+  test("passes a declared refusal, and one the kernel raises beneath every operation, through as raised", async () => {
+    const workspace = await fixtureWorkspace();
+    for (const reason of ["head-moved", "workspace-incomplete"] as const) {
+      const refusing: OperationDescriptor<LabelInput, unknown> = {
+        ...fixtureTool,
+        handler: async () => {
+          throw new OperationError({ reason, about: ["the label"], detail: "refused by the handler" });
+        },
+      };
+
+      const refusal = await refusalOf(() => runHandler(refusing, { label: "x" }, workspace.context()));
+
+      expect(refusal).toMatchObject({ reason, about: ["the label"] });
+    }
   });
 
   test("answers in plan mode with what performing would mint, and moves no head", async () => {

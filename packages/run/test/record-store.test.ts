@@ -113,7 +113,7 @@ describe("the log a store hands the fold, against a per-commit diff of the same 
     const tip = (await store.tip())!;
 
     const walked: CommitChanges[] = [];
-    for await (const changes of store.changesSince(null)) {
+    for await (const changes of store.changesSince(null, tip)) {
       walked.push(changes);
     }
 
@@ -161,7 +161,7 @@ describe("a fold over a history that deleted a record path", () => {
     const deleting = await deleteAroundTheStore(repo, path);
     const [laterId] = await store.putMany([{ kind: "run", value: receipt("written after the deletion") }]);
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     const refusal = await index.fold(store).then(
       () => undefined,
       (error: unknown) => error,

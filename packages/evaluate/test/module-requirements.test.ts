@@ -54,7 +54,7 @@ async function install(repo: FixtureRepo, name: string, version: string, contrib
     recordId({ marker: `build-for-${name}-${version}` }),
     storeOf(repo),
     blobStoreOf(repo.workspace),
-    await foldedIndex(storeOf(repo)),
+    repo.keep(await foldedIndex(storeOf(repo))),
   );
 }
 
@@ -132,7 +132,7 @@ describe("a requirement entry a module record carried into the fold without inst
     const repo = await trackedRepo();
     await writeModuleRecord(repo, "stray.pack", [malformedRequirement("stray.pack")]);
     await writeModuleRecord(repo, "sound.pack", [requirement("sound.pack", "git", null)]);
-    const index = await foldedIndex(storeOf(repo));
+    using index = await foldedIndex(storeOf(repo));
 
     const registry = readRequirementDeclarations(index, []);
 
@@ -167,7 +167,7 @@ describe("the registry the installed module set declares", () => {
     await install(repo, "a.pack", "1.0.0", [requirement("a.pack", "git", ">=2.40")]);
     await install(repo, "b.pack", "1.0.0", [requirement("b.pack", "git", ">=2.40")]);
 
-    const registry = readRequirementDeclarations(await foldedIndex(storeOf(repo)), []);
+    const registry = readRequirementDeclarations(repo.keep(await foldedIndex(storeOf(repo))), []);
 
     expect([...registry.byBinary.keys()]).toEqual(["git"]);
     expect(registry.byBinary.get("git")?.versionPredicate).toBe(">=2.40");
@@ -179,7 +179,7 @@ describe("the registry the installed module set declares", () => {
     await install(repo, "a.pack", "1.0.0", [requirement("a.pack", "git", ">=2.40")]);
     await install(repo, "a.pack", "1.1.0", [requirement("a.pack", "node", ">=24")]);
 
-    const registry = readRequirementDeclarations(await foldedIndex(storeOf(repo)), []);
+    const registry = readRequirementDeclarations(repo.keep(await foldedIndex(storeOf(repo))), []);
 
     expect(registry.byBinary.has("git")).toBe(false);
     expect(registry.byBinary.get("node")?.declaredBy).toBe("a.pack");
@@ -188,7 +188,7 @@ describe("the registry the installed module set declares", () => {
   it("a fold holding no installed module answers a registry authorising nothing", async () => {
     const repo = await trackedRepo();
 
-    const registry = readRequirementDeclarations(await foldedIndex(storeOf(repo)), []);
+    const registry = readRequirementDeclarations(repo.keep(await foldedIndex(storeOf(repo))), []);
 
     expect(registry.byBinary.size).toBe(0);
     expect(registry.conflicts.size).toBe(0);
@@ -199,7 +199,7 @@ describe("the registry the installed module set declares", () => {
     await writeModuleRecord(repo, "first.pack", [requirement("first.pack", "true", null)]);
     await writeModuleRecord(repo, "second.pack", [requirement("second.pack", "true", ">=1")]);
     await writeModuleRecord(repo, "third.pack", [requirement("third.pack", "node", null)]);
-    const index = await foldedIndex(storeOf(repo));
+    using index = await foldedIndex(storeOf(repo));
 
     const registry = readRequirementDeclarations(index, []);
     const conflicted = runNeed(["true"]);

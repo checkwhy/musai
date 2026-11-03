@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { OperationPlan, PlannedRecord } from "@musai/modules";
 import {
   type ArgumentRecord,
-  type ArtifactRecord,
   type ClaimTypeDeclaration,
   CURRENT_SCHEMA_VERSIONS,
   type EvidenceEdge,
@@ -22,6 +21,7 @@ import {
 } from "@musai/records";
 import { MUSAI_DIR } from "@musai/store";
 import {
+  fixtureArtifact,
   fixtureRunRecord,
   installModuleRecord,
   installParserFixture,
@@ -97,18 +97,6 @@ function argumentDraft(target: RecordId, supersedes: readonly RecordId[] = []): 
   };
 }
 
-function artifactDraft(caseId: RecordId, content: string, supersedes: readonly RecordId[] = []): ArtifactRecord {
-  return {
-    kind: "artifact",
-    schemaVersion: CURRENT_SCHEMA_VERSIONS.artifact,
-    case: caseId,
-    lifecycle: "drafted",
-    content,
-    format: "text",
-    supersedes: [...supersedes],
-  };
-}
-
 function rulingDraft(claim: RecordId, brief: RecordId): RulingRecord {
   return {
     kind: "ruling",
@@ -158,8 +146,8 @@ async function applied(
   mode: Mode,
   admitDrafts: DraftAdmission = ADMITS_EVERYTHING,
 ): Promise<AppliedPlan> {
-  const opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
-  return applyContributedOperation(plan, DECLARATION, opened, workspace.context({ mode }), admitDrafts);
+  using opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
+  return await applyContributedOperation(plan, DECLARATION, opened, workspace.context({ mode }), admitDrafts);
 }
 
 /** The refusals `plan` draws previewed and performed, each checked to leave the tip unmoved. */
@@ -337,9 +325,9 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
     const workspace = await fixtureWorkspace();
     const [run, own, ownAgain, elsewhere] = await workspace.store().putMany([
       { kind: "run", value: fixtureRunRecord("not an artifact") },
-      { kind: "artifact", value: artifactDraft(CASE, "the first draft") },
-      { kind: "artifact", value: artifactDraft(CASE, "a second draft beside it") },
-      { kind: "artifact", value: artifactDraft(OTHER_CASE, "another case's draft") },
+      { kind: "artifact", value: fixtureArtifact(CASE, "the first draft") },
+      { kind: "artifact", value: fixtureArtifact(CASE, "a second draft beside it") },
+      { kind: "artifact", value: fixtureArtifact(OTHER_CASE, "another case's draft") },
     ]);
     const unheld = recordId({ fixture: "a record this workspace does not hold" });
     const cases: readonly (readonly [readonly RecordId[], string])[] = [
@@ -353,7 +341,7 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
     ];
 
     for (const [supersedes, detail] of cases) {
-      const standingIn = planOf({ kind: "artifact", value: artifactDraft(CASE, "the next draft", supersedes) });
+      const standingIn = planOf({ kind: "artifact", value: fixtureArtifact(CASE, "the next draft", supersedes) });
       for (const refusal of await refusedBothWays(workspace, standingIn)) {
         expectKernelRefusal(refusal, 0, "artifact", detail);
       }
@@ -365,7 +353,7 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
     const cited = recordId(fixtureRunRecord("cited"));
     const unsealed: Readonly<Partial<Record<RecordKind, object>>> = {
       argument: argumentDraft(cited),
-      artifact: artifactDraft(CASE, "a draft to seal"),
+      artifact: fixtureArtifact(CASE, "a draft to seal"),
       claim: claimDraft("sealed"),
     };
     const sealable = RECORD_KINDS.filter((kind) => KIND_CONTRACTS[kind].packMayDraft).flatMap((kind) =>
@@ -388,7 +376,7 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
 
   test("refuses a pack's draft naming its own salt, which only the kernel mints, even of a record it holds", async () => {
     const workspace = await fixtureWorkspace();
-    const named = { ...artifactDraft(CASE, "a guessable draft"), salt: "5a".repeat(32) };
+    const named = { ...fixtureArtifact(CASE, "a guessable draft"), salt: "5a".repeat(32) };
     await workspace.store().putMany([{ kind: "artifact", value: named }]);
 
     for (const refusal of await refusedBothWays(workspace, planOf({ kind: "artifact", value: named }))) {
@@ -403,7 +391,7 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
 
   test("salts a pack's draft that asks, previewed and performed under one id", async () => {
     const workspace = await fixtureWorkspace();
-    const plan = planOf({ kind: "artifact", value: artifactDraft(CASE, "a draft to salt"), salt: true });
+    const plan = planOf({ kind: "artifact", value: fixtureArtifact(CASE, "a draft to salt"), salt: true });
 
     const previewed = await applied(workspace, plan, "plan");
     const performed = await applied(workspace, plan, "perform");
@@ -415,8 +403,8 @@ describe("the kernel refuses what no distribution's admission may admit of a pac
     const workspace = await fixtureWorkspace();
     const [predecessor] = await workspace
       .store()
-      .putMany([{ kind: "artifact", value: artifactDraft(CASE, "the first draft") }]);
-    const successor = artifactDraft(CASE, "the next draft", [predecessor!]);
+      .putMany([{ kind: "artifact", value: fixtureArtifact(CASE, "the first draft") }]);
+    const successor = fixtureArtifact(CASE, "the next draft", [predecessor!]);
     const plan = planOf({ kind: "artifact", value: successor });
     const before = await workspace.head();
 
@@ -595,7 +583,7 @@ describe("a throw carrying no reason leaves an admission's refusal as it was thr
 
   test("an edge whose selector's module path throws with no reason is refused invalid-input, naming the selector and the run", async () => {
     const { workspace, admitted } = await workspaceCitingARun();
-    const opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
+    using opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
     const admissionWorkspace = {
       ...(await buildAdmissionWorkspace(opened, await installedModules(opened))),
       modulePath(): string {
@@ -618,7 +606,7 @@ describe("a throw carrying no reason leaves an admission's refusal as it was thr
 describe("the kernel's pass loads no bundle for a plan citing no evidence edge", () => {
   test("a drafted claim citing no edge performs over a workspace one of whose installed bundles is missing from the blob store", async () => {
     const { workspace } = await workspaceCitingARun();
-    const opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
+    using opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
     const installed = (await installedModules(opened)).byName.get(PARSER_FIXTURE_MODULE)!;
     const bundle = (opened.read(installed.moduleRecordId) as ModuleRecord).bundle!;
     await rewriteBlob(workspace.dir, bundle, null);

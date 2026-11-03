@@ -63,10 +63,16 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: verify/go.sum
 
+      # Every build compiles in Go's own library and some modules, whose licences go with each copy.
+      - name: third-party notices
+        run: go run ./tools/notices > "${RUNNER_TEMP}/THIRD_PARTY_NOTICES"
+
       - name: build the page
         run: |
           go run ./tools/webbuild -out "${RUNNER_TEMP}/site" -version "${GITHUB_REF_NAME#verify/}"
+          cp "${RUNNER_TEMP}/THIRD_PARTY_NOTICES" "${RUNNER_TEMP}/site/"
           mkdir -p "${RUNNER_TEMP}/dist"
+          cp "${RUNNER_TEMP}/THIRD_PARTY_NOTICES" "${RUNNER_TEMP}/dist/"
           (cd "${RUNNER_TEMP}/site" && zip -qr "${RUNNER_TEMP}/dist/musai-verify-page.zip" .)
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -107,7 +113,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/*
           --repo "${GITHUB_REPOSITORY}"
           --title "musai-verify ${GITHUB_REF_NAME#verify/}"
-          --notes "Static binaries of the musai verifier, its two WebAssembly builds, and the page that runs one in a browser. Check a download against SHA256SUMS, and its provenance with: gh attestation verify <file> --repo ${GITHUB_REPOSITORY}"
+          --notes "Static binaries of the musai verifier, its two WebAssembly builds, the page that runs one in a browser, and THIRD_PARTY_NOTICES for the code they compile in. Check a download against SHA256SUMS, and its provenance with: gh attestation verify <file> --repo ${GITHUB_REPOSITORY}"
 
   # Deploys only where the repository's Pages settings deploy from Actions.
   pages:

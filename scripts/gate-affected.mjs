@@ -10,6 +10,7 @@ if (base === undefined) {
 
 const shell = process.platform === "win32";
 
+/** @param {string} command @param {string[]} args */
 function run(command, args, options = {}) {
   return spawnSync(command, args, { stdio: "inherit", shell, ...options });
 }
@@ -21,22 +22,27 @@ if (diff.status !== 0) {
 }
 const changed = diff.stdout.split("\n").filter((path) => path !== "");
 
-const selected = selectionFor(changed, base);
-if (selected === null) {
-  process.stdout.write(`gate:affected: ${base} differs only in prose outside packages/, nothing to gate\n`);
+const { filters, checks } = selectionFor(changed, base);
+if (filters.length === 0 && checks.length === 0) {
+  process.stdout.write(`gate:affected: ${base} reaches no package and no check, nothing to gate\n`);
   process.exit(0);
 }
 // The scenarios take minutes and exercise every package, so they run on their own.
-const selection = [...selected, "--filter", "!@musai/scenarios"];
+const selection = [...filters, "--filter", "!@musai/scenarios"];
 
 // A package resolves its siblings through their built output, which the selection does not cover.
 const steps = [
-  ["-r", "build"],
-  ["-r", ...selection, "typecheck"],
-  ["-r", "--no-bail", ...selection, "test"],
+  ["pnpm", "-r", "build"],
+  ...(filters.length === 0
+    ? []
+    : [
+        ["pnpm", "-r", ...selection, "typecheck"],
+        ["pnpm", "-r", "--no-bail", ...selection, "test"],
+      ]),
+  ...checks,
 ];
-for (const args of steps) {
-  const { status } = run("pnpm", args);
+for (const [command, ...args] of steps) {
+  const { status } = run(command, args);
   if (status !== 0) {
     process.exit(status ?? 1);
   }

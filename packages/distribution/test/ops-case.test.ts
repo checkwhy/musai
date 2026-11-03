@@ -27,7 +27,7 @@ describe("case.book@1", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-ops-case-"));
     await initWorkspace(workspace, { now });
     const store = storeAt();
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(artefacts, store, blobStoreOf(workspace), index);
   });
@@ -140,7 +140,7 @@ describe("case.book@1", () => {
 
     expect(second.case).toBe(first.case);
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const ids = await opened.store.list("case");
     const matching = [];
     for (const id of ids) {

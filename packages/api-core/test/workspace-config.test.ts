@@ -99,7 +99,7 @@ describe("the programs a workspace's configuration admits for its runs", () => {
     repos.push(repo);
     await writeMainConfig(repo.ctx, JSON.stringify({ tools: ["pnpm", "make"] }));
 
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
 
     expect(opened.tools).toEqual(["pnpm", "make"]);
   });
@@ -212,14 +212,10 @@ describe("the store enforces the payload bound its workspace configuration decla
     const record = caseRecord(1000);
     const size = canonicalBytes(record).byteLength;
     await writeMainConfig(repo.ctx, JSON.stringify({ [BLOB_THRESHOLD_CONFIG_KEY]: size - 1 }));
-    const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
-    try {
-      await writeMainConfig(repo.ctx, JSON.stringify({ [BLOB_THRESHOLD_CONFIG_KEY]: size }));
+    using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+    await writeMainConfig(repo.ctx, JSON.stringify({ [BLOB_THRESHOLD_CONFIG_KEY]: size }));
 
-      await expect(opened.store.putMany([{ kind: "case", value: record }])).rejects.toThrow(String(size - 1));
-    } finally {
-      opened.close();
-    }
+    await expect(opened.store.putMany([{ kind: "case", value: record }])).rejects.toThrow(String(size - 1));
   });
 
   it("a workspace's fetches hold a body over its configured threshold on its blobs branch", async () => {
@@ -233,7 +229,7 @@ describe("the store enforces the payload bound its workspace configuration decla
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const { port } = server.address() as AddressInfo;
-      const opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
+      using opened = await Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now });
       const recipe = { locator: `http://127.0.0.1:${port}/body`, headers: [], names: [] };
 
       const { record } = await performFetch(recipe, {}, opened.fetchStore, { now: repo.now });
@@ -303,5 +299,47 @@ describe("scopeRefName narrows a scope name to a conservative character set befo
     } finally {
       await repo.cleanup();
     }
+  });
+});
+
+describe("a trust file that does not parse refuses an open as a workspace to fix", () => {
+  const repos: FixtureRepo[] = [];
+
+  afterEach(async () => {
+    for (const repo of repos.splice(0)) {
+      await repo.cleanup();
+    }
+  });
+
+  async function refusedOpen(name: string, file: string, content: string): Promise<unknown> {
+    const repo = await makeFixtureRepo(name);
+    repos.push(repo);
+    await writeTrustFile(repo.ctx, file, content);
+    return Workspace.open({ dir: repo.workspace, scope: repo.scope, now: repo.now }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  }
+
+  it("a malformed allowed-signers line refuses an open naming its line and how to fix it", async () => {
+    const refusal = await refusedOpen("trust-signers-malformed", "allowed-signers", "# the team\nalice ssh-ed25519\n");
+
+    expect(refusal).toMatchObject({ reason: "workspace-incomplete", code: "workspace", about: ["allowed-signers"] });
+    expect((refusal as Error).message).toContain("at line 2: alice ssh-ed25519");
+    expect((refusal as Error).message).toContain("fix or remove line 2 of allowed-signers on the trust branch");
+  });
+
+  it("a roles line granting no shipped role refuses an open naming its line and how to fix it", async () => {
+    const refusal = await refusedOpen("trust-roles-malformed", "roles", "alice overlord any\n");
+
+    expect(refusal).toMatchObject({ reason: "workspace-incomplete", about: ["roles"] });
+    expect((refusal as Error).message).toContain("fix or remove line 1 of roles on the trust branch");
+  });
+
+  it("a signing level that is no level refuses an open naming the key and how to fix it", async () => {
+    const refusal = await refusedOpen("trust-signing-malformed", "config.json", JSON.stringify({ signing: "often" }));
+
+    expect(refusal).toMatchObject({ reason: "workspace-incomplete", about: ["signing"] });
+    expect((refusal as Error).message).toContain("fix or remove signing in config.json on the trust branch");
   });
 });

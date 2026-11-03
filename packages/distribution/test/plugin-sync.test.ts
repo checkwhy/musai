@@ -54,16 +54,19 @@ export function invoke(requestBytes: Uint8Array): Uint8Array {
 describe("syncSkills", () => {
   let workspace: string;
   let pluginDir: string;
+  let held: DisposableStack;
   const scope = "default";
   const now = fixedClock("2026-08-31T00:00:00.000Z");
 
   beforeEach(async () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-plugin-sync-"));
+    held = new DisposableStack();
     await initWorkspace(workspace, { now });
     pluginDir = defaultPluginDir(workspace);
   });
 
   afterEach(async () => {
+    held.dispose();
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -72,14 +75,15 @@ describe("syncSkills", () => {
   }
 
   async function view() {
-    return openWorkspace({ workspace, scope, now });
+    return held.use(await openWorkspace({ workspace, scope, now }));
   }
 
   async function installSkillful(): Promise<void> {
     const sourceGitDir = await repoGitDir();
+    using folded = await foldedIndex(storeAt());
     await buildModule(SKILLFUL_FIXTURE_DIR, storeAt(), {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(storeAt()),
+      index: folded,
       sourceGitDir,
       now,
     });
@@ -87,9 +91,10 @@ describe("syncSkills", () => {
 
   async function installQuiet(): Promise<void> {
     const sourceGitDir = await repoGitDir();
+    using folded = await foldedIndex(storeAt());
     await buildModule(QUIET_FIXTURE_DIR, storeAt(), {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(storeAt()),
+      index: folded,
       sourceGitDir,
       now,
     });
@@ -97,9 +102,10 @@ describe("syncSkills", () => {
 
   async function installSkillfulEscape(): Promise<void> {
     const sourceGitDir = await repoGitDir();
+    using folded = await foldedIndex(storeAt());
     await buildModule(SKILLFUL_ESCAPE_FIXTURE_DIR, storeAt(), {
       blobs: blobStoreOf(workspace),
-      index: await foldedIndex(storeAt()),
+      index: folded,
       sourceGitDir,
       now,
     });
@@ -153,9 +159,10 @@ describe("syncSkills", () => {
     const moduleDir = await mkdtemp(join(tmpdir(), "musai-plugin-sync-module-"));
     try {
       await writeAdHocModule(moduleDir, "updatable", "musai-updatable", "the first version's own words.");
+      using folded = await foldedIndex(storeAt());
       await buildModule(moduleDir, storeAt(), {
         blobs: blobStoreOf(workspace),
-        index: await foldedIndex(storeAt()),
+        index: folded,
         now,
       });
       const first = await syncSkills(await view(), pluginDir);
@@ -167,9 +174,10 @@ describe("syncSkills", () => {
         "musai-updatable",
         "the second version's own words, replacing the first.",
       );
+      using refolded = await foldedIndex(storeAt());
       await buildModule(moduleDir, storeAt(), {
         blobs: blobStoreOf(workspace),
-        index: await foldedIndex(storeAt()),
+        index: refolded,
         now: fixedClock("2026-08-31T00:01:00.000Z"),
       });
       const second = await syncSkills(await view(), pluginDir);
@@ -190,9 +198,10 @@ describe("syncSkills", () => {
     let elsewhere: string | undefined;
     try {
       await writeAdHocModule(moduleDir, "vanishing", "musai-vanishing", "here today.");
+      using folded = await foldedIndex(storeAt());
       await buildModule(moduleDir, storeAt(), {
         blobs: blobStoreOf(workspace),
-        index: await foldedIndex(storeAt()),
+        index: folded,
         now,
       });
       const synced = await syncSkills(await view(), pluginDir);
@@ -202,7 +211,7 @@ describe("syncSkills", () => {
       // A workspace with nothing installed, synced to the same plugin, stands in for an uninstall.
       elsewhere = await mkdtemp(join(tmpdir(), "musai-plugin-sync-elsewhere-"));
       await initWorkspace(elsewhere, { now });
-      const bare = await openWorkspace({ workspace: elsewhere, scope, now });
+      using bare = await openWorkspace({ workspace: elsewhere, scope, now });
       const result = await syncSkills(bare, pluginDir);
 
       expect(result.removed).toEqual(["musai-vanishing"]);
@@ -245,15 +254,16 @@ describe("syncSkills", () => {
     const moduleDir = await mkdtemp(join(tmpdir(), "musai-plugin-sync-atomic-"));
     try {
       await writeAdHocModule(moduleDir, "atomic", "musai-atomic", "written through a temp name and a rename.");
+      using folded = await foldedIndex(storeAt());
       await buildModule(moduleDir, storeAt(), {
         blobs: blobStoreOf(workspace),
-        index: await foldedIndex(storeAt()),
+        index: folded,
         now,
       });
       await syncSkills(await view(), pluginDir);
 
       const entries = await readdir(join(pluginDir, "skills", "musai-atomic"));
-      expect(entries.filter((name) => name.startsWith(".tmp-"))).toEqual([]);
+      expect(entries.filter((name) => name.includes(".partial-"))).toEqual([]);
       expect(entries).toContain("SKILL.md");
     } finally {
       await rm(moduleDir, { recursive: true, force: true });

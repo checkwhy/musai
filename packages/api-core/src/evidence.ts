@@ -51,3 +51,20 @@ export async function verifiedEvidenceEdge(
     });
   }
 }
+
+/** Refuses an edge a record already cites unless admitting its run and selector again yields its
+ * item. */
+export async function admitCitedEdge(
+  edge: EvidenceEdge,
+  opened: Workspace,
+  admissionWorkspace: AdmissionWorkspace,
+): Promise<void> {
+  const admitted = await verifiedEvidenceEdge(opened, admissionWorkspace, edge.run, edge.selector);
+  if (admitted.item !== edge.item) {
+    throw new OperationError({
+      reason: "invalid-input",
+      about: [edge.run, edge.item],
+      detail: `the edge on ${edge.run} names item ${edge.item}, and its selector admits ${admitted.item}`,
+    });
+  }
+}

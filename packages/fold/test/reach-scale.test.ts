@@ -62,7 +62,7 @@ test(
       Array.from({ length: RUNS }, (_, index) => ({ kind: "run", value: evaluationReading(index, hub) })),
     );
     const path = join(workspace, "index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
 
     const foldStarted = performance.now();
     await index.fold(store);

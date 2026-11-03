@@ -1,7 +1,7 @@
 import { access, copyFile, constants as fsConstants, mkdir, readFile, symlink } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import type { ContributionEntry, RequirementContributionInput } from "@musai/records";
-import { hexOfRecordId, KernelError, rawId } from "@musai/records";
+import { hexOfRecordId, KernelError, rawId, TrustFileError } from "@musai/records";
 import { execa } from "execa";
 
 /** A declared binary resolved on this process's `PATH`. The directory locates what the child's
@@ -127,11 +127,10 @@ export function workspaceToolsFromConfig(config: {
     return [];
   }
   if (!Array.isArray(tools) || !tools.every(isToolName)) {
-    throw new KernelError({
-      reason: "workspace-incomplete",
-      detail: `refusing to read ${TOOLS_CONFIG_KEY} from the workspace's configuration: it must be a list of program names, each without a path separator`,
-      about: [TOOLS_CONFIG_KEY],
-    });
+    throw TrustFileError.atKey(
+      TOOLS_CONFIG_KEY,
+      `refusing to read ${TOOLS_CONFIG_KEY} from the workspace's configuration: it must be a list of program names, each without a path separator`,
+    );
   }
   return tools;
 }

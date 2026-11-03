@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { Workspace } from "@musai/api-core";
 import { installedManifests, invokeContribution } from "@musai/api-core";
 import type { ContributionEntry } from "@musai/records";
+import { writeWhole } from "@musai/store";
 
 const SKILLS_SUBDIR = "skills";
 
@@ -60,15 +60,6 @@ function resolvedSkillDir(skillsDir: string, skill: MarkedSkill): string {
     throw new SkillPathEscapeError(skill.moduleName, resolved);
   }
   return resolved;
-}
-
-/** Writes through a temporary name and a rename, so a session never loads a fragment. */
-async function writeAtomically(dir: string, fileName: string, bytes: Uint8Array): Promise<void> {
-  await mkdir(dir, { recursive: true });
-  const tempName = `.tmp-${randomBytes(8).toString("hex")}`;
-  const tempPath = join(dir, tempName);
-  await writeFile(tempPath, bytes);
-  await rename(tempPath, join(dir, fileName));
 }
 
 async function readIfPresent(path: string): Promise<Buffer | undefined> {
@@ -143,8 +134,10 @@ export async function syncSkills(opened: Workspace, pluginDir: string): Promise<
       unchanged.push(skill.name);
       continue;
     }
-    await writeAtomically(dir, SKILL_FILE_NAME, content);
-    await writeAtomically(dir, OWNER_MARKER_NAME, new TextEncoder().encode(skill.moduleName));
+    // Whole files only, so a session never loads a fragment.
+    await mkdir(dir, { recursive: true });
+    await writeWhole(join(dir, SKILL_FILE_NAME), content);
+    await writeWhole(join(dir, OWNER_MARKER_NAME), skill.moduleName);
     written.push(skill.name);
   }
 

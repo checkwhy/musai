@@ -4,6 +4,8 @@ import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codeOnly, commentsIn } from "./source-text.mjs";
 
+/** @typedef {ReturnType<typeof commentsIn>[number]} Comment */
+
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const scanRoot = process.argv[2] ? resolve(process.argv[2]) : repoRoot;
 
@@ -12,6 +14,11 @@ const SOURCE_EXTENSIONS = [".ts", ".mjs", ".js"];
 const EXCLUDED_DIRECTORY_NAMES = new Set(["node_modules", "dist"]);
 // The lint fixtures are other scans' deliberate inputs; only their test file is scanned.
 const FIXTURE_ROOT = "packages/lint-fixtures";
+// Code a generator writes and the build checks against it.
+const GENERATED_FILES = new Set([
+  "packages/records/src/conditions/draft-07-meta.js",
+  "packages/distribution/src/kernel-schemas.js",
+]);
 
 const MAX_BLOCK_LINES = 2;
 const MAX_LINE_RUN = 1;
@@ -19,11 +26,14 @@ const MAX_LINE_LENGTH = 100;
 const DIRECTIVE = /^\/\/\s*(?:biome-ignore|@ts-(?:expect-error|ignore|nocheck))\b/;
 const URL_ONLY = /^(?:\/\/|\/?\*+)\s*https?:\/\/\S+\s*(?:\*\/)?$/;
 
+/** @param {string} path */
 function displayPath(path) {
   return relative(scanRoot, path).split(sep).join("/");
 }
 
+/** @param {string} dir @returns {Promise<string[]>} */
 async function sourceFilesUnder(dir) {
+  /** @type {string[]} */
   const files = [];
   let entries;
   try {
@@ -39,7 +49,7 @@ async function sourceFilesUnder(dir) {
         files.push(...(await sourceFilesUnder(path)));
       }
     } else if (entry.isFile() && SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
-      if (!entry.name.endsWith(".d.ts")) {
+      if (!entry.name.endsWith(".d.ts") && !GENERATED_FILES.has(displayPath(path))) {
         files.push(path);
       }
     }
@@ -47,10 +57,12 @@ async function sourceFilesUnder(dir) {
   return files;
 }
 
+/** @param {string} text @param {number} index */
 function lineOf(text, index) {
   return text.slice(0, index).split("\n").length;
 }
 
+/** @param {string} body */
 function blockContentLines(body) {
   const lines = body.split("\n");
   return lines.filter((line, i) => {
@@ -61,16 +73,21 @@ function blockContentLines(body) {
   }).length;
 }
 
+/** @param {string} file @param {string} text */
 function violationsIn(file, text) {
+  /** @type {{ rule: string, file: string, line: number, detail: string }[]} */
   const found = [];
   const lines = text.split("\n");
   const code = codeOnly(text.startsWith("#!") ? text.replace(/^#![^\n]*/, (m) => " ".repeat(m.length)) : text);
   const firstCode = code.search(/\S/);
   const comments = commentsIn(text);
+  /** @param {Comment} comment */
   const standalone = (comment) =>
     /^\s*$/.test(lines[lineOf(text, comment.start) - 1].slice(0, column(text, comment.start)));
+  /** @param {Comment} comment */
   const isDirective = (comment) => comment.kind === "line" && DIRECTIVE.test(text.slice(comment.start, comment.end));
 
+  /** @type {number[]} */
   let run = [];
   const closeRun = () => {
     if (run.length > MAX_LINE_RUN) {
@@ -113,6 +130,7 @@ function violationsIn(file, text) {
   return found;
 }
 
+/** @param {string} text @param {number} index */
 function column(text, index) {
   return index - (text.lastIndexOf("\n", index - 1) + 1);
 }

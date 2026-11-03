@@ -16,7 +16,7 @@ import {
   type Tool,
   titledSingleSelect,
 } from "@musai/mcp";
-import { askMenu } from "../gate/menu.js";
+import { askMenu, type MenuOption } from "../gate/menu.js";
 import { GATE_ANSWER_OUTPUT_SCHEMA } from "../ops/gate.js";
 import { structuredResult } from "./result.js";
 
@@ -94,6 +94,20 @@ function nonAnswerResult(action: "decline" | "cancel" | "expired"): CallToolResu
   return heldAnswer({ answered: false, action, message: lapsed });
 }
 
+/** Read and closed before the elicitation, so no fold stays open while a person decides. */
+async function gateMenu(
+  context: OperationContext,
+  pending: string,
+): Promise<{ readonly options: readonly MenuOption[]; readonly layerSecretNames: readonly string[] }> {
+  using opened = await openWorkspace(context);
+  const { options } = askMenu(opened, pending as never);
+  // Refuses every name a run treats as secret: the bindings file's and the project layer's.
+  const layerSecretNames = [...opened.layerDeclarations]
+    .filter(([, declaration]) => declaration.secret)
+    .map(([name]) => name);
+  return { options, layerSecretNames };
+}
+
 /** Answers a `gate_answer` call: elicits the person's choice from `gate.ask`'s menu and answers
  * under `via: "elicitation"`; a declined or expired elicitation mints nothing. */
 export async function answerGateThroughElicitation(
@@ -103,17 +117,12 @@ export async function answerGateThroughElicitation(
   args: Record<string, unknown>,
 ): Promise<CallToolResult> {
   const input = args as unknown as GateAnswerElicitationInput;
-  const opened = await openWorkspace(context);
-  const { options } = askMenu(opened, input.pending as never);
+  const { options, layerSecretNames } = await gateMenu(context, input.pending);
 
   const field = titledSingleSelect(
     "Disposition",
     options.map((option) => ({ const: option.value, title: option.description })),
   );
-  // Refuses every name a run treats as secret: the bindings file's and the project layer's.
-  const layerSecretNames = [...opened.layerDeclarations]
-    .filter(([, declaration]) => declaration.secret)
-    .map(([name]) => name);
   const outcome = await elicitGateAnswer(server, {
     message: "How should this gate be dispositioned?",
     field,

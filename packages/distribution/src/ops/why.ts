@@ -25,6 +25,7 @@ import {
   ANY_SCOPE,
   type ClaimRecord,
   type MusaiRecord,
+  type PerformedRunRecord,
   performedRun,
   type RecordId,
   type RulingRecord,
@@ -32,11 +33,12 @@ import {
   renderedTextOf,
   versionString,
 } from "@musai/records";
+import { commandLine } from "@musai/run";
 import { shownPrincipal } from "@musai/trust";
 import { cited } from "../cases.js";
 import { contentIdsOf, labelledClaim } from "../claim.js";
 import { shortIdOf } from "../claim-ref.js";
-import { commandText, markOf } from "../text.js";
+import { markOf } from "../text.js";
 
 export interface ClaimWhyInput {
   readonly claim: string;
@@ -67,12 +69,13 @@ export interface WhyRuling {
   readonly uncounted?: Uncounted;
 }
 
-const UNCOUNTED = ["unvouched", "grounds-withheld"] as const;
+const UNCOUNTED = ["unvouched", "grounds-withheld", "contested-by-unvouched"] as const;
 type Uncounted = (typeof UNCOUNTED)[number];
 
 const UNCOUNTED_TEXT: Readonly<Record<Uncounted, string>> = {
   unvouched: "decided nothing: nothing within the matrix vouches for it",
   "grounds-withheld": "decided nothing: the claim is contested on grounds withheld here",
+  "contested-by-unvouched": "decided nothing: a ruling nothing within the matrix vouches for contests it",
 };
 
 export interface ClaimWhyOutput {
@@ -81,7 +84,8 @@ export interface ClaimWhyOutput {
   readonly reason: string | null;
   readonly short: string;
   readonly via: string;
-  /** Why the claim reads open, when its gate or its own check said why. */
+  /** Why the claim reads open, when its gate or its own check said why, or which sibling's
+   * unrun check the ruling deciding it waits on. */
   readonly detail?: string;
   readonly runs: readonly WhyRun[];
   /** Present on an open claim that live rulings bear on. */
@@ -137,7 +141,7 @@ async function rulingsNamedBeneath(
 
 function runFacts(run: WhyRun): string {
   const trees = run.trees.map((tree) => `${tree.name} ${tree.digest.slice(0, 12)}`);
-  return [commandText(run.command), `exit ${run.exitCode}`, ...trees].join(" · ");
+  return [commandLine(run.command), `exit ${run.exitCode}`, ...trees].join(" · ");
 }
 
 function tailLines(run: WhyRun): string[] {
@@ -174,9 +178,15 @@ function runIdsIn(node: DerivationJson): string[] {
   return [...(node.label === "run" ? [node.id] : []), ...node.children.flatMap(runIdsIn)];
 }
 
-async function whyRun(opened: Workspace, id: RecordId, agrees: boolean): Promise<WhyRun> {
-  // From the store, not the fold: this call's own check may have minted the run.
-  const run = performedRun(id, (await opened.store.read(id, "run")) as RunRecord);
+/** A run a brief packs is outside the labelling's own; the store reads it, since this call's own
+ * check may have minted it after the fold. */
+async function whyRun(
+  opened: Workspace,
+  labelled: ReadonlyMap<RecordId, PerformedRunRecord>,
+  id: RecordId,
+  agrees: boolean,
+): Promise<WhyRun> {
+  const run = labelled.get(id) ?? performedRun(id, (await opened.store.read(id, "run")) as RunRecord);
   const { observation } = run;
   const asBlob = observation.resolved.some((resolved) => resolved.annotations?.["storage"] === "blob");
   const output = typeof observation.output === "string" && !asBlob ? observation.output.trimEnd() : null;
@@ -242,10 +252,10 @@ const DERIVATION_HOP_SCHEMA = {
   },
 } as const;
 
-/** `claim.why@4`: the derivation behind a claim's computed status, walked down to its receipts. */
+/** `claim.why@5`: the derivation behind a claim's computed status, walked down to its receipts. */
 export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
   id: "claim.why",
-  version: versionString("4"),
+  version: versionString("5"),
   input: {
     type: "object",
     additionalProperties: false,
@@ -293,6 +303,7 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
       labelling,
       argumentsById,
       runIdByArgumentId,
+      runs,
       rulingsById,
       attestationsByRulingId,
       detail,
@@ -302,27 +313,32 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
     const agreeingRuns = new Set(status.comparison.corroborated.flatMap((id) => runIdByArgumentId.get(id) ?? []));
     const answer = async (derivation: DerivationJson | null): Promise<ClaimWhyOutput> => {
       const runIds = derivation === null ? [...new Set(runIdByArgumentId.values())] : runIdsIn(derivation);
-      const rulings: WhyRuling[] =
+      const live =
         status.label === "open"
-          ? (await weighedRulingsFor(opened, indexed.slot))
-              .filter((ruling) => ruling.retiredBy === null)
-              .map((ruling) => {
-                const uncounted: Uncounted | null =
-                  ruling.tier === null
-                    ? "unvouched"
-                    : groundsWithheld || !cited(opened, ruling.record.brief)
-                      ? "grounds-withheld"
-                      : null;
-                return {
-                  id: ruling.id,
-                  verdict: ruling.record.verdict,
-                  authority: ruling.tier ?? "contested-authority",
-                  principals: ruling.principals,
-                  names: ruling.principals.map((principal) => shownPrincipal(opened.allowedSigners, principal)),
-                  ...(uncounted === null ? {} : { uncounted }),
-                };
-              })
+          ? (await weighedRulingsFor(opened, indexed.slot)).filter((ruling) => ruling.retiredBy === null)
           : [];
+      const unvouchedContests =
+        status.label === "open" &&
+        status.reason === "contested-authority" &&
+        live.some((ruling) => ruling.tier === null);
+      const rulings: WhyRuling[] = live.map((ruling) => {
+        const uncounted: Uncounted | null =
+          ruling.tier === null
+            ? "unvouched"
+            : groundsWithheld || !cited(opened, ruling.record.brief)
+              ? "grounds-withheld"
+              : unvouchedContests
+                ? "contested-by-unvouched"
+                : null;
+        return {
+          id: ruling.id,
+          verdict: ruling.record.verdict,
+          authority: ruling.tier ?? "contested-authority",
+          principals: ruling.principals,
+          names: ruling.principals.map((principal) => shownPrincipal(opened.allowedSigners, principal)),
+          ...(uncounted === null ? {} : { uncounted }),
+        };
+      });
       return {
         statement: renderedTextOf((indexed.record as ClaimRecord).rendering),
         label: status.label,
@@ -331,7 +347,9 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
         via: status.comparison.via,
         ...(detail !== undefined ? { detail } : {}),
         ...(rulings.length > 0 ? { rulings } : {}),
-        runs: await Promise.all(runIds.map((id) => whyRun(opened, id as RecordId, agreeingRuns.has(id as RecordId)))),
+        runs: await Promise.all(
+          runIds.map((id) => whyRun(opened, runs, id as RecordId, agreeingRuns.has(id as RecordId))),
+        ),
         ...(input.full === true && derivation !== null ? { derivation } : {}),
       };
     };
@@ -500,16 +518,12 @@ export const claimWhy: OperationDescriptor<ClaimWhyInput, ClaimWhyOutput> = {
       if (runId === undefined) {
         throw new Error(`claim ${indexed.slot}: the winning node ${winner.id} names no run to walk down to`);
       }
-      // From the store, not the fold: this call's own check may have minted the run.
-      const run = (await opened.store.read(runId, "run")) as RunRecord;
+      const run = runs.get(runId)!;
       const agreeing = new Map(
-        await Promise.all(
-          status.comparison.corroborated.map(async (argumentId) => {
-            const agreeingRunId = runIdByArgumentId.get(argumentId)!;
-            const agreeingRun = (await opened.store.read(agreeingRunId, "run")) as RunRecord;
-            return [argumentId, { runId: agreeingRunId, run: agreeingRun }] as const;
-          }),
-        ),
+        status.comparison.corroborated.map((argumentId) => {
+          const agreeingRunId = runIdByArgumentId.get(argumentId)!;
+          return [argumentId, { runId: agreeingRunId, run: runs.get(agreeingRunId)! }] as const;
+        }),
       );
       const agreeingByRun = new Map([...agreeing.values()].map((entry) => [entry.runId as string, entry.run]));
 

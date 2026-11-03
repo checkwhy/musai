@@ -97,7 +97,7 @@ const CONTRIBUTIONS: readonly ContributionEntry[] = [
 /** Installs the fixture world's module, data only, through the module installer a pack takes. */
 export async function installExpedition(repo: FixtureRepo): Promise<void> {
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   await installModule(
     EXPEDITION,

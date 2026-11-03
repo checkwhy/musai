@@ -113,7 +113,8 @@ function speaksFor(signer: AllowedSigner, principal: string): boolean {
   return principalsOf(signer).includes(principal);
 }
 
-/** The private key whose `<name>.pub` holds this key type and key, as OpenSSH writes pairs. */
+/** The private key file whose `<name>.pub` holds this key type and key, as OpenSSH writes pairs:
+ * a public half alone signs nothing. */
 async function privateKeyBeside(sshDir: string, keyType: string, key: string): Promise<string | null> {
   let entries: string[];
   try {
@@ -129,11 +130,16 @@ async function privateKeyBeside(sshDir: string, keyType: string, key: string): P
       continue;
     }
     const [foundType, foundKey] = content.trim().split(/\s+/);
-    if (foundType === keyType && foundKey === key) {
-      return join(sshDir, entry.slice(0, -".pub".length));
+    const privatePath = join(sshDir, entry.slice(0, -".pub".length));
+    if (foundType === keyType && foundKey === key && (await isFile(privatePath))) {
+      return privatePath;
     }
   }
   return null;
+}
+
+export async function isFile(path: string): Promise<boolean> {
+  return (await stat(path).catch(() => null))?.isFile() === true;
 }
 
 export interface ResolveSigningKeyInput {
@@ -173,4 +179,30 @@ export async function resolveSigningKey(input: ResolveSigningKeyInput): Promise<
     }
   }
   return null;
+}
+
+/** Every key this machine holds a private half for: the one named at the invocation, the one
+ * configured here, and each allowed signer's pair under `sshDir`, rotated keys included. */
+export async function heldKeyPrincipals(input: Omit<ResolveSigningKeyInput, "principal">): Promise<Set<string>> {
+  const sshDir = input.sshDir ?? join(homedir(), ".ssh");
+  const paths: string[] = [];
+  for (const path of [input.named, (await readSignerConfig(input.localDir)).keyPath]) {
+    if (path !== undefined && path.length > 0 && (await isFile(path))) {
+      paths.push(path);
+    }
+  }
+  for (const signer of input.allowedSigners) {
+    const found = await privateKeyBeside(sshDir, signer.keyType, signer.key);
+    if (found !== null) {
+      paths.push(found);
+    }
+  }
+  const held = new Set<string>();
+  for (const path of paths) {
+    const principal = await keyPrincipalAt(path);
+    if (principal !== null) {
+      held.add(principal);
+    }
+  }
+  return held;
 }

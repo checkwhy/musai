@@ -1,4 +1,4 @@
-import { ANY_SCOPE, point, type Scope } from "@musai/records";
+import { ANY_SCOPE, point, ROLES_FILE, type Scope, TrustFileError } from "@musai/records";
 
 /** The shipped roles; a delegate is an agent ruling on the owner's behalf. */
 export const ROLES = ["owner", "maintainer", "arbiter", "delegate"] as const;
@@ -22,18 +22,18 @@ function parseScopeText(text: string): Scope {
 /** Parses the roles file, one principal, role and scope per line; empty forms yield no grants. */
 export function parseRoles(content: string): RoleGrant[] {
   const grants: RoleGrant[] = [];
-  for (const rawLine of content.split("\n")) {
+  for (const [index, rawLine] of content.split("\n").entries()) {
     const line = rawLine.trim();
     if (line.length === 0 || line.startsWith("#")) {
       continue;
     }
     const fields = line.split(/\s+/);
     if (fields.length !== 3) {
-      throw new RangeError(`not a roles file line: ${rawLine}`);
+      throw TrustFileError.atLine(ROLES_FILE, index, "no principal, role and scope", rawLine);
     }
     const [principal, roleText, scopeText] = fields as [string, string, string];
     if (!isRole(roleText)) {
-      throw new RangeError(`not a shipped role: ${roleText}`);
+      throw TrustFileError.atLine(ROLES_FILE, index, `a role it does not ship, ${roleText},`, rawLine);
     }
     grants.push({ principal, role: roleText, scope: parseScopeText(scopeText) });
   }

@@ -1,12 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { appendFile, chmod, mkdir } from "node:fs/promises";
+import { appendFile, chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalBytes } from "@musai/records";
 import { readBindings, secretObservation } from "@musai/run";
-import { currentKey, LOCAL_DIR, listKeys, MUSAI_DIR, readKeyFile, type WorkspaceKey } from "@musai/store";
-
-/** Under the workspace's local directory: disposable, and never a record. */
-export const CALL_LOG_DIR = "calls";
+import {
+  CALL_LOG_DIR,
+  currentKey,
+  LOCAL_DIR,
+  listKeys,
+  MUSAI_DIR,
+  readKeyFile,
+  type WorkspaceKey,
+  workspaceAbsent,
+} from "@musai/store";
 
 function callLogDirPath(workspaceDir: string): string {
   return join(workspaceDir, MUSAI_DIR, LOCAL_DIR, CALL_LOG_DIR);
@@ -15,6 +21,11 @@ function callLogDirPath(workspaceDir: string): string {
 /** Where the bindings and keys that never leave the machine are kept. */
 export function workspaceLocalDir(workspaceDir: string): string {
   return join(workspaceDir, MUSAI_DIR, LOCAL_DIR);
+}
+
+/** Holds no workspace yet, so no log, event or installed contribution: `init` makes one there. */
+export function noWorkspaceAt(workspaceDir: string): Promise<boolean> {
+  return workspaceAbsent(join(workspaceDir, MUSAI_DIR));
 }
 
 /** Names only, so no credential helper runs for the sake of a check. */
@@ -30,13 +41,28 @@ export interface CallLog {
   readonly path: string;
 }
 
+async function mkdirIfAbsent(dir: string): Promise<void> {
+  try {
+    await mkdir(dir, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+  }
+}
+
 /** A session's trace stays on this machine: nothing in the record store is handed this path. */
 export async function openCallLog(workspaceDir: string): Promise<CallLog> {
   const dir = callLogDirPath(workspaceDir);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Made below `.musai` alone, so a workspace removed meanwhile is not made again as its parent.
+  await mkdirIfAbsent(workspaceLocalDir(workspaceDir));
+  await mkdirIfAbsent(dir);
   await chmod(dir, 0o700);
   const name = `${Date.now().toString(36)}-${randomBytes(8).toString("hex")}.jsonl`;
-  return { path: join(dir, name) };
+  const path = join(dir, name);
+  // Made at open, so the file stands for the workspace that holds it before any entry lands.
+  await writeFile(path, "", { flag: "wx", mode: 0o600 });
+  return { path };
 }
 
 /** `contribution` is `"operation"`, `"extension"`, `"subscription"`, `"fold"` (id: the file) or a
@@ -125,6 +151,21 @@ function scrubResponse(
       message: scrubKnownSecrets(response.error.message, byValue, replace) as string,
     },
   };
+}
+
+/** Read as each entry is written, so a call that makes the workspace lands in the log it makes. */
+export type CallLogSource = () => Promise<CallLog | undefined>;
+
+export async function logCall(
+  source: CallLogSource,
+  workspaceDir: string,
+  request: CallLogRequest,
+  response: CallLogResponse,
+): Promise<void> {
+  const log = await source();
+  if (log !== undefined) {
+    await appendCall(log, workspaceDir, request, response);
+  }
 }
 
 /** Logs a secret as a receipt represents one, matched whole-value, so no logged value is a

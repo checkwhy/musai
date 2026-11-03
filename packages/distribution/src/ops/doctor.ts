@@ -1,7 +1,9 @@
-import type { OperationDescriptor } from "@musai/api-core";
+import { join } from "node:path";
+import type { OperationDescriptor, Workspace } from "@musai/api-core";
 import { openWorkspace } from "@musai/api-core";
-import { CODE_CLASSES, type CodeClass, exitCodeForClass, versionString } from "@musai/records";
-import { type LocalCheck, localChecks } from "../doctor/local-checks.js";
+import { CODE_CLASSES, type CodeClass, exitCodeForClass, TrustFileError, versionString } from "@musai/records";
+import { MUSAI_DIR } from "@musai/store";
+import { type LocalCheck, localChecks, machineChecks, trustFileChecks } from "../doctor/local-checks.js";
 import { enumerateRequirements, type RequirementReport } from "../doctor/requirements.js";
 
 export type DoctorRunInput = Record<string, never>;
@@ -35,10 +37,16 @@ const WORKSPACE_ROWS: ReadonlySet<string> = new Set([
   "blob-store",
   "key-file",
   "bindings-file",
+  "binding-paths",
+  "checkouts-file",
   "enclosing-repository",
   "contributed-declarations",
   "requirement-entries",
   "published-key",
+  "trust-files",
+  "forked-slots",
+  "unverified-seals",
+  "unverified-revocations",
 ]);
 
 function exitCodeTable(): readonly ExitCodeRow[] {
@@ -177,7 +185,16 @@ export const doctorRun: OperationDescriptor<DoctorRunInput, DoctorRunOutput> = {
   exitCode: (output) =>
     output.local.some((check) => !check.ok && WORKSPACE_ROWS.has(check.name)) ? exitCodeForClass("workspace") : 0,
   async handler(_input, context) {
-    const opened = await openWorkspace(context);
+    let opened: Workspace;
+    try {
+      opened = await openWorkspace(context);
+    } catch (error) {
+      if (!(error instanceof TrustFileError)) {
+        throw error;
+      }
+      const trust = await trustFileChecks(join(context.workspace, MUSAI_DIR), error);
+      return { requirements: [], local: [...trust, ...(await machineChecks())], exitCodes: exitCodeTable() };
+    }
     const [requirements, local] = await Promise.all([enumerateRequirements(opened), localChecks(opened)]);
     return { requirements, local, exitCodes: exitCodeTable() };
   },

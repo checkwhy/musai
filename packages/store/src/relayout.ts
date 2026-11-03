@@ -115,7 +115,7 @@ export async function relayoutScope(
   try {
     for (const { commit, changes } of log) {
       const raw = new TextDecoder().decode((await raws.next()).value as Uint8Array);
-      const tree = await gitSpliceTree(
+      const { sha: tree } = await gitSpliceTree(
         ctx,
         parent,
         changes.map(({ path, blob }) => ({ path: relaidPath(path, commit), sha: blob! })),

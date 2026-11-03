@@ -64,7 +64,7 @@ describe("a contribution answered from the fold rather than through a host", () 
     await initWorkspace(workspace, { now });
     const gitDir = join(workspace, ".musai");
     const store = new Store({ ctx: { gitDir }, scope: "default", now });
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installModule(
       MODULE_NAME,
@@ -83,7 +83,7 @@ describe("a contribution answered from the fold rather than through a host", () 
   });
 
   test("answers a query's rows under the shape its own output declares", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
 
     const answered = await invokeContribution(opened, MODULE_NAME, QUERY, { kind: "module" });
 
@@ -98,7 +98,7 @@ describe("a contribution answered from the fold rather than through a host", () 
   });
 
   test("binds a parameter the caller left out as nothing, rather than refusing the call", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
 
     const answered = await invokeContribution(opened, MODULE_NAME, QUERY, {});
 
@@ -106,7 +106,7 @@ describe("a contribution answered from the fold rather than through a host", () 
   });
 
   test("refuses by name a data contribution at a point nothing invokes", async () => {
-    const opened = await openWorkspace({ workspace, scope: "default", now });
+    using opened = await openWorkspace({ workspace, scope: "default", now });
 
     const refusal = await invokeContribution(opened, MODULE_NAME, SLOT, {}).then(
       (response) => response,

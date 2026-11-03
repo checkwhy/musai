@@ -22,6 +22,7 @@ export interface EvaluateClaim {
   readonly overBudget: boolean;
   readonly supportingArgumentIds: readonly string[];
   readonly stale?: boolean;
+  readonly forked?: boolean;
 }
 
 /** `authority` is unchecked until `evaluate` mints it; the ruling is stale once `briefReads` names
@@ -100,6 +101,7 @@ export function evaluate(input: EvaluateInput): EvaluationResult {
       floor: input.floor,
     }),
     stale: claim.stale,
+    forked: claim.forked,
   }));
 
   const { labelling, statuses } = evaluateClaims(claimInputs, nodeIds, defeats, argumentOf);

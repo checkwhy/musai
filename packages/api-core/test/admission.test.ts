@@ -43,7 +43,9 @@ async function installBundledModule(workspace: FixtureWorkspace): Promise<Record
 }
 
 async function admission(workspace: FixtureWorkspace): Promise<Awaited<ReturnType<typeof buildAdmissionWorkspace>>> {
-  const opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
+  const opened = workspace.keep(
+    await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK }),
+  );
   return buildAdmissionWorkspace(opened, await installedModules(opened));
 }
 
@@ -79,7 +81,7 @@ describe("buildAdmissionWorkspace, the admission a module is loaded through", ()
   test("refuses a bundle whose bytes in the store no longer digest to its id, record-corrupted", async () => {
     const workspace = await fixtureWorkspace();
     const bundle = await installBundledModule(workspace);
-    const opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
+    using opened = await openWorkspace({ workspace: workspace.dir, scope: workspace.scope, now: FIXTURE_CLOCK });
     const installed = await installedModules(opened);
     await rewriteBlob(workspace.dir, bundle, new TextEncoder().encode(BUNDLE_SOURCE.replace("invoke", "swapped")));
 

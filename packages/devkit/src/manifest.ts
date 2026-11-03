@@ -13,10 +13,11 @@ import {
   DESCRIBE_CONTRIBUTION,
   KernelError,
   type ModuleManifest,
+  SchemaCompiler,
   type ToolchainEntry,
   versionString,
 } from "@musai/records";
-import { Ajv, type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
 
 /** The global a bundle's top level assigns its exports to, shared by the build and describe. */
 export const MODULE_BUNDLE_GLOBAL = "__musaiModule";
@@ -93,7 +94,7 @@ function runDescribe(bundleSource: string, globalName: string, requestBytes: Uin
   return channel.result ?? { kind: "unsettled" };
 }
 
-const ajv = new Ajv({ strict: false, allErrors: true });
+const schemas = new SchemaCompiler();
 /** Compiled when first asked for, so loading the devkit compiles nothing. */
 let describeOutput: ValidateFunction | undefined;
 
@@ -151,10 +152,10 @@ export async function deriveManifest(
     );
   }
 
-  describeOutput ??= ajv.compile(DESCRIBE_OUTPUT_SCHEMA as Record<string, unknown>);
+  describeOutput ??= schemas.compile(DESCRIBE_OUTPUT_SCHEMA as Record<string, unknown>);
   if (!describeOutput(response.output)) {
     throw new ManifestError(
-      `refusing to derive a manifest for ${moduleName}: describe's answer disagrees with the kernel's own contribution-table shape: ${ajv.errorsText(
+      `refusing to derive a manifest for ${moduleName}: describe's answer disagrees with the kernel's own contribution-table shape: ${schemas.errorsText(
         describeOutput.errors ?? [],
       )}`,
     );

@@ -52,6 +52,15 @@
     "what": "allowed-signers names the key under another principal"
   },
   {
+    "name": "trust-line-refused",
+    "verdict": "failed",
+    "codes": [
+      "ref.pin-absent",
+      "trust.line-invalid"
+    ],
+    "what": "allowed-signers holding, after the signer's own line, a line the kernel refuses: a window with no zone"
+  },
+  {
     "name": "dangling-reference",
     "verdict": "failed",
     "codes": [

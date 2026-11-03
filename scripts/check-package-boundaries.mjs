@@ -12,12 +12,18 @@ const scanRoot = process.argv[2] ? resolve(process.argv[2]) : repoRoot;
 const SOURCE_EXTENSIONS = [".ts", ".mts", ".mjs"];
 const DEPENDENCY_FIELDS = ["dependencies", "peerDependencies", "devDependencies", "optionalDependencies"];
 
-/** Relative to the scan root, with forward slashes on every platform. */
+/** @typedef {{ name: string, [field: string]: string | Record<string, string> }} Manifest */
+/** @typedef {{ dir: string, path: string, manifest: Manifest | null, role?: string }} Package */
+/** @typedef {Package & { manifest: Manifest }} NamedPackage */
+
+/** Relative to the scan root, with forward slashes on every platform.
+ * @param {string} path */
 function displayPath(path) {
   return relative(scanRoot, path).split(sep).join("/");
 }
 
-/** Presence alone counts: a package.json that does not parse is still there. */
+/** Presence alone counts: a package.json that does not parse is still there.
+ * @param {string} dir */
 async function holdsPackageJson(dir) {
   try {
     await readFile(join(dir, "package.json"));
@@ -29,8 +35,11 @@ async function holdsPackageJson(dir) {
 
 /** Outside a `src/`, `dist` and `packages` are build output or fixture trees. A nested package's
  * files declare nothing to this one, so `skipNestedPackages` passes over them. */
+/** @param {string} packageRoot */
 async function filesUnderPackage(packageRoot, { skipNestedPackages = false } = {}) {
+  /** @type {string[]} */
   const files = [];
+  /** @param {string} dir @param {boolean} underSrc */
   async function walk(dir, underSrc) {
     let entries;
     try {
@@ -60,6 +69,7 @@ async function filesUnderPackage(packageRoot, { skipNestedPackages = false } = {
 /** Every directory under packages/, manifest or not: the layer rule reads source without one. */
 async function discoverPackages() {
   const packagesRoot = join(scanRoot, "packages");
+  /** @type {import("node:fs").Dirent[]} */
   let entries;
   try {
     entries = await readdir(packagesRoot, { withFileTypes: true });
@@ -70,6 +80,7 @@ async function discoverPackages() {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
+  /** @type {Package[]} */
   const packages = [];
   for (const dir of dirs) {
     const path = join(packagesRoot, dir);
@@ -88,7 +99,11 @@ async function discoverPackages() {
 const WORKSPACE_ALIAS = /^workspace:((?:@[^/@]+\/)?[^/@]+)@/;
 
 /** Each declaration naming a workspace package: by its spec when an alias, else by its key. */
-function* workspaceDeclarations(manifest, packagesByName, fields) {
+function* workspaceDeclarations(
+  /** @type {Manifest | null} */ manifest,
+  /** @type {Map<string, NamedPackage>} */ packagesByName,
+  /** @type {string[]} */ fields,
+) {
   for (const field of fields) {
     for (const [key, spec] of Object.entries(manifest?.[field] ?? {})) {
       const target = packagesByName.get(WORKSPACE_ALIAS.exec(spec)?.[1] ?? key);
@@ -100,7 +115,11 @@ function* workspaceDeclarations(manifest, packagesByName, fields) {
 }
 
 /** Keyed by the declared package's own name, whatever key the manifest lists it under. */
-function declaredWorkspaceDeps(manifest, packagesByName, fields) {
+function declaredWorkspaceDeps(
+  /** @type {Manifest | null} */ manifest,
+  /** @type {Map<string, NamedPackage>} */ packagesByName,
+  /** @type {string[]} */ fields,
+) {
   return new Map(
     [...workspaceDeclarations(manifest, packagesByName, fields)].map(({ field, target }) => [
       target.manifest.name,
@@ -109,7 +128,8 @@ function declaredWorkspaceDeps(manifest, packagesByName, fields) {
   );
 }
 
-/** Every package's own name, plus each key the manifest of `pkg` declares one under. */
+/** Every package's own name, plus each key the manifest of `pkg` declares one under.
+ * @param {Package} pkg @param {Map<string, NamedPackage>} packagesByName */
 function workspaceNamesSeenFrom(pkg, packagesByName) {
   const names = new Map(packagesByName);
   for (const { key, target } of workspaceDeclarations(pkg.manifest, packagesByName, DEPENDENCY_FIELDS)) {
@@ -118,6 +138,7 @@ function workspaceNamesSeenFrom(pkg, packagesByName) {
   return names;
 }
 
+/** @param {string} specifier @param {Map<string, NamedPackage>} names */
 function workspacePackageFor(specifier, names) {
   for (const [name, pkg] of names) {
     if (specifier === name || specifier.startsWith(`${name}/`)) {
@@ -127,6 +148,7 @@ function workspacePackageFor(specifier, names) {
   return undefined;
 }
 
+/** @param {string} specifier */
 function packageNameOf(specifier) {
   return specifier
     .split("/")
@@ -134,12 +156,14 @@ function packageNameOf(specifier) {
     .join("/");
 }
 
+/** @param {string} specifier */
 function isPlatformModule(specifier) {
   return (
     specifier.startsWith("node:") || specifier.startsWith("bun:") || builtinModules.includes(packageNameOf(specifier))
   );
 }
 
+/** @param {Package[]} packages */
 async function everyPackageHasARole(packages) {
   const unroled = [];
   for (const pkg of packages.filter((candidate) => candidate.role === undefined)) {
@@ -150,7 +174,8 @@ async function everyPackageHasARole(packages) {
   return unroled;
 }
 
-/** A type-only import counts: under src/ it lands in the declarations a consumer typechecks. */
+/** A type-only import counts: under src/ it lands in the declarations a consumer typechecks.
+ * @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 async function importsAreDeclared(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages) {
@@ -165,8 +190,8 @@ async function importsAreDeclared(packages, packagesByName) {
         pkg.manifest?.name,
         ...declaredWorkspaceDeps(pkg.manifest, packagesByName, fields).keys(),
       ]);
-      if (!underSrc) {
-        // The helper depends on the kernel side, so declaring it there would close a cycle.
+      if (!underSrc && SHIPPED_ROLES.has(pkg.role)) {
+        // What ships never declares the helper, so the root links it for that package's tests.
         allowed.add("@musai/test-support");
       }
       for (const { specifier, line } of importsIn(await readFile(file, "utf8"))) {
@@ -184,6 +209,7 @@ async function importsAreDeclared(packages, packagesByName) {
   return violations;
 }
 
+/** @param {Package[]} packages */
 async function relativeImportsStayInTheirPackage(packages) {
   const violations = [];
   for (const pkg of packages) {
@@ -202,19 +228,23 @@ async function relativeImportsStayInTheirPackage(packages) {
   return violations;
 }
 
+/** @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 function declaredGraphIsAcyclic(packages, packagesByName) {
-  const edges = new Map(packages.map((pkg) => [pkg.dir, new Set()]));
+  const edges = new Map(packages.map((pkg) => [pkg.dir, /** @type {Set<string>} */ (new Set())]));
   for (const pkg of packages) {
     for (const { target } of declaredWorkspaceDeps(pkg.manifest, packagesByName, DEPENDENCY_FIELDS).values()) {
-      edges.get(pkg.dir).add(target.dir);
+      /** @type {Set<string>} */ (edges.get(pkg.dir)).add(target.dir);
     }
   }
 
+  /** @type {Set<string>} */
   const cycles = new Set();
+  /** @type {string[]} */
   const stack = [];
   const onStack = new Set();
   const visited = new Set();
 
+  /** @param {string} node */
   function visit(node) {
     visited.add(node);
     stack.push(node);
@@ -231,6 +261,7 @@ function declaredGraphIsAcyclic(packages, packagesByName) {
     onStack.delete(node);
   }
 
+  /** @param {string[]} path */
   function normalizeCycle(path) {
     const smallest = [...path].sort()[0];
     const at = path.indexOf(smallest);
@@ -246,7 +277,8 @@ function declaredGraphIsAcyclic(packages, packagesByName) {
   return [...cycles].sort();
 }
 
-/** Reads no source: with the edge undeclared, `imports-are-declared` refuses any import of it. */
+/** Reads no source: with the edge undeclared, `imports-are-declared` refuses any import of it.
+ * @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 function excludedEdgesStayUndeclared(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages) {
@@ -261,7 +293,12 @@ function excludedEdgesStayUndeclared(packages, packagesByName) {
 }
 
 /** Declarations, and imports under src/, from a `fromRole` package into a `forbiddenRoles` one. */
-async function reachesInto(packages, packagesByName, fromRole, forbiddenRoles) {
+async function reachesInto(
+  /** @type {Package[]} */ packages,
+  /** @type {Map<string, NamedPackage>} */ packagesByName,
+  /** @type {string} */ fromRole,
+  /** @type {Set<string | undefined>} */ forbiddenRoles,
+) {
   const violations = [];
   for (const pkg of packages.filter((candidate) => candidate.role === fromRole)) {
     for (const [depName, { field, target }] of declaredWorkspaceDeps(pkg.manifest, packagesByName, DEPENDENCY_FIELDS)) {
@@ -284,10 +321,13 @@ async function reachesInto(packages, packagesByName, fromRole, forbiddenRoles) {
   return violations;
 }
 
+/** @type {Set<string | undefined>} */
 const SHIPPED_ROLES = new Set(["kernel-side", "surface", "distribution", "package"]);
+/** @type {Set<string | undefined>} */
 const NEVER_SHIPPED_ROLES = new Set(["test", "scenarios", "content"]);
 
-/** The test helper would break an install: it exports TypeScript source and imports the runner. */
+/** The test helper would break an install: it exports TypeScript source and imports the runner.
+ * @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 function neverShippedPackagesStayUndeclared(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages.filter((candidate) => SHIPPED_ROLES.has(candidate.role))) {
@@ -302,6 +342,7 @@ function neverShippedPackagesStayUndeclared(packages, packagesByName) {
   return violations;
 }
 
+/** @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 async function surfacesDeclareOnlyTheKernelSidePackagesTheyImport(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages.filter((candidate) => candidate.role === "surface")) {
@@ -330,6 +371,7 @@ async function surfacesDeclareOnlyTheKernelSidePackagesTheyImport(packages, pack
   return violations;
 }
 
+/** @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 async function scenariosReachTheKernelOnlyBySpawningIt(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages.filter((candidate) => candidate.role === "scenarios")) {
@@ -346,6 +388,7 @@ async function scenariosReachTheKernelOnlyBySpawningIt(packages, packagesByName)
   return violations;
 }
 
+/** @param {Package[]} packages */
 async function directoriesFormOneLayeredGraph(packages) {
   const packagesByDir = new Map(packages.map((pkg) => [pkg.dir, pkg]));
   const violations = [];
@@ -378,6 +421,7 @@ async function directoriesFormOneLayeredGraph(packages) {
   return violations;
 }
 
+/** @param {Package[]} packages @param {Map<string, NamedPackage>} packagesByName */
 async function typeOnlyEdgesCarryOnlyTypes(packages, packagesByName) {
   const violations = [];
   for (const pkg of packages) {
@@ -399,6 +443,7 @@ async function typeOnlyEdgesCarryOnlyTypes(packages, packagesByName) {
   return violations;
 }
 
+/** @type {Set<string | undefined>} */
 const BARREL_HELD_ROLES = new Set(["kernel-side", "surface"]);
 
 // `import` or `export` as a word, and not the `import` of `import.meta` or of a call.
@@ -408,7 +453,8 @@ const HEAD_TO_FROM = /^(import|export)(?:\s+type(?![\w$]))?\s*([^;]*?)\s*(?<![\w
 // An export clause naming bindings of the file's own scope: no `from` follows it.
 const LOCAL_EXPORT_CLAUSE = /(?<![\w$.])export(?:\s+type(?![\w$]))?\s*\{([^}]*)\}(?!\s*from(?![\w$]))/g;
 
-/** A `{ … }` clause's entries as written, `a` or `a as b`, each without its `type`. */
+/** A `{ … }` clause's entries as written, `a` or `a as b`, each without its `type`.
+ * @param {string} inner */
 function clauseEntries(inner) {
   return inner
     .split(",")
@@ -421,7 +467,8 @@ function clauseEntries(inner) {
     .filter((entry) => entry !== "");
 }
 
-/** The local names an import clause binds: default, namespace and each named entry's. */
+/** The local names an import clause binds: default, namespace and each named entry's.
+ * @param {string} clause */
 function importedBindings(clause) {
   const braces = /\{([^}]*)\}/.exec(clause);
   const outside = clause
@@ -435,7 +482,10 @@ function importedBindings(clause) {
 
 /** An alias by declaration (`export const x = y`, `export type X = Y`, `export default y`) is
  * read as a name of the file's own. */
-async function barrelsCarryOnlyTheirOwnNames(packages, packagesByName) {
+async function barrelsCarryOnlyTheirOwnNames(
+  /** @type {Package[]} */ packages,
+  /** @type {Map<string, NamedPackage>} */ packagesByName,
+) {
   const violations = [];
   for (const pkg of packages.filter((candidate) => BARREL_HELD_ROLES.has(candidate.role))) {
     const names = workspaceNamesSeenFrom(pkg, packagesByName);
@@ -443,6 +493,7 @@ async function barrelsCarryOnlyTheirOwnNames(packages, packagesByName) {
       const text = await readFile(file, "utf8");
       const code = codeOnly(text);
       const lineStarts = [0, ...[...code.matchAll(/\n/g)].map((newline) => newline.index + 1)];
+      /** @param {number} index */
       const lineOf = (index) => lineStarts.findLastIndex((start) => start <= index) + 1;
       const headsByLine = Map.groupBy(
         [...code.matchAll(STATEMENT_HEAD)].map((head) => head.index),
@@ -502,7 +553,8 @@ function layeredGraphComment() {
 }
 
 const packages = await discoverPackages();
-const packagesByName = new Map(packages.filter((pkg) => pkg.manifest?.name).map((pkg) => [pkg.manifest.name, pkg]));
+const namedPackages = /** @type {NamedPackage[]} */ (packages.filter((pkg) => pkg.manifest?.name));
+const packagesByName = new Map(namedPackages.map((pkg) => [pkg.manifest.name, pkg]));
 
 const rules = [
   {
@@ -514,7 +566,7 @@ const rules = [
   {
     name: "imports-are-declared",
     comment:
-      "a file under a package's src/ imports only its own package, the platform's own modules, and the packages its dependencies or peerDependencies declare, third-party and workspace alike; any other file may also import its devDependencies, and — the root links it for every package's tests — @musai/test-support undeclared.",
+      "a file under a package's src/ imports only its own package, the platform's own modules, and the packages its dependencies or peerDependencies declare, third-party and workspace alike; any other file may also import its devDependencies, and, in a package that ships, which never declares it, @musai/test-support, which the root links for its tests.",
     check: async () => importsAreDeclared(packages, packagesByName),
   },
   {

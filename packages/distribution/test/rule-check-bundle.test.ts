@@ -87,7 +87,8 @@ async function sender(settle: (context: OperationContext) => Promise<string>) {
   await runHandler(workspaceInit, { workspace: made.dir, key: key.keyPath }, made.context);
   await runHandler(moduleBuild, { dir: TREE_COMMAND_MODULE_DIR }, made.context);
   const root = await settle(made.context);
-  const module = (await openWorkspace(made.context)).index.contributionById(TREE_COMMAND_RULE)!.moduleRecord;
+  using opened = await openWorkspace(made.context);
+  const module = opened.index.contributionById(TREE_COMMAND_RULE)!.moduleRecord;
   const out = (name: string) => join(scratch, `${name}.tar.gz`);
   const exported = (name: string) =>
     runHandler(bundleExport, { id: root, to: "public", out: out(name), key: key.keyPath }, made.context);
@@ -127,7 +128,8 @@ describe("a check a module's rule judges leaves with what a stranger re-derives 
     const runs = [...files.keys()].filter((path) => path.startsWith("records/run/"));
     const commands = runs.map((path) => JSON.parse(new TextDecoder().decode(files.get(path))).recipe.command);
     expect(commands).toContainEqual(TRACKED_IS_HELLO);
-    const module = (await openWorkspace(from.context)).read(from.module) as ModuleRecord;
+    using opened = await openWorkspace(from.context);
+    const module = opened.read(from.module) as ModuleRecord;
     expect(files.has(recordPath("module", from.module))).toBe(true);
     expect(files.has(recordPath("run", module.build!))).toBe(true);
     expect(files.has(blobPath(module.bundle!))).toBe(true);
@@ -136,7 +138,8 @@ describe("a check a module's rule judges leaves with what a stranger re-derives 
 
   test("after a rebuild nothing has evaluated with, export refuses the check by name, and carries its receipt once status evaluates it", async () => {
     const from = await checkSender();
-    const { slot } = (await openWorkspace(from.context)).read(from.root as RecordId) as ClaimRecord;
+    using opened = await openWorkspace(from.context);
+    const { slot } = opened.read(from.root as RecordId) as ClaimRecord;
     await runHandler(moduleBuild, { dir: TREE_COMMAND_MODULE_DIR }, { ...from.context, now: rebuiltAt });
 
     const refused = await from.exported("rebuilt").catch((error: unknown) => error);
@@ -342,7 +345,8 @@ describe("a claim whose expectation a module decides leaves with that module", (
 
     expect(exported.underivable).toBeUndefined();
     const files = untarGz(new Uint8Array(await readFile(from.out("decided-carried"))));
-    const module = (await openWorkspace(from.context)).read(from.module) as ModuleRecord;
+    using opened = await openWorkspace(from.context);
+    const module = opened.read(from.module) as ModuleRecord;
     expect(files.has(recordPath("module", from.module))).toBe(true);
     expect(files.has(recordPath("run", module.build!))).toBe(true);
     expect(files.has(blobPath(module.bundle!))).toBe(true);
@@ -357,7 +361,8 @@ describe("a claim whose expectation a module decides leaves with that module", (
 
   test("one whose module has no build here is named by export, and rerun names that module uncarried", async () => {
     const from = await caseSender(TREE_COMMAND_DECIDED_HERE_KIND, 1);
-    const module = (await openWorkspace(from.context)).read(from.module) as ModuleRecord;
+    using opened = await openWorkspace(from.context);
+    const module = opened.read(from.module) as ModuleRecord;
     await rewriteBlob(from.dir, module.bundle!, null);
 
     const exported = await from.exported("decided-no-build");
@@ -434,7 +439,8 @@ test("an inapplicable check sharing the recipe of a check that held exports, for
 
 test("a module whose code this machine lacks is named by export, and rerun names it uncarried", async () => {
   const from = await checkSender();
-  const module = (await openWorkspace(from.context)).read(from.module) as ModuleRecord;
+  using opened = await openWorkspace(from.context);
+  const module = opened.read(from.module) as ModuleRecord;
   await rewriteBlob(from.dir, module.bundle!, null);
 
   const output = await from.exported("no-build");

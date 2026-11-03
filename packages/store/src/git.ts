@@ -170,28 +170,52 @@ export async function gitHashObjectBatch(ctx: GitContext, filePaths: string[]): 
     .filter((line) => line.length > 0);
 }
 
+function treeLines(entries: readonly TreeEntry[]): string {
+  return entries.map((entry) => `${entry.mode} ${entry.type} ${entry.sha}\t${entry.path}`).join("\n");
+}
+
 export async function gitMkTree(ctx: GitContext, entries: TreeEntry[]): Promise<string> {
-  const stdin = entries.map((entry) => `${entry.mode} ${entry.type} ${entry.sha}\t${entry.path}`).join("\n");
+  const stdin = treeLines(entries);
   const stdout = await runGit(ctx, ["mktree"], { input: stdin.length > 0 ? `${stdin}\n` : "" });
   return stdout.trim();
 }
 
-/** Every tree needs an entry: `--batch` separates trees by a blank line, so an empty first reads as
- * none. */
-export async function gitMkTreeBatch(ctx: GitContext, trees: readonly TreeEntry[][]): Promise<string[]> {
-  const stdin = trees
-    .map((entries) => entries.map((entry) => `${entry.mode} ${entry.type} ${entry.sha}\t${entry.path}`).join("\n"))
-    .join("\n\n");
-  const stdout = await runGit(ctx, ["mktree", "--batch"], { input: `${stdin}\n` });
-  const ids = stdout.split("\n").filter((line) => line.length > 0);
-  if (ids.length !== trees.length) {
-    throw new KernelError({
-      reason: "tool-unavailable",
-      detail: `git mktree --batch answered ${ids.length} tree ids for ${trees.length} trees`,
-      about: [ctx.gitDir],
+/** One `mktree --batch` for a run of trees: git answers each tree as it reads it, so a tree may
+ * name one written before it. Every tree needs an entry, since a blank line ends a tree. */
+async function withMkTreeBatch<T>(
+  ctx: GitContext,
+  build: (mktree: (entries: readonly TreeEntry[]) => Promise<string>) => Promise<T>,
+): Promise<T> {
+  const gitDir = resolve(ctx.gitDir);
+  const subprocess = execa("git", ["--git-dir", gitDir, "mktree", "--batch"], {
+    cwd: gitDir,
+    env: runEnv(gitDir, ctx.operatorConfig === true),
+    extendEnv: false,
+    stdin: "pipe",
+    buffer: { stdout: false },
+  });
+  const ids = subprocess.iterable()[Symbol.asyncIterator]();
+  try {
+    const built = await build(async (entries) => {
+      subprocess.stdin.write(`${treeLines(entries)}\n\n`);
+      const id = await ids.next();
+      if (id.done === true) {
+        throw new KernelError({
+          reason: "tool-unavailable",
+          detail: "git mktree --batch ended before it answered every tree",
+          about: [ctx.gitDir],
+        });
+      }
+      return id.value;
     });
+    subprocess.stdin.end();
+    await subprocess;
+    return built;
+  } finally {
+    // Ends the child of a build that stopped early; a no-op once it has exited.
+    subprocess.kill();
+    await subprocess.catch(() => undefined);
   }
-  return ids;
 }
 
 /** A declared identity, never the configuration's, so one instant mints one commit. */
@@ -522,13 +546,19 @@ function splitTreePath(path: string): { dir: string; name: string } {
   return slash === -1 ? { dir: "", name: path } : { dir: path.slice(0, slash), name: path.slice(slash + 1) };
 }
 
+export interface SplicedTree {
+  readonly sha: string;
+  /** `false` only where every file already sat at its path with its content. */
+  readonly changed: boolean;
+}
+
 /** `base`'s tree with each file placed at its path, touching only the directories on those paths.
  * It equals `gitBuildTree` over the whole base listing. */
 export async function gitSpliceTree(
   ctx: GitContext,
   base: string | null,
   files: readonly { path: string; sha: string }[],
-): Promise<string> {
+): Promise<SplicedTree> {
   const dirs = new Map<string, Map<string, TreeEntry>>([["", new Map()]]);
   for (const file of files) {
     let { dir } = splitTreePath(file.path);
@@ -561,29 +591,35 @@ export async function gitSpliceTree(
     }
   }
 
+  const before = new Map<string, TreeEntry | undefined>();
   for (const file of files) {
     const { dir, name } = splitTreePath(file.path);
-    dirs.get(dir)!.set(name, { mode: "100644", type: "blob", sha: file.sha, path: name });
-  }
-
-  // Directories at one depth are independent, so each depth is one `mktree --batch`.
-  const depthOf = (dir: string) => (dir === "" ? 0 : dir.split("/").length);
-  const byDepth = new Map<number, string[]>();
-  for (const dir of touched) {
-    byDepth.set(depthOf(dir), [...(byDepth.get(depthOf(dir)) ?? []), dir]);
-  }
-  for (const depth of [...byDepth.keys()].sort((a, b) => b - a).filter((depth) => depth > 0)) {
-    const level = byDepth.get(depth)!;
-    const shas = await gitMkTreeBatch(
-      ctx,
-      level.map((dir) => [...dirs.get(dir)!.values()]),
-    );
-    for (const [index, dir] of level.entries()) {
-      const { dir: parent, name } = splitTreePath(dir);
-      dirs.get(parent)!.set(name, { mode: "040000", type: "tree", sha: shas[index]!, path: name });
+    const held = dirs.get(dir)!;
+    if (!before.has(file.path)) {
+      before.set(file.path, held.get(name));
     }
+    held.set(name, { mode: "100644", type: "blob", sha: file.sha, path: name });
   }
-  return gitMkTree(ctx, [...dirs.get("")!.values()]);
+  const changed = [...before].some(([path, entry]) => {
+    const { dir, name } = splitTreePath(path);
+    return entry?.type !== "blob" || entry.sha !== dirs.get(dir)!.get(name)!.sha;
+  });
+
+  // Deepest first, so each directory's tree is written before its parent names it.
+  const depthOf = (dir: string) => (dir === "" ? 0 : dir.split("/").length);
+  const nested = touched.filter((dir) => dir !== "").sort((a, b) => depthOf(b) - depthOf(a));
+  if (nested.length === 0 && dirs.get("")!.size === 0) {
+    return { sha: await gitMkTree(ctx, []), changed };
+  }
+  const sha = await withMkTreeBatch(ctx, async (mktree) => {
+    for (const dir of nested) {
+      const { dir: parent, name } = splitTreePath(dir);
+      const tree = await mktree([...dirs.get(dir)!.values()]);
+      dirs.get(parent)!.set(name, { mode: "040000", type: "tree", sha: tree, path: name });
+    }
+    return mktree([...dirs.get("")!.values()]);
+  });
+  return { sha, changed };
 }
 
 /** The tree git would commit from `workTree` less each `excluded` path, in a scratch index. A
@@ -651,14 +687,14 @@ export async function gitRevParse(ctx: GitContext, ref: string): Promise<string 
 /** `merge-base --is-ancestor` answers 1 for "no" and anything else for a failure; an ancestor the
  * repository no longer holds, as after a rewrite was pruned, is no ancestor. */
 export async function gitIsAncestor(ctx: GitContext, ancestor: string, descendant: string): Promise<boolean> {
-  if ((await gitRevParse(ctx, `${ancestor}^{commit}`)) === null) {
-    return false;
-  }
   try {
     await runGit(ctx, ["merge-base", "--is-ancestor", ancestor, descendant]);
     return true;
   } catch (error) {
     if ((error as { exitCode?: number }).exitCode === 1) {
+      return false;
+    }
+    if ((await gitRevParse(ctx, `${ancestor}^{commit}`)) === null) {
       return false;
     }
     throw error;
@@ -865,7 +901,10 @@ function parseWorktreeListPorcelain(stdout: string): WorktreeEntry[] {
     if (key === "worktree") {
       current.path = value;
     } else if (key === "HEAD") {
-      current.headCommit = value;
+      // Git prints the null object id for a worktree on a branch with no commit yet.
+      if (!/^0+$/.test(value)) {
+        current.headCommit = value;
+      }
     } else if (key === "branch") {
       // The porcelain form always prints the full ref.
       current.branch = value.startsWith("refs/heads/") ? value.slice("refs/heads/".length) : value;

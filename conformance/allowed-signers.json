@@ -1,0 +1,761 @@
+{
+  "cases": [
+    {
+      "name": "a name and its key",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a name beside its key's own form",
+      "line": "florin,key:SHA256:xINMbtFxkELD0ccc0cxDBE87gG2aE/Yyt+W01EOwKpI ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin",
+        "key:SHA256:xINMbtFxkELD0ccc0cxDBE87gG2aE/Yyt+W01EOwKpI"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "the key's own form alone",
+      "line": "key:SHA256:xINMbtFxkELD0ccc0cxDBE87gG2aE/Yyt+W01EOwKpI ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "key:SHA256:xINMbtFxkELD0ccc0cxDBE87gG2aE/Yyt+W01EOwKpI"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "tabs between principals, options and key",
+      "line": "florin\tnamespaces=\"musai\"\tssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "namespaces": "musai",
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a comment after the key",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5 the author's laptop",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "whitespace around the line",
+      "line": "  florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5 \r",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an ECDSA key",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLyXQ58Vd/sPi8ChbwrxUUonffJNNUCpmvbDj3xNQy356BCE4UQHrvZmwNpzBIoJL6IneUqmCFS/N287UplxuVE=",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "cert-authority",
+      "line": "florin cert-authority ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": true,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "cert-authority twice",
+      "line": "florin cert-authority,cert-authority ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": true,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "namespaces, one a pattern",
+      "line": "florin namespaces=\"musai,git*\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "namespaces": "musai,git*",
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an empty namespaces list",
+      "line": "florin namespaces=\"\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "namespaces": "",
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an option named in capitals",
+      "line": "florin NAMESPACES=\"musai\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "namespaces": "musai",
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a window to the day in UTC",
+      "line": "florin valid-after=\"20250101Z\",valid-before=\"20990101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": 1735689600,
+      "validBefore": 4070908800
+    },
+    {
+      "name": "a window to the minute in UTC",
+      "line": "florin valid-after=\"202501010000Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": 1735689600,
+      "validBefore": null
+    },
+    {
+      "name": "a time to the second, UTC named in lower case",
+      "line": "florin valid-before=\"20990101000000utc\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": 4070908800
+    },
+    {
+      "name": "a day past its month's end, read in the next month",
+      "line": "florin valid-before=\"20270230Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": 1803945600
+    },
+    {
+      "name": "the first second after the epoch",
+      "line": "florin valid-after=\"19700101000001Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": 1,
+      "validBefore": null
+    },
+    {
+      "name": "every option at once",
+      "line": "florin cert-authority,namespaces=\"musai\",valid-after=\"20250101Z\",valid-before=\"20990101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": true,
+      "namespaces": "musai",
+      "validAfter": 1735689600,
+      "validBefore": 4070908800
+    },
+    {
+      "name": "the 29th of February of a common year, read as the 1st of March",
+      "line": "florin valid-before=\"20270229Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": 1803859200
+    },
+    {
+      "name": "the 31st of April, read as the 1st of May",
+      "line": "florin valid-after=\"20270431Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": 1809129600,
+      "validBefore": null
+    },
+    {
+      "name": "the last second OpenSSH reads",
+      "line": "florin valid-before=\"99991231235959Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": 253402300799
+    },
+    {
+      "name": "a backslash inside a value",
+      "line": "florin namespaces=\"mu\\sai\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "namespaces": "mu\\sai",
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an empty principal",
+      "line": ",florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "accepted",
+      "principals": [
+        "",
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an ECDSA key on P-384",
+      "line": "florin ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBJN/4v56XIkdSIFvU//qbzNesfztJm337QAhDO9emWqZJyOuyo+7LTQYREcYf/xSXXnfd3YOu6je9PSYknMiYU1HRiRrFFSGiV1Cx1pZvcVAOjwpv+aGyGz5lHvCfX/SCw==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an ECDSA key on P-521",
+      "line": "florin ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAAznWKRaxO32r191SOgBrhSHtBl66gRUs+Ru7xAnBcoAD0jyZZmxNx4WMcGqO45IyMS4gnr4HpYaEVSuLsy1cV0mQB+sreOSQ2wz4FaI0uF5EMrtNAcXGePo15Eh9A2ohmOrnlS+O3KjO4FUzJYaH4GYhtkHWJVOuDWEx9jAfcgSgy5cg==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an RSA key",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDBNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an RSA key beside its own form",
+      "line": "florin,key:SHA256:XYHMdWtm1tyCIrqic9IzYhHeBoJCmgSol9U0yprLAtE ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDBNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1",
+      "outcome": "accepted",
+      "principals": [
+        "florin",
+        "key:SHA256:XYHMdWtm1tyCIrqic9IzYhHeBoJCmgSol9U0yprLAtE"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an RSA key of 1024 bits",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQDBNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an RSA exponent of 3",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAABAwAAAQEAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "an RSA exponent of 24 bits",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAAEAP///wAAAQEAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a security key's ed25519 key",
+      "line": "florin sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5AAAABHNzaDo=",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a security key's ECDSA key",
+      "line": "florin sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBLyXQ58Vd/sPi8ChbwrxUUonffJNNUCpmvbDj3xNQy356BCE4UQHrvZmwNpzBIoJL6IneUqmCFS/N287UplxuVEAAAAEc3NoOg==",
+      "outcome": "accepted",
+      "principals": [
+        "florin"
+      ],
+      "certAuthority": false,
+      "validAfter": null,
+      "validBefore": null
+    },
+    {
+      "name": "a NUL inside a value",
+      "line": "florin namespaces=\"mu\u0000sai\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "unread-character"
+    },
+    {
+      "name": "a no-break space inside the principals",
+      "line": "florin, alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "unread-character"
+    },
+    {
+      "name": "a carriage return inside a principal",
+      "line": "flo\rrin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "unread-character"
+    },
+    {
+      "name": "a byte-order mark before the principals",
+      "line": "﻿florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "unread-character"
+    },
+    {
+      "name": "a vertical tab after the principals",
+      "line": "florin\u000b ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "unread-character"
+    },
+    {
+      "name": "a principal alone",
+      "line": "florin",
+      "outcome": "refused",
+      "reason": "incomplete"
+    },
+    {
+      "name": "a key type with no key",
+      "line": "florin ssh-ed25519",
+      "outcome": "refused",
+      "reason": "incomplete"
+    },
+    {
+      "name": "an unknown key type and no options",
+      "line": "florin ssh-foo AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "incomplete"
+    },
+    {
+      "name": "an option value whose quote never closes",
+      "line": "florin namespaces=\"musai ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "incomplete"
+    },
+    {
+      "name": "a wildcard principal",
+      "line": "fl*n ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-pattern"
+    },
+    {
+      "name": "a principal matching one character",
+      "line": "fl?rin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-pattern"
+    },
+    {
+      "name": "a negated principal",
+      "line": "florin,!alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-pattern"
+    },
+    {
+      "name": "a pattern principal before an unknown option",
+      "line": "fl*n bogus ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-pattern"
+    },
+    {
+      "name": "a principal in quotes",
+      "line": "\"florin\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-quoted"
+    },
+    {
+      "name": "a quote inside a principal",
+      "line": "fl\"or\"in ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "principal-quoted"
+    },
+    {
+      "name": "an unknown option",
+      "line": "florin bogus ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "cert-authority given a value",
+      "line": "florin cert-authority=\"yes\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "namespaces given no value",
+      "line": "florin namespaces ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "a trailing comma",
+      "line": "florin namespaces=\"musai\", ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "a leading comma",
+      "line": "florin ,namespaces=\"musai\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "two commas",
+      "line": "florin namespaces=\"musai\",,valid-after=\"20250101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "an option named only by Unicode case folding",
+      "line": "florin namespaceſ=\"musai\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "an unknown option before a bad key",
+      "line": "florin bogus ssh-ed25519 AAAA",
+      "outcome": "refused",
+      "reason": "option-unknown"
+    },
+    {
+      "name": "a value without quotes",
+      "line": "florin namespaces=musai ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unquoted"
+    },
+    {
+      "name": "a value with text after its quotes",
+      "line": "florin namespaces=\"musai\"x ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unquoted"
+    },
+    {
+      "name": "a value ending in an escaped quote",
+      "line": "florin namespaces=\"musai\\\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-unquoted"
+    },
+    {
+      "name": "namespaces twice",
+      "line": "florin namespaces=\"musai\",namespaces=\"git\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-repeated"
+    },
+    {
+      "name": "a bound twice in two cases",
+      "line": "florin valid-after=\"20250101Z\",VALID-AFTER=\"20260101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-repeated"
+    },
+    {
+      "name": "a day with no zone",
+      "line": "florin valid-after=\"20250101\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a second with no zone",
+      "line": "florin valid-before=\"20990101000000\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a time of ten digits",
+      "line": "florin valid-after=\"2025010100Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a month that does not exist",
+      "line": "florin valid-after=\"20251301Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a day of zero",
+      "line": "florin valid-after=\"20250100Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a sixtieth second",
+      "line": "florin valid-after=\"20250101000060Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a word for a time",
+      "line": "florin valid-after=\"tomorrow\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a space before the time",
+      "line": "florin valid-after=\" 20250101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "the epoch",
+      "line": "florin valid-after=\"19700101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a time before the epoch",
+      "line": "florin valid-before=\"19691231Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "option-time"
+    },
+    {
+      "name": "a window closing before it opens",
+      "line": "florin valid-after=\"20990101Z\",valid-before=\"20250101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "window-empty"
+    },
+    {
+      "name": "a window closing as it opens",
+      "line": "florin valid-after=\"20250101Z\",valid-before=\"20250101Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "window-empty"
+    },
+    {
+      "name": "a window empty once its day past the month's end is read",
+      "line": "florin valid-after=\"20270231Z\",valid-before=\"20270302Z\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "window-empty"
+    },
+    {
+      "name": "an unknown key type",
+      "line": "florin namespaces=\"musai\" ssh-foo AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "key-type-unknown"
+    },
+    {
+      "name": "a key cut short",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a key with a character too many",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5x",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a key padded past its length",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a key in base64 that is not strict",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLyXQ58Vd/sPi8ChbwrxUUonffJNNUCpmvbDj3xNQy356BCE4UQHrvZmwNpzBIoJL6IneUqmCFS/N287UplxuVF=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a key of another type",
+      "line": "florin ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a key on another curve",
+      "line": "florin ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLyXQ58Vd/sPi8ChbwrxUUonffJNNUCpmvbDj3xNQy356BCE4UQHrvZmwNpzBIoJL6IneUqmCFS/N287UplxuVE=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an ed25519 key a byte short",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAHwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an ed25519 key with a field too many",
+      "line": "florin ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a principal naming another key's form",
+      "line": "florin,key:SHA256:oFKCR0zMBlNxUQqan94/vm/ggAZRdTRiGjbnhLCDCWs ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "key-foreign"
+    },
+    {
+      "name": "a principal naming no key's form",
+      "line": "florin,key:SHA256:nope ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2BQWDJDXC+Z7BUUruH+wCErasTO3aYNeoSUkCdWdb5",
+      "outcome": "refused",
+      "reason": "key-foreign"
+    },
+    {
+      "name": "an ECDSA point off its curve",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a compressed ECDSA point",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAAAhAryXQ58Vd/sPi8ChbwrxUUonffJNNUCpmvbDj3xNQy35",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an ECDSA point of a small x",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFRZJDuapYGAb+kTvOmYF63hHKUDxk2aPFM0FcCDJI+8w=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an ECDSA point of an x past the order",
+      "line": "florin ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBP////8AAAAA//////////+85vqtpxeehPO5ysL8YyVUSE8MD9pDTvCoCEWJFPMocV16VF4Zisfu4x3/6GG10j8=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a security key's ECDSA point off its curve",
+      "line": "florin sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEAAAAEc3NoOg==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA key of 512 bits",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAQQDBNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA key of 1023 bits",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgEE1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA exponent of 1",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAABAQAAAQEAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an even RSA exponent",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQAAAAABAQDBNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA exponent of 25 bits",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAAEAQAAAQAAAQEAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA exponent padded with a zero",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAAEAAEAAQAAAQEAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "an RSA modulus padded with a zero",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAgAAwTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NQ==",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a negative RSA modulus",
+      "line": "florin ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAME1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU=",
+      "outcome": "refused",
+      "reason": "key-invalid"
+    },
+    {
+      "name": "a DSA key",
+      "line": "florin ssh-dss AAAAB3NzaC1kc3MAAAABAQAAAAEBAAAAAQEAAAABAQ==",
+      "outcome": "refused",
+      "reason": "key-type-unknown"
+    }
+  ]
+}

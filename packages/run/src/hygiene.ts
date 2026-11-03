@@ -74,23 +74,30 @@ export async function withScratch<T>(fn: (scratch: ScratchPaths) => Promise<T>):
   }
 }
 
+/** Where the child finds an entry of its run's scratch. */
+export type ScratchPlace = (entry: string) => string;
+
+export function onHost(scratch: ScratchPaths): ScratchPlace {
+  return (entry) => join(scratch.root, entry);
+}
+
 /** Per-user git configuration points at a scratch path never created, not a device name, since
  * a device present on one platform is absent on another. */
-function hygieneAssignments(scratch: ScratchPaths): Record<(typeof ASSIGNED_CHANNELS)[number], string> {
-  const home = join(scratch.root, "home");
-  const tmp = join(scratch.root, "tmp");
+function hygieneAssignments(at: ScratchPlace): Record<(typeof ASSIGNED_CHANNELS)[number], string> {
+  const home = at("home");
+  const tmp = at("tmp");
   return {
     HOME: home,
     TMPDIR: tmp,
     TEMP: tmp,
     TMP: tmp,
-    XDG_CONFIG_HOME: join(scratch.root, "xdg-config"),
-    XDG_CACHE_HOME: join(scratch.root, "xdg-cache"),
-    XDG_DATA_HOME: join(scratch.root, "xdg-data"),
-    XDG_STATE_HOME: join(scratch.root, "xdg-state"),
+    XDG_CONFIG_HOME: at("xdg-config"),
+    XDG_CACHE_HOME: at("xdg-cache"),
+    XDG_DATA_HOME: at("xdg-data"),
+    XDG_STATE_HOME: at("xdg-state"),
     SSH_AUTH_SOCK: "",
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: join(scratch.root, "unwritten-global-config"),
+    GIT_CONFIG_GLOBAL: at("unwritten-global-config"),
   };
 }
 
@@ -126,10 +133,10 @@ function assertNoCollision(name: string, hygieneKeys: ReadonlySet<string>): void
  * from `bound` is left out, unlike one bound to the empty string. */
 export function hygienicEnvironment(
   recipe: HygienicEnvironmentRecipe,
-  scratch: ScratchPaths,
+  at: ScratchPlace,
   bound: Readonly<Record<string, string>>,
 ): Record<string, string> {
-  const assignments = hygieneAssignments(scratch);
+  const assignments = hygieneAssignments(at);
   const hygieneKeys = new Set<string>(AMBIENT_CHANNELS);
 
   for (const name of Object.keys(recipe.environment)) {

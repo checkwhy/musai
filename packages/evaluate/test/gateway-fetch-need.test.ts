@@ -127,7 +127,7 @@ describe("a rule that asks for a body, satisfied through the same restart loop t
           invoker,
           input: { claimId: `claim-fetch-${name}`, conditions: {}, evidence: [] },
           store,
-          index: new IndexDb(),
+          index: repo.keep(new IndexDb()),
           now: repo.now,
         });
 
@@ -157,7 +157,7 @@ describe("a rule that asks for a body, satisfied through the same restart loop t
       const path = await moduleNaming(locator);
       const loaded = await host.load(path, "invoke");
       const invoker = invokerFromModuleHost(host, loaded, CONTRIBUTION);
-      const index = new IndexDb();
+      using index = new IndexDb();
       const evaluationOutcomes = new Map();
 
       const first = await runRestartLoop({
@@ -202,7 +202,7 @@ describe("a rule that asks for a body, satisfied through the same restart loop t
         invoker,
         input: { claimId: "claim-refused", conditions: {}, evidence: [] },
         store,
-        index: new IndexDb(),
+        index: repo.keep(new IndexDb()),
         now: repo.now,
       });
 

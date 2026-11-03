@@ -61,9 +61,8 @@ export {
   resolveSlot,
   type SlotLayers,
   type SlotResolution,
-  slotReadId,
 } from "./conditions/layering.js";
-export { SchemaCompiler } from "./conditions/schema-compiler.js";
+export { admitPrecompiledValidators, SchemaCompiler } from "./conditions/schema-compiler.js";
 export {
   ANY_SCOPE,
   type CodedScopeReference,
@@ -116,8 +115,22 @@ export {
   STATUS_REASONS,
   type Status,
 } from "./reason/reason.js";
+export {
+  ALLOWED_SIGNERS_FILE,
+  AUDIENCES_FILE,
+  CONFIG_FILE,
+  ROLES_FILE,
+  TrustFileError,
+} from "./reason/trust-file.js";
 export { ACTIONS, type Action } from "./record/actions.js";
-export { ANCHOR_LABEL_WIDTH, parseReceiptsSection, RECEIPTS_HEADING, splitReceiptsSection } from "./record/anchors.js";
+export {
+  ANCHOR_ID_PREFIX_PATTERN,
+  ANCHOR_LABEL_PATTERN,
+  ANCHOR_LABEL_WIDTH,
+  parseReceiptsSection,
+  RECEIPTS_HEADING,
+  splitReceiptsSection,
+} from "./record/anchors.js";
 export { type Audience, type AudienceForm, isAudience, parseAudience } from "./record/audience.js";
 export {
   BLOB_THRESHOLD_CONFIG_KEY,
@@ -250,7 +263,13 @@ export {
   PSEUDONYM_PREFIX,
   pseudonymFor,
 } from "./record/pseudonym.js";
-export { RecordRefusedError, readArrivingRecord, readStoredRecord } from "./record/read.js";
+export {
+  type FixedAttestation,
+  RecordRefusedError,
+  readArrivingRecord,
+  readLaterAttestation,
+  readStoredRecord,
+} from "./record/read.js";
 export { citationRecipeFor, type FetchRecipe } from "./record/recipe.js";
 export {
   type Annotated,

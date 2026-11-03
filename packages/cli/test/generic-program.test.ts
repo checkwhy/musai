@@ -1,6 +1,7 @@
-import type { Distribution, OperationDescriptor } from "@musai/api-core";
+import { type Distribution, type OperationDescriptor, Workspace } from "@musai/api-core";
 import { exitCodeForClass, versionString } from "@musai/records";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { makeFixtureRepo } from "@musai/test-support";
+import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { runCli } from "../src/index.js";
 
 /** Answers a constant, so running it touches no workspace. */
@@ -194,6 +195,33 @@ describe("runCli", () => {
     expect(commands).toEqual(["greet", "fails", "echo", "traces", "whoami", "help"]);
     expect(help).toContain("answer one constant greeting");
     expect(process.exitCode).toBe(0);
+  });
+
+  test("streaming a scope's events closes the fold it read them from", async () => {
+    const repo = await makeFixtureRepo("default");
+    onTestFinished(() => repo.cleanup());
+    const open = vi.spyOn(Workspace, "open");
+    const close = vi.spyOn(Workspace.prototype, "close");
+    onTestFinished(() => {
+      open.mockRestore();
+      close.mockRestore();
+    });
+
+    const answered = await writtenTo(process.stdout, [
+      "node",
+      "/nowhere/bin.js",
+      "--workspace",
+      repo.workspace,
+      "--events",
+      "greet",
+      "--json",
+    ]);
+
+    expect(answered).toBe('{"count":2,"greeting":"hello"}');
+    expect(process.exitCode).toBe(0);
+    const opened = await Promise.all(open.mock.results.map((result) => result.value));
+    expect(opened).toHaveLength(1);
+    expect(close.mock.contexts).toEqual(opened);
   });
 
   test("a command runs under the name MUSAI_PRINCIPAL gives, and never under the machine's user name", async () => {

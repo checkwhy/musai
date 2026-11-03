@@ -173,7 +173,7 @@ describe("records minted at previous schema versions", () => {
       await commitAroundTheStore(repo, file.path, file.bytes);
     }
 
-    const index = new IndexDb();
+    using index = new IndexDb();
     await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
 
     expect(index.refusals()).toEqual([]);

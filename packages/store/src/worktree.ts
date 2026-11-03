@@ -90,12 +90,13 @@ export interface ViewTreeFile {
   content: Uint8Array;
 }
 
-/** `stale` when the case the slug names no longer exists. */
+/** `stale` when the case the slug names no longer exists; `headCommit` is `null` while its branch
+ * holds no commit. */
 export interface ViewWorktree {
   slug: string;
   branch: string;
   path: string;
-  headCommit: string;
+  headCommit: string | null;
   stale: boolean;
 }
 
@@ -171,7 +172,7 @@ export async function materialiseView(
   files: readonly ViewTreeFile[],
   editablePaths: ReadonlySet<string>,
   now: Clock,
-): Promise<ViewWorktree> {
+): Promise<ViewWorktree & { readonly headCommit: string }> {
   assertSafeSlugSegment(slug);
   const branch = branchFor(slug);
   const path = join(openDirPath(ctx), slug);
@@ -218,7 +219,7 @@ export async function listViewWorktrees(ctx: GitContext, liveSlugs: ReadonlySet<
       slug,
       branch: entry.branch,
       path: entry.path,
-      headCommit: entry.headCommit ?? "",
+      headCommit: entry.headCommit,
       stale: !liveSlugs.has(slug),
     });
   }

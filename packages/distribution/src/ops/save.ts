@@ -17,9 +17,11 @@ import {
   type RecordId,
   versionString,
 } from "@musai/records";
+import { printable } from "@musai/run";
 import { assertSafeSlugSegment, gitCatFile, gitRevParse, OPEN_DIR, VIEW_BRANCH_PREFIX } from "@musai/store";
 import { anchorGrammarFor, UngrammaredFormatError } from "../anchor/formats.js";
-import { findCaseRecord } from "../cases.js";
+import { findCaseRecord, refuseForkedView } from "../cases.js";
+import { markdownCommand } from "../text.js";
 import { DERIVED, EDITABLE } from "../view/render.js";
 import { VIEW_MANIFEST_PATH, type ViewManifestEntry } from "./open.js";
 
@@ -119,9 +121,10 @@ async function draftedArtifacts(input: CaseSaveInput, opened: Workspace): Promis
     throw new OperationError({
       reason: "no-such-record",
       about: [input.case],
-      detail: `no case found named ${input.case}`,
+      detail: `no case found named ${printable(input.case)}`,
     });
   }
+  refuseForkedView(opened, found.record.slug);
 
   const branch = `${VIEW_BRANCH_PREFIX}${found.record.slug}`;
   const tip = await gitRevParse(opened.ctx, `refs/heads/${branch}`);
@@ -129,7 +132,7 @@ async function draftedArtifacts(input: CaseSaveInput, opened: Workspace): Promis
     throw new OperationError({
       reason: "no-such-record",
       about: [input.case],
-      detail: `case ${input.case} has no open worktree to save from; run "musai lab open ${input.case}" first`,
+      detail: `case ${printable(input.case)} has no open worktree to save from; run ${markdownCommand(["musai", "lab", "open", input.case])} first`,
     });
   }
   assertSafeSlugSegment(found.record.slug);

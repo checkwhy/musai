@@ -45,7 +45,7 @@ describe("the audiences file decides which audience covers which", () => {
     expect(covers(audiences, KEY, OTHER_KEY)).toBe(false);
   });
 
-  it("a cycle of includes is refused as a declaration conflict, naming it", () => {
+  it("a cycle of includes is refused as a trust file to fix, naming it", () => {
     const refusal = (() => {
       try {
         parseAudiences("a includes b\nb includes c\nc includes a\n");
@@ -55,7 +55,7 @@ describe("the audiences file decides which audience covers which", () => {
       return undefined;
     })();
     expect(refusal).toBeInstanceOf(KernelError);
-    expect(refusal).toMatchObject({ reason: "declaration-conflict" });
+    expect(refusal).toMatchObject({ reason: "workspace-incomplete" });
     expect((refusal as KernelError).detail).toContain("a includes b includes c includes a");
   });
 

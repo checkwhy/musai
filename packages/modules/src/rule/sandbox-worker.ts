@@ -1,9 +1,9 @@
-import { stripTypeScriptTypes } from "node:module";
 import { type Context, constants, createContext, Script } from "node:vm";
 import { parentPort, workerData } from "node:worker_threads";
 
 interface SandboxWorkerData {
-  readonly source: string;
+  /** The module as its host stripped it into a strict script. */
+  readonly scriptSource: string;
   readonly exportName: string;
   readonly modulePath: string;
   readonly timeLimitMs: number;
@@ -14,29 +14,6 @@ const RANDOMNESS_DENIAL = "a contribution may not draw randomness";
 
 /** `MODULE_BUNDLE_GLOBAL` of `@musai/devkit`, repeated by value; a raw gateway declares none. */
 const BUNDLE_GLOBAL = "__musaiModule";
-
-/** A top-level `export`, a syntax error in a script, dropped leaving its declaration. */
-const TOP_LEVEL_EXPORT = /^export\s+(?=(?:const|let|function|class)\b)/gm;
-
-/** Node warns once per process that the stripper is experimental, a line every verb would print. */
-function stripTypesQuietly(source: string): string {
-  const emitWarning = process.emitWarning;
-  process.emitWarning = () => undefined;
-  try {
-    return stripTypeScriptTypes(source, { mode: "strip" });
-  } finally {
-    process.emitWarning = emitWarning;
-  }
-}
-
-/** Compiled strict as the build compiles, every line in place. It mirrors `module/host-child.ts`
- * rather than importing it: a worker's entry maps no `.js` specifier to its `.ts` sibling. */
-function compileModuleScript(source: string, modulePath: string): Script {
-  const stripped = stripTypesQuietly(source);
-  const scriptSource = stripped.replace(TOP_LEVEL_EXPORT, "");
-  const body = scriptSource.startsWith("#!") ? `//${scriptSource.slice(2)}` : scriptSource;
-  return new Script(`"use strict";${body}`, { filename: modulePath });
-}
 
 function forbidClockAndRandomness(context: Context): void {
   const forbiddenDate = (): never => {
@@ -151,8 +128,8 @@ function invokeOneRequest(
   }
 }
 
-const { source, exportName, modulePath, timeLimitMs } = workerData as SandboxWorkerData;
-const script = compileModuleScript(source, modulePath);
+const { scriptSource, exportName, modulePath, timeLimitMs } = workerData as SandboxWorkerData;
+const script = new Script(scriptSource, { filename: modulePath });
 
 if (parentPort === null) {
   throw new Error("sandbox-worker is this host's own worker entry point and does not run outside a worker thread");

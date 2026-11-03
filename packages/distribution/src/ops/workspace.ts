@@ -141,6 +141,7 @@ export const workspaceInit: OperationDescriptor<WorkspaceInitInput, WorkspaceIni
   documentation:
     "Creates a workspace, or installs the core module into one that holds none, refusing before any key is registered if it conflicts with an installed module; registers the operator's signing key when one is named.",
   paths: ["workspace", "key"],
+  makesWorkspace: true,
   cli: {
     verb: "init",
     positional: ["workspace"],

@@ -93,7 +93,7 @@ describe("eventsSince", () => {
   }
 
   test("a workspace with no commits at all returns no events and the empty cursor, and reading from that cursor answers the same", async () => {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const first = await eventsSince(opened);
     const second = await eventsSince(opened, first.cursor);
     expect(first).toEqual({ events: [], cursor: "" });
@@ -105,7 +105,7 @@ describe("eventsSince", () => {
     await bookEmptyCase(store, "unrelated-case");
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const moduleEvents = (await eventsSince(opened)).events.filter(isModuleEvent);
     expect(moduleEvents).toEqual([{ kind: "module.installed", at: moduleEvents[0]!.at, about: "pack" }]);
   });
@@ -114,7 +114,7 @@ describe("eventsSince", () => {
     const store = storeAt();
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const first = await eventsSince(opened);
     expect(first.events).toHaveLength(1);
 
@@ -127,7 +127,7 @@ describe("eventsSince", () => {
     await installFixtureModule(store, "pack", "1");
     await installFixtureModule(store, "pack", "2");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const result = await eventsSince(opened);
     expect(result.events.map((event) => event.kind)).toEqual(["module.installed", "pin.changed"]);
     expect(result.events.every((event) => event.about === "pack")).toBe(true);
@@ -137,11 +137,11 @@ describe("eventsSince", () => {
     const store = storeAt();
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const afterInstall = await eventsSince(opened);
 
     await installFixtureModule(store, "pack", "2");
-    const reopened = await openWorkspace({ workspace, scope, now });
+    using reopened = await openWorkspace({ workspace, scope, now });
     const afterPin = await eventsSince(reopened, afterInstall.cursor);
     expect(afterPin.events).toEqual([{ kind: "pin.changed", at: afterPin.events[0]!.at, about: "pack" }]);
   });
@@ -150,7 +150,7 @@ describe("eventsSince", () => {
     const store = storeAt();
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const unheld = "0".repeat(40);
     expect((await refusalOf(eventsSince(opened, unheld))).reason).toBe("stale");
     expect((await refusalOf(eventsSince(opened, `${unheld}:0`))).reason).toBe("stale");
@@ -160,7 +160,7 @@ describe("eventsSince", () => {
     const store = storeAt();
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const { cursor } = await eventsSince(opened);
     for (const unparseable of [
       "not-a-cursor",
@@ -181,7 +181,7 @@ describe("eventsSince", () => {
     await store.putMany([caseItem("first"), moduleItem("pack", "1")]);
     await installFixtureModule(store, "pack", "2");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const withNone = await eventsSince(opened);
     expect(withNone.events).toHaveLength(3);
     expect(await eventsSince(opened, "")).toEqual(withNone);
@@ -190,12 +190,12 @@ describe("eventsSince", () => {
   test("a bare commit sha reads on from the end of that commit", async () => {
     const store = storeAt();
     await store.putMany([caseItem("first"), moduleItem("pack", "1")]);
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const first = await eventsSince(opened);
     expect(first.events.map((event) => event.at)).toEqual([first.cursor, first.cursor]);
 
     await installFixtureModule(store, "pack", "2");
-    const reopened = await openWorkspace({ workspace, scope, now });
+    using reopened = await openWorkspace({ workspace, scope, now });
     const all = await eventsSince(reopened);
     expect(all.events).toHaveLength(3);
     expect(await eventsSince(reopened, first.cursor)).toEqual({ events: all.events.slice(2), cursor: all.cursor });
@@ -206,7 +206,7 @@ describe("eventsSince", () => {
     await store.putMany([caseItem("first"), moduleItem("pack", "1")]);
     await installFixtureModule(store, "pack", "2");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const all = await eventsSince(opened);
     const commit = all.events[0]!.at;
     expect(await eventsSince(opened, `${commit}:0`)).toEqual({ events: all.events.slice(1), cursor: all.cursor });
@@ -217,7 +217,7 @@ describe("eventsSince", () => {
     await store.putMany([caseItem("first"), moduleItem("pack", "1")]);
     await installFixtureModule(store, "pack", "2");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const commit = (await eventsSince(opened)).events[0]!.at;
     const bare = await eventsSince(opened, commit);
     expect(bare.events).toHaveLength(1);
@@ -230,7 +230,7 @@ describe("eventsSince", () => {
     const store = storeAt();
     await installFixtureModule(store, "pack", "1");
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const first = await eventsSince(opened);
     const second = await eventsSince(opened);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));

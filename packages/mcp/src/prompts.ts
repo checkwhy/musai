@@ -7,17 +7,17 @@ import {
   type PromptArgument,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
-  closingWorkspaces,
   installedManifests,
   invokeContribution,
   type NamedManifest,
   type OperationContext,
   OperationError,
   openWorkspace,
+  type Workspace,
 } from "@musai/api-core";
 import type { ContributionEntry } from "@musai/records";
 import { contributionToolNameFor } from "./project.js";
-import { refusalCrossingAsRpcError } from "./refusal.js";
+import { noWorkspaceRefusal, type ReadGuard, refusalCrossingAsRpcError } from "./refusal.js";
 
 /** A `template` renders text from an input, the one kernel shape a prompt's `get` answers with. */
 const PROMPT_CONTRIBUTION_KIND = "template";
@@ -64,17 +64,25 @@ function promptsFromManifests(manifests: readonly NamedManifest[]): ProjectedPro
     }));
 }
 
+async function installedPrompts(opened: Workspace): Promise<ProjectedPrompt[]> {
+  return promptsFromManifests(await installedManifests(opened));
+}
+
+async function listedPrompts(context: OperationContext): Promise<Prompt[]> {
+  using opened = await openWorkspace(context);
+  return (await installedPrompts(opened)).map((projected) => projected.prompt);
+}
+
 async function getPrompt(
-  projected: readonly ProjectedPrompt[],
   context: OperationContext,
   name: string,
   args: Record<string, string>,
 ): Promise<GetPromptResult> {
-  const found = projected.find((candidate) => candidate.prompt.name === name);
+  using opened = await openWorkspace(context);
+  const found = (await installedPrompts(opened)).find((candidate) => candidate.prompt.name === name);
   if (found === undefined) {
     throw new OperationError({ reason: "no-such-record", about: [name], detail: `no prompt named ${name}` });
   }
-  const opened = await openWorkspace(context);
   const response = await invokeContribution(opened, found.moduleName, found.entry, args);
   if (!response.ok) {
     throw new OperationError({
@@ -91,32 +99,22 @@ async function getPrompt(
   };
 }
 
-/** `beforeRead` runs ahead of every list and get, and its refusal is theirs. */
-export function registerPromptHandlers(
-  server: Server,
-  context: OperationContext,
-  beforeRead: () => Promise<void> = async () => {},
-): void {
+export function registerPromptHandlers(server: Server, context: OperationContext, guard: ReadGuard): void {
   server.setRequestHandler(ListPromptsRequestSchema, () =>
-    closingWorkspaces(() =>
-      refusalCrossingAsRpcError(async () => {
-        await beforeRead();
-        const opened = await openWorkspace(context);
-        const manifests = await installedManifests(opened);
-        return { prompts: promptsFromManifests(manifests).map((projected) => projected.prompt) };
-      }),
+    refusalCrossingAsRpcError(() =>
+      guard(async (makers) => ({ prompts: makers === undefined ? await listedPrompts(context) : [] })),
     ),
   );
 
   server.setRequestHandler(GetPromptRequestSchema, (request) =>
-    closingWorkspaces(() =>
-      refusalCrossingAsRpcError(async () => {
-        await beforeRead();
-        const opened = await openWorkspace(context);
-        const manifests = await installedManifests(opened);
-        const projected = promptsFromManifests(manifests);
+    refusalCrossingAsRpcError(() =>
+      guard(async (makers) => {
+        const { name } = request.params;
+        if (makers !== undefined) {
+          throw noWorkspaceRefusal("no-such-record", name, context.workspace, makers);
+        }
         const args = (request.params.arguments ?? {}) as Record<string, string>;
-        return getPrompt(projected, context, request.params.name, args);
+        return getPrompt(context, name, args);
       }),
     ),
   );

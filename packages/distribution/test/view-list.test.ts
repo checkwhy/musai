@@ -200,7 +200,7 @@ describe("case.status@2 and view.run@1", () => {
   async function installCoreModule(): Promise<void> {
     const sourceGitDir = await repoGitDir();
     const store = storeAt();
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await buildModule(CORE_MODULE_DIR, store, {
       blobs: blobStoreOf(workspace),
@@ -526,6 +526,104 @@ describe("case.status@2 and view.run@1", () => {
       } finally {
         opened.close();
       }
+    }, 30_000);
+
+    test("a ruling over a brief read under a shared claim's case stands while another citing slug is forked", async () => {
+      const store = storeAt();
+      const shared = await mintClaim(store, { id: "shared", rendering: "a shared gate", gateClass: "judgment" });
+      await bookCase(store, "read-whole", [shared]);
+      await bookCase(store, "forked-beside", [shared]);
+      const asked = await runHandler(gateAsk, { claim: shared, case: "read-whole" }, ctx());
+      await runHandler(
+        gateAnswer,
+        { pending: shared, brief: asked.brief, choice: "holds", reason: "the fixture decides" },
+        { ...ctx(), via: "tty", principalName: "person@example.com" },
+      );
+
+      await bookCase(store, "forked-beside", [shared], "musai.core/merged-from-another-scope");
+
+      const { done, flagged } = await runHandler(caseStatus, { case: "read-whole" }, ctx());
+      expect({ done, flagged: flagged ?? [] }).toEqual({ done: true, flagged: [] });
+    }, 30_000);
+
+    test("a ruling over a brief read under one of the cases two slugs share stands for both, until that case is rebooked", async () => {
+      const store = storeAt();
+      const shared = await mintClaim(store, { id: "shared", rendering: "a shared gate", gateClass: "judgment" });
+      await bookCase(store, "shares-one", [shared]);
+      const two = await bookCase(store, "shares-two", [shared]);
+
+      const unnamed = await runHandler(gateAsk, { claim: shared }, ctx()).catch((caught: unknown) => caught);
+      const asked = await runHandler(gateAsk, { claim: shared, case: "shares-two" }, ctx());
+      await runHandler(
+        gateAnswer,
+        { pending: shared, brief: asked.brief, choice: "holds", reason: "the fixture decides" },
+        { ...ctx(), via: "tty", principalName: "person@example.com" },
+      );
+      const progress = async (slug: string) => {
+        const { done, flagged } = await runHandler(caseStatus, { case: slug }, ctx());
+        return { done, flagged: flagged ?? [] };
+      };
+      const stood = [await progress("shares-one"), await progress("shares-two")];
+      const booked = (await store.read(two, "case")) as CaseRecord;
+      await store.putMany([{ kind: "case", value: { ...booked, projectCommit: "f".repeat(40), supersedes: [two] } }]);
+
+      expect((unnamed as { reason?: string }).reason).toBe("invalid-input");
+      expect(stood).toEqual([
+        { done: true, flagged: [] },
+        { done: true, flagged: [] },
+      ]);
+      expect((await progress("shares-one")).flagged).toEqual([shared]);
+    }, 30_000);
+
+    test("a ruling over a brief read under a case stands no longer once a second live case forks that case's slug", async () => {
+      const store = storeAt();
+      const shared = await mintClaim(store, { id: "shared", rendering: "a shared gate", gateClass: "judgment" });
+      await bookCase(store, "forks-later", [shared]);
+      await bookCase(store, "stays-whole", [shared]);
+      const asked = await runHandler(gateAsk, { claim: shared, case: "forks-later" }, ctx());
+      await runHandler(
+        gateAnswer,
+        { pending: shared, brief: asked.brief, choice: "holds", reason: "the fixture decides" },
+        { ...ctx(), via: "tty", principalName: "person@example.com" },
+      );
+      const before = (await runHandler(caseStatus, { case: "stays-whole" }, ctx())).flagged ?? [];
+
+      await bookCase(store, "forks-later", [shared], "musai.core/merged-from-another-scope");
+
+      expect(before).toEqual([]);
+      expect((await runHandler(caseStatus, { case: "stays-whole" }, ctx())).flagged).toEqual([shared]);
+    }, 30_000);
+
+    test("pending lists a gate cases under two slugs share once, under the first slug, naming both", async () => {
+      const store = storeAt();
+      const shared = await mintClaim(store, { id: "shared", rendering: "a shared gate", gateClass: "judgment" });
+      const later = await bookCase(store, "shared-by-kappa", [shared]);
+      const earlier = await bookCase(store, "shared-by-alpha", [shared]);
+
+      const pending = await runHandler(gatePending, {}, ctx());
+      const named = await runHandler(gatePending, { case: "shared-by-kappa" }, ctx());
+
+      // The later slug's case sorts first by id, so a row named by id order would name it.
+      expect(later < earlier).toBe(true);
+      expect(pending.gates).toEqual([
+        {
+          case: "shared-by-alpha",
+          claim: shared,
+          gateClass: "judgment",
+          shared: ["shared-by-alpha", "shared-by-kappa"],
+        },
+      ]);
+      expect(named.gates).toEqual([
+        {
+          case: "shared-by-kappa",
+          claim: shared,
+          gateClass: "judgment",
+          shared: ["shared-by-alpha", "shared-by-kappa"],
+        },
+      ]);
+      expect(gatePending.renderText(pending)).toContain(
+        "shared by the cases shared-by-alpha, shared-by-kappa: ask names one as --case",
+      );
     }, 30_000);
 
     test("an ask over a superseded claim is refused and mints no run", async () => {

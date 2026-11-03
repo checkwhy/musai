@@ -48,6 +48,7 @@ export function parserFixtureManifest(): ModuleManifest {
 export async function installParserFixture(workspace: string, scope: string, now: Clock): Promise<void> {
   const ctx = { gitDir: join(workspace, MUSAI_DIR) };
   const store = new Store({ ctx, scope, now });
+  using index = await foldedIndex(store);
   await installModule(
     PARSER_FIXTURE_MODULE,
     versionString("1.0.0"),
@@ -56,6 +57,6 @@ export async function installParserFixture(workspace: string, scope: string, now
     recordId({ marker: `build-for-${PARSER_FIXTURE_MODULE}` }),
     store,
     new GitBlobStore({ ctx, now }),
-    await foldedIndex(store),
+    index,
   );
 }

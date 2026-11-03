@@ -6,13 +6,16 @@ import { isOperationError, runHandler } from "@musai/api-core";
 import {
   type ArgumentRecord,
   type Audience,
+  BRIEF_MEDIA_TYPE,
   type CaseRecord,
   type ClaimRecord,
   type ClaimTypeDeclaration,
+  CREW_MEDIA_TYPE,
   CURRENT_SCHEMA_VERSIONS,
   claimTypesFrom,
   EVALUATOR_VERSION,
   type EvidenceEdge,
+  MODEL_MEDIA_TYPE,
   type RecordId,
   type RunRecord,
   readEntryFor,
@@ -21,16 +24,26 @@ import {
   SEALED_RENDERING_PLACEHOLDER,
   type SealableText,
   slotFor,
+  type Timestamp,
   timestamp,
   versionString,
 } from "@musai/records";
 import { RUNNER_PERFORMER } from "@musai/run";
 import { type GitContext, initWorkspace, Store } from "@musai/store";
-import { declareClaimTypes, fixedClock } from "@musai/test-support";
+import {
+  declareClaimTypes,
+  fixedClock,
+  fixtureCase,
+  fixtureRunRecord,
+  mintedSortingBefore,
+  pseudonymOf,
+} from "@musai/test-support";
+import { type Attestation, mintAttestation } from "@musai/trust";
 import { afterEach, describe, expect, test } from "vitest";
 import { BRIEF_BUDGET_SLOT_ID, BRIEF_COMMAND, briefRecipe, parseBriefSubstrates } from "../src/brief/recipe.js";
 import { type BriefRender, renderBrief } from "../src/brief/render.js";
 import { byteLengthUtf8 } from "../src/brief/trim.js";
+import { shortIdOf } from "../src/claim-ref.js";
 import { briefRender } from "../src/ops/brief.js";
 
 const CLAIM_TYPE = "musai.brief-fixture-test/claim@1";
@@ -137,23 +150,7 @@ async function makeFixture(
   };
   const [argumentId] = await store.putMany([{ kind: "argument", value: argument }]);
 
-  const caseRecord: CaseRecord = {
-    kind: "case",
-    supersedes: [],
-    schemaVersion: CURRENT_SCHEMA_VERSIONS.case,
-    type: null,
-    slug,
-    claims: [claimId!],
-    preset: {
-      module: "musai.core",
-      contribution: "musai.core/bare",
-      moduleRecord: recordId({ marker: "brief-fixture" }),
-    },
-    projectCommit: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-    overrides: {},
-    evaluatorVersion: versionString("1"),
-  };
-  const [caseId] = await store.putMany([{ kind: "case", value: caseRecord }]);
+  const [caseId] = await store.putMany([{ kind: "case", value: fixtureCase(slug, [claimId!]) }]);
 
   const opened = { ctx, store } as unknown as Workspace;
 
@@ -264,7 +261,7 @@ describe("renderBrief", () => {
       expect(rendered.output).not.toContain(control);
     }
     expect(lines).toContain(
-      `- claim ${f.claimId}: the claim holds\\n\\n## Direct evidence\\n${forgedReceipt}\\r\\u2028\\u001b[2A`,
+      `- claim ${f.claimId}: the claim holds\\u000a\\u000a## Direct evidence\\u000a${forgedReceipt}\\u000d\\u2028\\u001b[2A`,
     );
     expect(rendered.output).toContain(": an attack\\u0085\\\\n that ends a line");
   });
@@ -332,6 +329,83 @@ describe("renderBrief", () => {
     expect(rendered.reads).toContainEqual(readEntryFor(againstRunId!));
   });
 
+  /** A testimony argued against the claim, attested as `attest` mints for it, then rendered. */
+  async function renderTestimony(attest: (run: RecordId) => readonly Attestation[]) {
+    const f = await setUp();
+    const receipt = fixtureRunRecord("a recommendation against the claim");
+    const testimony: RunRecord = {
+      ...receipt,
+      runKind: "testimony",
+      recipe: {
+        ...receipt.recipe,
+        command: ["ask", "musai.core/judge"],
+        substrates: [
+          { mediaType: BRIEF_MEDIA_TYPE, digest: { sha256: "a".repeat(64) } },
+          { mediaType: CREW_MEDIA_TYPE, digest: { sha256: "b".repeat(64) } },
+          { mediaType: MODEL_MEDIA_TYPE, uri: "model://anthropic/claude" },
+        ],
+        isolation: "none",
+      },
+      observation: { ...receipt.observation, isolationHeld: "none" },
+    };
+    const [run] = await f.store.putMany([{ kind: "run", value: testimony }]);
+    const argument: ArgumentRecord = {
+      kind: "argument",
+      premises: [],
+      supersedes: [],
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.argument,
+      target: f.claimId,
+      reason: "the testimony recommends against it",
+      evidence: [receiptEdge(run!, "result")],
+    };
+    await f.store.putMany([
+      ...attest(run!).map((attestation) => ({ kind: "attestation" as const, value: attestation.record })),
+      { kind: "argument", value: argument },
+    ]);
+    return { run: run!, rendered: await render(f, 20000) };
+  }
+
+  function attestationOf(
+    run: RecordId,
+    principalClass: "agent" | "person",
+    purpose: "made" | "asserted",
+    at: Timestamp,
+  ): Attestation {
+    return mintAttestation({
+      subject: run,
+      principal: pseudonymOf(principalClass),
+      principalClass,
+      via: principalClass === "agent" ? "model" : "signature",
+      purpose,
+      at,
+    });
+  }
+
+  test("a testimony's kind word is its maker's, even where an asserter's attestation comes first in hash order", async () => {
+    let made: Attestation | undefined;
+    let asserted: Attestation | undefined;
+    const { run, rendered } = await renderTestimony((subject) => {
+      made = attestationOf(subject, "agent", "made", FIXED_INSTANT);
+      asserted = mintedSortingBefore(made, (at) => attestationOf(subject, "person", "asserted", at));
+      return [asserted, made];
+    });
+
+    expect(rendered.output).toContain(`- agent-judgment ${run} `);
+    expect(rendered.reads).toContainEqual(readEntryFor(made!.id));
+    expect(rendered.reads).not.toContainEqual(readEntryFor(asserted!.id));
+  });
+
+  test("a testimony nobody attests making takes its kind word from an asserter's attestation", async () => {
+    let asserted: Attestation | undefined;
+    const { run, rendered } = await renderTestimony((subject) => {
+      asserted = attestationOf(subject, "person", "asserted", FIXED_INSTANT);
+      return [asserted];
+    });
+
+    expect(rendered.output).toContain(`- person-judgment ${run} `);
+    expect(rendered.reads).toContainEqual(readEntryFor(asserted!.id));
+  });
+
   test("the trim drops an argument whole and never prints a line it omits, even beside a kept line on its run", async () => {
     const f = await setUp();
     const against = (target: RecordId, reason: string, runs: readonly RecordId[]): ArgumentRecord => ({
@@ -354,13 +428,11 @@ describe("renderBrief", () => {
     ]);
     const attackLines = (rendered: BriefRender) =>
       rendered.output.split("## Attacking evidence\n")[1]!.split("\n\n")[0]!.split("\n");
-    const itemLines = (rendered: BriefRender) => rendered.output.split("\n").filter((line) => line.startsWith("- "));
     const full = await render(f, 20000);
     expect(attackLines(full)).toHaveLength(4);
 
-    const bytesOf = (lines: readonly string[]) => lines.reduce((total, line) => total + byteLengthUtf8(line), 0);
     let mostOmitted = 0;
-    for (let budget = bytesOf(itemLines(full)); ; budget -= 8) {
+    for (let budget = byteLengthUtf8(full.output); ; budget -= 8) {
       const rendered = await render(f, budget).catch((error: unknown) => error);
       if (isOperationError(rendered)) {
         break;
@@ -370,7 +442,7 @@ describe("renderBrief", () => {
       const omittedLines = omissions.reduce((total, omission) => total + linesOf.get(omission.id)!, 0);
       expect(printed.length + omittedLines).toBe(4);
       expect(new Set(omissions.map((omission) => omission.id)).size).toBe(omissions.length);
-      expect(bytesOf(itemLines(rendered as BriefRender))).toBeLessThanOrEqual(budget);
+      expect(byteLengthUtf8((rendered as BriefRender).output)).toBeLessThanOrEqual(budget);
       mostOmitted = Math.max(mostOmitted, omissions.length);
     }
     expect(mostOmitted).toBe(3);
@@ -420,7 +492,7 @@ describe("renderBrief", () => {
   test("changing the budget changes the output; changing nothing changes nothing", async () => {
     const f = await setUp();
     const full = await render(f, 20000);
-    const tiny = await render(f, 350);
+    const tiny = await render(f, byteLengthUtf8(full.output) - 1);
     expect(tiny.output).not.toBe(full.output);
     expect(tiny.omissions.length).toBeGreaterThan(0);
 
@@ -553,12 +625,94 @@ describe("brief.render@1", () => {
     const f = await setUp("brief-op-case-4");
     const output = await runHandler(
       briefRender,
-      { claim: f.claimId, budget: 350 },
+      { claim: f.claimId, budget: 4000 },
       { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT) },
     );
     const record = output.minted[0]!.record as RunRecord;
     const { budget } = parseBriefSubstrates(record.recipe);
-    expect(budget).toBe(350);
+    expect(budget).toBe(4000);
+  });
+
+  /** The fixture's claim cited too by a case under `slug`, with the ids of both cases. */
+  async function sharedAcross(slug: string): Promise<{ readonly f: Fixture; readonly cases: readonly RecordId[] }> {
+    const f = await setUp(`${slug}-first`);
+    const [other] = await f.store.putMany([{ kind: "case", value: fixtureCase(slug, [f.claimId]) }]);
+    return { f, cases: [f.caseId, other!] };
+  }
+
+  test("refuses a claim cases under two slugs cite until a case is named, naming each case and the input", async () => {
+    const { f, cases } = await sharedAcross("brief-op-shared");
+    const context = { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT), mode: "plan" as const };
+
+    const refused = await runHandler(briefRender, { claim: f.claimId }, context).catch((caught: unknown) => caught);
+
+    expect(refused).toMatchObject({ reason: "invalid-input", about: [f.claimId, ...[...cases].sort()] });
+    for (const named of [...cases, "(brief-op-shared)", "(brief-op-shared-first)", "`case`"]) {
+      expect((refused as { detail: string }).detail).toContain(named);
+    }
+  });
+
+  test("renders under the case named by its slug, its id or a short id, whichever of the two sorts first by id", async () => {
+    const { f, cases } = await sharedAcross("brief-op-named");
+    const context = { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT), mode: "plan" as const };
+    const slugs = new Map([
+      [cases[0]!, "brief-op-named-first"],
+      [cases[1]!, "brief-op-named"],
+    ]);
+
+    for (const [caseId, slug] of slugs) {
+      for (const named of [slug, caseId, shortIdOf(caseId)]) {
+        const { minted } = await runHandler(briefRender, { claim: f.claimId, case: named }, context);
+        expect(parseBriefSubstrates((minted[0]!.record as RunRecord).recipe).caseId).toBe(caseId);
+      }
+    }
+  });
+
+  test("refuses a named case that cites no such claim, and a name no case answers to", async () => {
+    const f = await setUp("brief-op-uncited");
+    await f.store.putMany([{ kind: "case", value: fixtureCase("brief-op-citing-nothing", []) }]);
+    const context = { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT), mode: "plan" as const };
+
+    const refusedFor = (named: string) =>
+      runHandler(briefRender, { claim: f.claimId, case: named }, context).catch((caught: unknown) => caught);
+
+    expect(await refusedFor("brief-op-citing-nothing")).toMatchObject({
+      reason: "invalid-input",
+      detail: expect.stringContaining(`the cases citing it are ${f.caseId} (brief-op-uncited)`),
+    });
+    expect(await refusedFor("brief-op-no-such-case")).toMatchObject({ reason: "no-such-record" });
+  });
+
+  test("refuses a case named by its id or its slug where a second live case forks that slug", async () => {
+    const f = await setUp("brief-op-forked");
+    const forking = { ...fixtureCase("brief-op-forked", [f.claimId]), projectCommit: "f".repeat(40) };
+    const [fork] = await f.store.putMany([{ kind: "case", value: forking }]);
+    const context = { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT), mode: "plan" as const };
+
+    for (const named of [f.caseId, fork!, "brief-op-forked"]) {
+      const refused = await runHandler(briefRender, { claim: f.claimId, case: named }, context).catch(
+        (caught: unknown) => caught,
+      );
+      expect(refused).toMatchObject({
+        reason: "invalid-input",
+        detail: expect.stringContaining("the slug brief-op-forked is forked between the live cases"),
+      });
+    }
+  });
+
+  test("refuses a claim cases under two slugs cite, one of them forked, naming every case", async () => {
+    const { f, cases } = await sharedAcross("brief-op-shared-forked");
+    const forking = { ...fixtureCase("brief-op-shared-forked", [f.claimId]), projectCommit: "f".repeat(40) };
+    const [fork] = await f.store.putMany([{ kind: "case", value: forking }]);
+    const context = { workspace: f.workspace, scope: f.scope, now: fixedClock(ASKED_AT), mode: "plan" as const };
+
+    const refused = await runHandler(briefRender, { claim: f.claimId }, context).catch((caught: unknown) => caught);
+
+    expect(refused).toMatchObject({
+      reason: "invalid-input",
+      about: [f.claimId, ...[...cases, fork!].sort()],
+      detail: expect.stringContaining("under different slugs"),
+    });
   });
 
   test("declares the reasons it can raise", () => {

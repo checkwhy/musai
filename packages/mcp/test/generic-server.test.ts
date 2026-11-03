@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -10,18 +10,25 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { type OperationContext, type OperationDescriptor, OperationError } from "@musai/api-core";
-import { type ContributionEntry, recordId, recordPath, versionString } from "@musai/records";
-import { initWorkspace, LOCAL_DIR, MUSAI_DIR } from "@musai/store";
+import {
+  type OperationContext,
+  type OperationDescriptor,
+  OperationError,
+  runHandler,
+  type SubscriptionTrace,
+} from "@musai/api-core";
+import { type Audience, type ContributionEntry, recordId, recordPath, versionString } from "@musai/records";
+import { CALL_LOG_DIR, initWorkspace, LOCAL_DIR, MUSAI_DIR } from "@musai/store";
 import {
   commitAroundTheStore,
   fixedClock,
   fixtureRunRecord,
   installEmptyModule,
   installModuleRecord,
+  writeTrustFile,
 } from "@musai/test-support";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { CALL_LOG_DIR, openCallLog } from "../src/call-log.js";
+import { openCallLog } from "../src/call-log.js";
 import type {
   McpDistribution,
   McpExtensionTool,
@@ -209,7 +216,83 @@ const REPLACING: McpDistribution = {
   extensions: { mcp: { tools: [GREET_INSTEAD] } },
 };
 
+/** Answers the projected greeting with one field more, under an output schema of its own. */
+const GREET_WIDER: McpExtensionTool = {
+  tool: {
+    name: "fixture_greet",
+    description: "Greets as the projected greeting does, and says from where.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    outputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["greeting", "count", "from"],
+      properties: { greeting: { type: "string" }, count: { type: "number" }, from: { type: "string" } },
+    },
+  },
+  call: async () => {
+    const answer = { greeting: "hello", count: 2, from: "the extension" };
+    return { content: [{ type: "text", text: JSON.stringify(answer) }], structuredContent: answer };
+  },
+};
+
+const PUBLIC_WIDENED: McpDistribution = {
+  ...REPLACING,
+  publicOperations: new Set([`${GREET.id}@${GREET.version}`, `${PART.id}@${PART.version}`]),
+  extensions: { mcp: { tools: [GREET_WIDER] } },
+};
+
+/** Offers the greeting alone outside `lab`; its lab listing adds a farewell and a wave. */
+const PUBLIC_GREETING: McpDistribution = {
+  ...REPLACING,
+  publicOperations: new Set([`${GREET.id}@${GREET.version}`]),
+  extensions: { mcp: { tools: [WAVE] } },
+};
+
 const MOUNTING: McpDistribution = { ...BARE, extensions: { mcp: { tools: [WAVE], resources: RESOURCES } } };
+
+const keptRuns: string[] = [];
+
+/** Works in what the machine keeps for its author, so any clearance withholds it. */
+const KEEP: OperationDescriptor = {
+  ...GREET,
+  id: "fixture.keep",
+  effect: "write",
+  authorOnly: true,
+  documentation: "Answers from what the author keeps.",
+  cli: { ...GREET.cli, verb: "keep", describe: "answer from what the author keeps" },
+  renderText: () => "kept",
+  handler: async () => {
+    keptRuns.push("ran");
+    return { greeting: "kept", count: 0 };
+  },
+};
+
+const keptInstead: Record<string, unknown>[] = [];
+
+const KEEP_INSTEAD: McpExtensionTool = {
+  tool: {
+    name: "fixture_keep",
+    description: "Answers in the place of the author's own operation.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  call: async (_session, args) => {
+    keptInstead.push(args);
+    return { content: [{ type: "text", text: "kept instead" }] };
+  },
+};
+
+/** Offers the author's own operation publicly, an extension standing over it. */
+const PUBLIC_KEEPING: McpDistribution = {
+  ...BARE,
+  registry: new Map([
+    [`${GREET.id}@${GREET.version}`, GREET],
+    [`${KEEP.id}@${KEEP.version}`, KEEP],
+  ]),
+  publicOperations: new Set([`${GREET.id}@${GREET.version}`, `${KEEP.id}@${KEEP.version}`]),
+  extensions: { mcp: { tools: [KEEP_INSTEAD] } },
+};
+
+const WRITER = "writer" as Audience;
 
 const namingToolSessions: McpToolSession[] = [];
 
@@ -248,6 +331,21 @@ const NAMING: McpDistribution = {
 /** What an extension reads is this distribution, never the constant it was spread from. */
 const SPREAD: McpDistribution = { ...NAMING, name: "fixture-spread" };
 
+/** Hands the trace it is called with to the session's sink, as a write's subscription would. */
+const REPORT_TOOL: McpExtensionTool = {
+  tool: {
+    name: "fixture_report",
+    description: "Reports a subscription's refused answer through the session's sink.",
+    inputSchema: { type: "object", properties: { trace: { type: "object" } } },
+  },
+  call: async (session, args) => {
+    await session.context.reportSubscription!(args["trace"] as SubscriptionTrace);
+    return { content: [{ type: "text", text: "reported" }] };
+  },
+};
+
+const REPORTING: McpDistribution = { ...BARE, extensions: { mcp: { tools: [REPORT_TOOL] } } };
+
 /** Its kind names no contribution point, so invoking it is refused before any host is reached. */
 const UNPLACED: ContributionEntry = {
   kind: "fixture-unplaced",
@@ -283,6 +381,12 @@ async function callLogRows(workspace: string): Promise<Record<string, unknown>[]
   return rows;
 }
 
+async function subscriptionRows(workspace: string): Promise<Record<string, unknown>[]> {
+  return (await callLogRows(workspace)).filter(
+    (row) => (row["request"] as { contribution: string }).contribution === "subscription",
+  );
+}
+
 describe("a server built from the distribution it is handed", () => {
   let workspace: string;
   const scope = "default";
@@ -294,6 +398,8 @@ describe("a server built from the distribution it is handed", () => {
     waved.length = 0;
     greetedInstead.length = 0;
     nodded.length = 0;
+    keptInstead.length = 0;
+    keptRuns.length = 0;
     readUris.length = 0;
     namingToolSessions.length = 0;
     namingReadSessions.length = 0;
@@ -309,8 +415,8 @@ describe("a server built from the distribution it is handed", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  async function connect(distribution: McpDistribution = FIXTURE): Promise<void> {
-    server = createMcpServer(distribution, context, { lab: false });
+  async function connect(distribution: McpDistribution = FIXTURE, lab = false): Promise<void> {
+    server = createMcpServer(distribution, context, { lab });
     client = new Client({ name: "generic-server-client", version: "1.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
@@ -488,6 +594,163 @@ describe("a server built from the distribution it is handed", () => {
     expect(parted.structuredContent).toEqual({ greeting: "goodbye", count: 1 });
   });
 
+  test("outside lab, every listed tool answers within its listed output schema, an extension's in the place of the projection it stands over", async () => {
+    await connect(PUBLIC_WIDENED);
+
+    const { tools } = await client.listTools();
+    const answers = [];
+    for (const tool of tools) {
+      answers.push(((await client.callTool({ name: tool.name, arguments: {} })) as CallToolResult).structuredContent);
+    }
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet", "fixture_part"]);
+    expect(tools[0]).toEqual(GREET_WIDER.tool);
+    expect(answers).toEqual([
+      { greeting: "hello", count: 2, from: "the extension" },
+      { greeting: "goodbye", count: 1 },
+    ]);
+  });
+
+  test("outside lab, a call by a name the listing leaves out is refused as no tool, logged under the name sent", async () => {
+    await connect(PUBLIC_GREETING);
+
+    const { tools } = await client.listTools();
+    const greeted = (await client.callTool({ name: "fixture_greet", arguments: {} })) as CallToolResult;
+    const refused = [];
+    for (const name of ["fixture_part", "fixture_wave"]) {
+      const result = (await client.callTool({ name, arguments: {} })) as CallToolResult;
+      refused.push({ isError: result.isError, refusal: JSON.parse((result.content[0] as { text: string }).text) });
+    }
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet"]);
+    expect(greeted.structuredContent).toEqual({ greeting: "hello", count: 2 });
+    expect(refused).toEqual(
+      ["fixture_part", "fixture_wave"].map((name) => ({
+        isError: true,
+        refusal: expect.objectContaining({ reason: "unknown-operation", about: [name] }),
+      })),
+    );
+    expect(waved).toEqual([]);
+    expect((await callLogRows(workspace)).slice(1)).toEqual(
+      ["fixture_part", "fixture_wave"].map((name) => ({
+        request: { contribution: "operation", id: name, version: "0", input: {} },
+        response: expect.objectContaining({ ok: false }),
+      })),
+    );
+  });
+
+  test("in lab, every tool the listing holds is callable, the ones outside lab leaves out among them", async () => {
+    await connect(PUBLIC_GREETING, true);
+
+    const { tools } = await client.listTools();
+    const results = [];
+    for (const tool of tools) {
+      results.push(((await client.callTool({ name: tool.name, arguments: {} })) as CallToolResult).isError);
+    }
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet", "fixture_part", "fixture_wave"]);
+    expect(results).toEqual([undefined, undefined, undefined]);
+  });
+
+  async function clearedToWriter(): Promise<void> {
+    await writeTrustFile({ gitDir: join(workspace, MUSAI_DIR) }, "audiences", `${WRITER}\n`);
+    context = { ...context, clearance: WRITER };
+  }
+
+  test.each([
+    ["outside lab", false],
+    ["in lab", true],
+  ])("%s, an extension over an operation the clearance withholds is neither listed nor callable", async (_, lab) => {
+    await clearedToWriter();
+    await connect(PUBLIC_KEEPING, lab);
+
+    const { tools } = await client.listTools();
+    const refused = (await client.callTool({ name: "fixture_keep", arguments: {} })) as CallToolResult;
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet"]);
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse((refused.content[0] as { text: string }).text)).toMatchObject({
+      reason: "invalid-input",
+      about: [`${KEEP.id}@${KEEP.version}`],
+      detail: expect.stringContaining(WRITER),
+    });
+    expect(keptInstead).toEqual([]);
+  });
+
+  test("outside lab and in it, every name the listing holds is callable and every name it leaves out is refused", async () => {
+    await clearedToWriter();
+    const answered: Record<string, boolean> = {};
+    for (const lab of [false, true]) {
+      await connect(PUBLIC_KEEPING, lab);
+      const listed = new Set((await client.listTools()).tools.map((tool) => tool.name));
+      for (const name of ["fixture_greet", "fixture_keep", "fixture_wave"]) {
+        const result = (await client.callTool({ name, arguments: {} })) as CallToolResult;
+        answered[`${lab ? "lab" : "public"} ${name}`] = listed.has(name) === (result.isError !== true);
+      }
+      if (!lab) {
+        await client.close();
+        await server.close();
+      }
+    }
+
+    expect(Object.values(answered)).toEqual([true, true, true, true, true, true]);
+  });
+
+  test.each([
+    ["input its schema refuses", { stray: true }],
+    ["a head that has moved", { expectHead: "0".repeat(40) }],
+    ["input its schema admits", {}],
+  ])("a call with %s to an operation the clearance withholds is refused as the API refuses it", async (_, args) => {
+    await clearedToWriter();
+    await connect(PUBLIC_KEEPING, true);
+    const { expectHead, ...input } = args as { expectHead?: string };
+
+    const overMcp = (await client.callTool({ name: "fixture_keep", arguments: args })) as CallToolResult;
+    const overApi = await runHandler(KEEP, input, { ...context, ...(expectHead === undefined ? {} : { expectHead }) })
+      .then(() => undefined)
+      .catch((error: OperationError) => ({ reason: error.reason, about: error.about, detail: error.detail }));
+
+    expect(overMcp.isError).toBe(true);
+    expect(overApi).toBeDefined();
+    expect(JSON.parse((overMcp.content[0] as { text: string }).text)).toEqual(overApi);
+    expect(keptRuns).toEqual([]);
+  });
+
+  test("a contribution that collides with a listed name is withheld, and every other tool stays listed and callable", async () => {
+    const contribution = (id: string): ContributionEntry => ({ ...UNPLACED, id });
+    await installModuleRecord(workspace, scope, "fixture", [contribution("fixture/greet")], now);
+    await installModuleRecord(workspace, scope, "twin", [contribution("twin/a.b"), contribution("twin/a_b")], now);
+    await installModuleRecord(workspace, scope, "solo", [contribution("solo/x")], now);
+    await connect(FIXTURE, true);
+
+    const { tools } = await client.listTools();
+    const greeted = (await client.callTool({ name: "fixture_greet", arguments: {} })) as CallToolResult;
+    const waved = (await client.callTool({ name: "fixture_wave", arguments: { at: "a sibling" } })) as CallToolResult;
+    const solo = (await client.callTool({ name: "solo_x", arguments: {} })) as CallToolResult;
+    const twin = (await client.callTool({ name: "twin_a_b", arguments: {} })) as CallToolResult;
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet", "solo_x", "fixture_wave"]);
+    expect(greeted.structuredContent).toEqual({ greeting: "hello", count: 2 });
+    expect(waved.content).toEqual([{ type: "text", text: "waved at a sibling" }]);
+    expect(JSON.parse((solo.content[0] as { text: string }).text)).toMatchObject({ about: ["solo/x", UNPLACED.kind] });
+    expect(twin.isError).toBe(true);
+    const refusal = JSON.parse((twin.content[0] as { text: string }).text) as { reason: string; detail: string };
+    expect(refusal.reason).toBe("declaration-conflict");
+    expect(refusal.detail).toContain("twin/a.b");
+    expect(refusal.detail).toContain("twin/a_b");
+    const collisions = (await callLogRows(workspace)).filter(
+      (row) => (row["response"] as { error?: { code: string } }).error?.code === "declaration-conflict",
+    );
+    expect(collisions.map((row) => (row["request"] as { id: string }).id).sort()).toEqual([
+      "fixture_greet",
+      "twin_a_b",
+      "twin_a_b",
+    ]);
+    expect(
+      collisions.filter((row) => (row["request"] as { contribution: string }).contribution === "tool-name"),
+    ).toHaveLength(2);
+  });
+
   test("logs an extension tool's call under its own name with the arguments it was given and the answer it returned", async () => {
     await connect(NODDING);
 
@@ -527,11 +790,11 @@ describe("a server built from the distribution it is handed", () => {
     ]);
   });
 
-  test("refuses an extension tool whose input schema does not compile as unavailable by its name and leaves its siblings working", async () => {
-    const unreached: unknown[] = [];
-    const UNCOMPILABLE: McpExtensionTool = {
+  /** Declares a dialect the validator does not know, so its schema never compiles. */
+  function uncompilableTool(name: string, unreached: unknown[]): McpExtensionTool {
+    return {
       tool: {
-        name: "fixture_uncompilable",
+        name,
         description: "Declares a schema dialect the validator does not know.",
         inputSchema: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "object" },
       },
@@ -540,22 +803,85 @@ describe("a server built from the distribution it is handed", () => {
         return { content: [] };
       },
     };
-    await connect({ ...BARE, extensions: { mcp: { tools: [UNCOMPILABLE, WAVE] } } });
+  }
 
+  test("withholds an extension tool whose input schema does not compile from the listing, says why in the session's log and leaves its siblings working", async () => {
+    const unreached: unknown[] = [];
+    const uncompilable = uncompilableTool("fixture_uncompilable", unreached);
+    await connect({ ...BARE, extensions: { mcp: { tools: [uncompilable, WAVE] } } });
+
+    const { tools } = await client.listTools();
+    await client.listTools();
     const refused = (await client.callTool({ name: "fixture_uncompilable", arguments: {} })) as CallToolResult;
     const wave = (await client.callTool({ name: "fixture_wave", arguments: { at: "a sibling" } })) as CallToolResult;
 
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_greet", "fixture_wave"]);
     expect(refused.isError).toBe(true);
     expect(JSON.parse((refused.content[0] as { text: string }).text)).toMatchObject({
-      reason: "tool-unavailable",
+      reason: "unknown-operation",
       about: ["fixture_uncompilable"],
     });
     expect(unreached).toEqual([]);
     expect(wave.content).toEqual([{ type: "text", text: "waved at a sibling" }]);
-    expect((await callLogRows(workspace))[0]).toMatchObject({
-      request: { contribution: "extension", id: "fixture_uncompilable" },
-      response: { ok: false, error: { code: "tool-unavailable" } },
+    const rows = await callLogRows(workspace);
+    expect(rows[0]).toEqual({
+      request: {
+        contribution: "extension",
+        id: "fixture_uncompilable",
+        version: "0",
+        input: uncompilable.tool.inputSchema,
+      },
+      response: {
+        ok: false,
+        error: {
+          code: "schema-uncompilable",
+          data: null,
+          message: expect.stringContaining("withheld from tools/list"),
+        },
+      },
     });
+    expect(
+      rows.filter((row) => (row["response"] as { error?: { code: string } }).error?.code === "schema-uncompilable"),
+    ).toHaveLength(1);
+  });
+
+  test.each([
+    ["it stands over an operation the clearance withholds", true, "keeps for its author"],
+    ["outside lab, no public operation holds its name", false, "offers no operation named fixture_keep"],
+  ])("an uncompilable extension left out because %s is logged with that reason", async (_, cleared, reason) => {
+    if (cleared) {
+      await clearedToWriter();
+    }
+    const unreached: unknown[] = [];
+    const keepless = { ...PUBLIC_KEEPING, publicOperations: new Set([`${GREET.id}@${GREET.version}`]) };
+    const distribution = cleared ? PUBLIC_KEEPING : keepless;
+    await connect({ ...distribution, extensions: { mcp: { tools: [uncompilableTool("fixture_keep", unreached)] } } });
+
+    await client.listTools();
+
+    const [row] = (await callLogRows(workspace)).filter(
+      (logged) => (logged["response"] as { error?: { code: string } }).error?.code === "schema-uncompilable",
+    );
+    const message = (row!["response"] as { error: { message: string } }).error.message;
+    expect(message).toContain(reason);
+    expect(message).not.toMatch(/^withheld from tools\/list: /);
+    expect(unreached).toEqual([]);
+  });
+
+  test("withholds the name an uncompilable extension tool stands over rather than listing the projection it replaced", async () => {
+    const unreached: unknown[] = [];
+    await connect({ ...BARE, extensions: { mcp: { tools: [uncompilableTool("fixture_greet", unreached), WAVE] } } });
+
+    const { tools } = await client.listTools();
+    const refused = (await client.callTool({ name: "fixture_greet", arguments: { whom: "anyone" } })) as CallToolResult;
+
+    expect(tools.map((tool) => tool.name)).toEqual(["fixture_wave"]);
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse((refused.content[0] as { text: string }).text)).toMatchObject({
+      reason: "unknown-operation",
+      about: ["fixture_greet"],
+    });
+    expect(unreached).toEqual([]);
   });
 
   test("answers a refused resource read as a JSON-RPC error whose data is the refusal's reason, what it is about and its detail", async () => {
@@ -617,6 +943,21 @@ describe("a server built from the distribution it is handed", () => {
     ]);
   });
 
+  test("a call log that fails to open is opened again for the next entry", async () => {
+    const calls = join(workspace, MUSAI_DIR, LOCAL_DIR, CALL_LOG_DIR);
+    await mkdir(join(workspace, MUSAI_DIR, LOCAL_DIR), { recursive: true });
+    await writeFile(calls, "");
+    await connect();
+    await expect(client.callTool({ name: "fixture_greet", arguments: {} })).rejects.toThrow();
+
+    await rm(calls);
+
+    expect(((await client.callTool({ name: "fixture_greet", arguments: {} })) as CallToolResult).isError).not.toBe(
+      true,
+    );
+    expect(await callLogRows(workspace)).toHaveLength(1);
+  });
+
   test("passes a subscription's refused answer to the sink the caller's own context carries as well as logging it", async () => {
     const seen: string[] = [];
     context = {
@@ -625,40 +966,30 @@ describe("a server built from the distribution it is handed", () => {
         seen.push(trace.subscription);
       },
     };
-    await connect(SPREAD);
-    await client.callTool({ name: "fixture_distribution", arguments: {} });
+    await connect(REPORTING);
     const event = { name: "claim.put", payload: { id: "sha256:a", about: "sha256:a", at: "abc" } };
     const error = { code: "need-refused", data: null, message: "refused" } as const;
+    const trace = { subscription: "pack/on-claim", version: "1", event, error };
 
-    await namingToolSessions[0]!.context.reportSubscription!({
-      subscription: "pack/on-claim",
-      version: "1",
-      event,
-      error,
-    });
+    await client.callTool({ name: "fixture_report", arguments: { trace } });
 
     expect(seen).toEqual(["pack/on-claim"]);
-    expect((await callLogRows(workspace)).slice(-1)[0]).toMatchObject({ request: { contribution: "subscription" } });
+    expect(await subscriptionRows(workspace)).toMatchObject([{ request: { contribution: "subscription" } }]);
   });
 
   test("logs a subscription's refused answer a write left behind as a row naming the subscription and the event it was invoked with", async () => {
-    await connect(SPREAD);
-    await client.callTool({ name: "fixture_distribution", arguments: {} });
+    await connect(REPORTING);
     const event = { name: "claim.put", payload: { id: "sha256:a", about: "sha256:a", at: "abc" } };
     const error = {
       code: "need-refused",
       data: { need: "run" },
       message: "the run named a binary nothing declares",
     } as const;
+    const trace = { subscription: "pack/on-claim", version: "1", event, error };
 
-    await namingToolSessions[0]!.context.reportSubscription!({
-      subscription: "pack/on-claim",
-      version: "1",
-      event,
-      error,
-    });
+    await client.callTool({ name: "fixture_report", arguments: { trace } });
 
-    expect((await callLogRows(workspace)).slice(-1)).toEqual([
+    expect(await subscriptionRows(workspace)).toEqual([
       {
         request: { contribution: "subscription", id: "pack/on-claim", version: "1", input: event },
         response: { ok: false, error },
@@ -752,6 +1083,36 @@ describe("a server built from the distribution it is handed", () => {
   });
 });
 
+describe("a server whose distribution projects one tool name twice", () => {
+  test.each([
+    ["two operations whose ids fold to one name", "fixture.a_b", "fixture_a.b", "1", "1"],
+    ["two versions of one operation", "fixture.greet", "fixture.greet", "1", "2"],
+  ])("%s refuse to build the server, naming both", (_, firstId, secondId, firstVersion, secondVersion) => {
+    const first = { ...GREET, id: firstId, version: versionString(firstVersion) };
+    const second = { ...GREET, id: secondId, version: versionString(secondVersion) };
+    const colliding: McpDistribution = {
+      ...BARE,
+      registry: new Map([
+        [`${first.id}@${first.version}`, first],
+        [`${second.id}@${second.version}`, second],
+      ]),
+    };
+
+    const built = () => createMcpServer(colliding, { workspace: "unopened", scope: "default", now }, { lab: true });
+
+    expect(built).toThrow(`${first.id}@${first.version}`);
+    expect(built).toThrow(`${second.id}@${second.version}`);
+  });
+
+  test("two extension tools of one name refuse to build the server", () => {
+    const twice: McpDistribution = { ...BARE, extensions: { mcp: { tools: [WAVE, { ...WAVE }] } } };
+
+    expect(() => createMcpServer(twice, { workspace: "unopened", scope: "default", now }, { lab: true })).toThrow(
+      WAVE.tool.name,
+    );
+  });
+});
+
 describe("a call refused before its tool is resolved, driven with no transport", () => {
   let workspace: string;
 
@@ -773,7 +1134,7 @@ describe("a call refused before its tool is resolved, driven with no transport",
       { workspace, scope, now },
       "fixture_unregistered",
       { at: "nowhere" },
-      log,
+      async () => log,
     ).catch((caught: unknown) => caught);
 
     expect(refused).toMatchObject({ reason: "invalid-input", about: [scope] });

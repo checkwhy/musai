@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { FoldContributions, FoldExtension } from "@musai/fold";
-import { AmbiguousExclusiveGroupError, IndexDb, openIndexProvider, RuleRecordConflictError } from "@musai/fold";
+import type { Admission, FoldContributions, FoldExtension } from "@musai/fold";
+import { IndexDb, openIndexProvider, RuleRecordConflictError } from "@musai/fold";
 import type {
-  CaseRecord,
   ClaimRecord,
   ComputedRunRecord,
   ContributionEntry,
@@ -16,12 +15,14 @@ import type {
 import {
   type ClaimTypeDeclaration,
   CURRENT_SCHEMA_VERSIONS,
+  canonicalBytes,
   claimTypesFrom,
   exactDecimal,
   type MusaiRecord,
   RECORD_KINDS,
   type RecordId,
   type RecordKind,
+  rawId,
   recordId,
   recordPath,
   slotFor,
@@ -36,7 +37,9 @@ import {
   commitFilesAroundTheStore,
   type FixtureRepo,
   fixtureBrief,
+  fixtureCase,
   fixtureRunRecord,
+  foldClosed,
   makeFixtureRepo,
   ownGit,
   rowsHeld,
@@ -133,26 +136,6 @@ function contributorAt(id: string, tag: string): ClaimRecord {
 /** `contributorAt` with its `exclusiveGroup` a parameter, for contributors that disagree on it. */
 function contributorWithGroup(id: string, tag: string, exclusiveGroup: string | null): ClaimRecord {
   return { ...contributorAt(id, tag), exclusiveGroup };
-}
-
-/** A case under `slug` citing `claims`, booked bare under the placeholder preset. */
-function caseCiting(slug: string, claims: readonly RecordId[]): CaseRecord {
-  return {
-    kind: "case",
-    schemaVersion: CURRENT_SCHEMA_VERSIONS.case,
-    type: null,
-    slug,
-    claims: [...claims],
-    preset: {
-      module: "musai.core",
-      contribution: "musai.core/default",
-      moduleRecord: recordId({ marker: "preset" }),
-    },
-    projectCommit: "0".repeat(40),
-    overrides: {},
-    evaluatorVersion: versionString("1"),
-    supersedes: [],
-  };
 }
 
 /** The id a record would mint, computed without writing, so a test can search ids before git. */
@@ -304,7 +287,7 @@ describe("IndexDb.fold, applying commits and advancing the watermark together", 
     const commits = await writeThreeCommits(repo);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
     expect(index.watermark()).toBe(commits[2]);
@@ -320,7 +303,7 @@ describe("IndexDb.fold, applying commits and advancing the watermark together", 
     await writeThreeCommits(repo);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
     const before = await digestOf(dbPath);
@@ -336,7 +319,7 @@ describe("IndexDb.fold, applying commits and advancing the watermark together", 
     const commits = await writeThreeCommits(repo);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
 
     await expect(
       index.fold(storeOf(repo), (event) => {
@@ -361,7 +344,7 @@ describe("IndexDb.fold, applying commits and advancing the watermark together", 
     const commits = await writeThreeCommits(repo);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
 
     await expect(
       index.fold(storeOf(repo), (event) => {
@@ -389,7 +372,7 @@ describe("IndexDb.fold, a scope whose ref moved off the folded history", () => {
     repos.push(repo);
     const commits = await writeThreeCommits(repo);
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
     const tip = await forceMoveTo(repo, commits[0]!);
 
@@ -411,7 +394,7 @@ describe("IndexDb.fold, a scope whose ref moved off the folded history", () => {
     repos.push(repo);
     const commits = await writeThreeCommits(repo);
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
     await forceMoveTo(repo, commits[0]!);
     await ownGit(repo.ctx.gitDir, ["reflog", "expire", "--expire=now", "--all"]);
@@ -425,12 +408,12 @@ describe("IndexDb.fold, a scope whose ref moved off the folded history", () => {
     repos.push(repo);
     const commits = await writeThreeCommits(repo);
     const dbPath = await makeDbPath("index.sqlite");
-    await new IndexDb(dbPath).fold(storeOf(repo));
+    await foldClosed(dbPath, storeOf(repo));
     const tip = await forceMoveTo(repo, commits[0]!);
 
     await rm(dirname(dbPath), { recursive: true, force: true });
     await mkdir(dirname(dbPath), { recursive: true });
-    const rebuilt = new IndexDb(dbPath);
+    using rebuilt = new IndexDb(dbPath);
     await rebuilt.fold(storeOf(repo));
 
     expect(rebuilt.watermark()).toBe(tip);
@@ -471,10 +454,10 @@ describe("IndexDb.fold, a history longer than one transaction's group of commits
 
   test("a walk across a group boundary folds to the same index as walks that each fit in one", async () => {
     const whole = await makeDbPath("whole.sqlite");
-    await new IndexDb(whole).fold(storeOf(repo));
+    await foldClosed(whole, storeOf(repo));
 
     const pieces = await makeDbPath("pieces.sqlite");
-    const index = new IndexDb(pieces);
+    using index = new IndexDb(pieces);
     for (let stop = 50; stop < LONG_HISTORY; stop += 50) {
       await expect(
         index.fold(storeOf(repo), (event) => {
@@ -493,7 +476,7 @@ describe("IndexDb.fold, a history longer than one transaction's group of commits
 
   test("an interruption in a later group leaves the watermark at the commit before it", async () => {
     const path = await makeDbPath("index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
 
     await expect(
       index.fold(storeOf(repo), (event) => {
@@ -529,23 +512,23 @@ describe("IndexDb.fold, a case naming one claim more than once", () => {
 
     const [claimId] = await writeFixtureRecords(repo, [{ kind: "claim", value: contributorAt("cited-twice", "only") }]);
     const [caseId] = await writeFixtureRecords(repo, [
-      { kind: "case", value: caseCiting("cites-one-claim-twice", [claimId!, claimId!]) },
+      { kind: "case", value: fixtureCase("cites-one-claim-twice", [claimId!, claimId!]) },
     ]);
 
     const incrementalPath = await makeDbPath("incremental.sqlite");
-    const incremental = new IndexDb(incrementalPath);
+    using incremental = new IndexDb(incrementalPath);
     await incremental.fold(storeOf(repo));
 
     // The watermark at the tip shows the case's commit applied rather than rolled back.
     expect(incremental.watermark()).toBe(await gitRevParse(repo.ctx, scopeRefName(repo.scope)));
-    expect(incremental.caseForClaim(claimId!)?.id).toBe(caseId);
+    expect(incremental.casesForClaim(claimId!).map(({ id }) => id)).toEqual([caseId]);
     expect(citationsHeld(incrementalPath, caseId!)).toEqual([claimId]);
 
     const rebuiltPath = await makeDbPath("rebuilt.sqlite");
-    const rebuilt = new IndexDb(rebuiltPath);
+    using rebuilt = new IndexDb(rebuiltPath);
     await rebuilt.fold(storeOf(repo));
 
-    expect(rebuilt.caseForClaim(claimId!)).toEqual(incremental.caseForClaim(claimId!));
+    expect(rebuilt.casesForClaim(claimId!)).toEqual(incremental.casesForClaim(claimId!));
     expect(citationsHeld(rebuiltPath, caseId!)).toEqual(citationsHeld(incrementalPath, caseId!));
   });
 });
@@ -662,7 +645,7 @@ async function writeRichScope(repo: FixtureRepo): Promise<{
   ]);
 
   const [caseId] = await writeFixtureRecords(repo, [
-    { kind: "case", value: caseCiting("rebuild-case", [menuA!, menuB!]) },
+    { kind: "case", value: fixtureCase("rebuild-case", [menuA!, menuB!]) },
   ]);
 
   const plain = { ...claimAtSlot("ruled"), conditions: { id: "ruled", chapter: "04" } };
@@ -900,8 +883,8 @@ async function expectSameAnswers(
   expect(incremental.index.refusals()).toHaveLength(1);
   expect(incremental.index.refusalFor(REFUSED_ID)).toBeDefined();
   expect(incremental.index.argumentsAgainst(scope.attacked)).toHaveLength(1);
-  expect(incremental.index.caseBySlug(scope.caseSlug)).toBeDefined();
-  expect(incremental.index.caseForClaim(scope.citedClaim)).toBeDefined();
+  expect(incremental.index.casesAtSlug(scope.caseSlug)).toHaveLength(1);
+  expect(incremental.index.casesForClaim(scope.citedClaim)).toHaveLength(1);
   expect(incremental.index.cases()).toHaveLength(1);
   expect(incremental.index.caseSlugs()).toEqual([scope.caseSlug]);
   expect(incremental.index.artifactsOfCase(scope.byKind.case)).toHaveLength(1);
@@ -979,8 +962,8 @@ async function expectSameAnswers(
   expect(rebuilt.index.refusals()).toEqual(incremental.index.refusals());
   expect(rebuilt.index.refusalFor(REFUSED_ID)).toEqual(incremental.index.refusalFor(REFUSED_ID));
   expect(rebuilt.index.argumentsAgainst(scope.attacked)).toEqual(incremental.index.argumentsAgainst(scope.attacked));
-  expect(rebuilt.index.caseBySlug(scope.caseSlug)).toEqual(incremental.index.caseBySlug(scope.caseSlug));
-  expect(rebuilt.index.caseForClaim(scope.citedClaim)).toEqual(incremental.index.caseForClaim(scope.citedClaim));
+  expect(rebuilt.index.casesAtSlug(scope.caseSlug)).toEqual(incremental.index.casesAtSlug(scope.caseSlug));
+  expect(rebuilt.index.casesForClaim(scope.citedClaim)).toEqual(incremental.index.casesForClaim(scope.citedClaim));
   expect(rebuilt.index.cases()).toEqual(incremental.index.cases());
   expect(rebuilt.index.caseSlugs()).toEqual(incremental.index.caseSlugs());
   expect(rebuilt.index.artifactsOfCase(scope.byKind.case)).toEqual(
@@ -1027,19 +1010,19 @@ describe("IndexDb schema-version rebuild", () => {
     repos.push(repo);
 
     const incrementalPath = await makeDbPath("incremental.sqlite");
-    const incremental = new IndexDb(incrementalPath);
+    using incremental = new IndexDb(incrementalPath);
     const scope = await writeRichScope(repo);
     await incremental.fold(storeOf(repo), undefined, foldContributions(incremental));
 
     const rebuiltPath = await makeDbPath("rebuilt.sqlite");
-    const rebuilt = new IndexDb(rebuiltPath);
+    using rebuilt = new IndexDb(rebuiltPath);
     await rebuilt.fold(storeOf(repo), undefined, foldContributions(rebuilt));
 
     const raw = openIndexProvider().open(rebuiltPath);
     raw.exec("UPDATE schema_meta SET version = 9999 WHERE id = 0");
     raw.close();
 
-    const reopened = new IndexDb(rebuiltPath);
+    using reopened = new IndexDb(rebuiltPath);
     expect(reopened.watermark()).toBeNull();
     await reopened.fold(storeOf(repo), undefined, foldContributions(reopened));
 
@@ -1056,13 +1039,13 @@ describe("IndexDb schema-version rebuild", () => {
     repos.push(repo);
 
     const incrementalPath = await makeDbPath("incremental.sqlite");
-    const incremental = new IndexDb(incrementalPath);
+    using incremental = new IndexDb(incrementalPath);
     const scope = await writeRichScope(repo);
     await incremental.fold(storeOf(repo), undefined, foldContributions(incremental));
 
     const freshPath = await makeDbPath("fresh.sqlite");
     await rm(freshPath, { force: true });
-    const fresh = new IndexDb(freshPath);
+    using fresh = new IndexDb(freshPath);
     await fresh.fold(storeOf(repo), undefined, foldContributions(fresh));
 
     await expectSameAnswers(
@@ -1114,6 +1097,62 @@ function moveWatermark(path: string, sha: string | null): void {
   }
 }
 
+/** Admits what `admits` answers for, judged once at `through` under one trust commit. */
+function admittingOnly(digest: string, through: string | null, admits: (id: RecordId) => boolean): Admission {
+  const admission: Admission = {
+    digest,
+    through,
+    trust: "trust",
+    trustTip: async () => "trust",
+    admits: ({ id }) => admits(id),
+    withholds: (id) => !admits(id),
+    verifies: () => false,
+    replaces: () => false,
+    judgedAgain: async () => admission,
+  };
+  return admission;
+}
+
+describe("IndexDb.fold, a fold reset under another admission", () => {
+  test("a reset leaves no row of the old admission in any table, nor its bytes in the file", async () => {
+    const repo = await makeRepo("fold-reset-admission");
+    repos.push(repo);
+    const [moduleId, claimId] = await writeFixtureRecords(repo, [
+      { kind: "module", value: foldModule() },
+      { kind: "claim", value: claimAtSlot("withheld after the reset") },
+    ]);
+    const path = await makeDbPath("cleared.sqlite");
+    using index = new IndexDb(path);
+    const tip = await storeOf(repo).tip();
+    await index.fold(
+      storeOf(repo),
+      undefined,
+      foldContributions(index),
+      admittingOnly("everything", tip, () => true),
+    );
+    expect(contributedRowsHeld(path).map((row) => row["record_id"])).toEqual([claimId]);
+    const raw = openIndexProvider().open(path);
+    raw.exec('CREATE TABLE "a table; named as no contribution names one" (held TEXT)');
+    raw.prepare('INSERT INTO "a table; named as no contribution names one" (held) VALUES (?)').run(claimId);
+    raw.close();
+
+    const withheld = new Set([moduleId, claimId]);
+    await index.fold(
+      storeOf(repo),
+      undefined,
+      foldContributions(index),
+      admittingOnly("withholding the module", tip, (id) => !withheld.has(id)),
+    );
+
+    const held = JSON.stringify(tablesHeld(path));
+    expect(held).not.toContain(claimId);
+    expect(held).not.toContain(moduleId);
+    const bytes = await readFile(path);
+    expect(bytes.includes(claimId)).toBe(false);
+    expect(bytes.includes(moduleId)).toBe(false);
+  });
+});
+
 describe("IndexDb.fold, a commit the index already holds", () => {
   test("applies it again without failing and leaves every table exactly as the first fold left it", async () => {
     const repo = await makeRepo("fold-reapplied");
@@ -1121,7 +1160,7 @@ describe("IndexDb.fold, a commit the index already holds", () => {
     await writeRichScope(repo);
 
     const path = await makeDbPath("index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
     await index.fold(storeOf(repo));
     const tip = index.watermark();
     const folded = tablesHeld(path);
@@ -1144,7 +1183,7 @@ describe("IndexDb, a lookup resolving two rows to one", () => {
     repos.push(repo);
 
     // The first fold stops between the tie's two commits, so the later one is numbered on resume.
-    const incremental = new IndexDb(await makeDbPath("incremental.sqlite"));
+    using incremental = new IndexDb(await makeDbPath("incremental.sqlite"));
     const [earlierAcross] = await writeFixtureRecords(repo, [
       { kind: "module", value: moduleDeclaring(TIED_ACROSS_COMMITS, "tied-across-commits-earlier") },
     ]);
@@ -1163,7 +1202,7 @@ describe("IndexDb, a lookup resolving two rows to one", () => {
     const higherWithin = firstWithin > secondWithin ? firstWithin : secondWithin;
     expect(incremental.contributionById(TIED_WITHIN_COMMIT.id)?.moduleRecord).toBe(higherWithin);
 
-    const rebuilt = new IndexDb(await makeDbPath("rebuilt.sqlite"));
+    using rebuilt = new IndexDb(await makeDbPath("rebuilt.sqlite"));
     await rebuilt.fold(storeOf(repo));
     expect(rebuilt.contributionById(TIED_ACROSS_COMMITS.id)).toEqual(
       incremental.contributionById(TIED_ACROSS_COMMITS.id),
@@ -1179,7 +1218,7 @@ describe("IndexDb, a lookup resolving two rows to one", () => {
     const nested = ruleContribution("tie", `${MODULE_NAME}/nested`);
     const earlierName = `${MODULE_NAME}/nested`;
 
-    const incremental = new IndexDb(await makeDbPath("incremental.sqlite"));
+    using incremental = new IndexDb(await makeDbPath("incremental.sqlite"));
     const [earlier] = await writeFixtureRecords(repo, [
       { kind: "module", value: { ...moduleDeclaring(nested, "nested-first"), name: earlierName } },
     ]);
@@ -1192,7 +1231,7 @@ describe("IndexDb, a lookup resolving two rows to one", () => {
     expect(incremental.contributionById(nested.id)?.moduleRecord).toBe(laterId);
     expect(incremental.contributionById(nested.id)?.moduleName).toBe(MODULE_NAME);
 
-    const rebuilt = new IndexDb(await makeDbPath("rebuilt.sqlite"));
+    using rebuilt = new IndexDb(await makeDbPath("rebuilt.sqlite"));
     await rebuilt.fold(storeOf(repo));
     expect(rebuilt.contributionById(nested.id)).toEqual(incremental.contributionById(nested.id));
   });
@@ -1215,11 +1254,11 @@ describe("IndexDb, two contributors sharing one slot", () => {
     await writeFixtureRecords(backward, [{ kind: "claim", value: first }]);
 
     const forwardPath = await makeDbPath("forward.sqlite");
-    const forwardIndex = new IndexDb(forwardPath);
+    using forwardIndex = new IndexDb(forwardPath);
     await forwardIndex.fold(storeOf(forward));
 
     const backwardPath = await makeDbPath("backward.sqlite");
-    const backwardIndex = new IndexDb(backwardPath);
+    using backwardIndex = new IndexDb(backwardPath);
     await backwardIndex.fold(storeOf(backward));
 
     const forwardContributors = forwardIndex.contributorsAtSlot(slotOf("shared-slot"));
@@ -1234,6 +1273,9 @@ describe("IndexDb, two contributors sharing one slot", () => {
     expect(forwardEdges).toEqual(backwardEdges);
 
     expect(forwardIndex.claimAtSlot(slotOf("shared-slot"))).toEqual(backwardIndex.claimAtSlot(slotOf("shared-slot")));
+    expect(forwardIndex.forkAtSlot(slotOf("shared-slot"))).toEqual(forwardContributors);
+    expect(backwardIndex.forkAtSlot(slotOf("shared-slot"))).toEqual(forwardContributors);
+    expect(forwardIndex.forkedSlots()).toEqual(backwardIndex.forkedSlots());
   });
 });
 
@@ -1268,11 +1310,11 @@ describe("IndexDb.claimAtSlot, two contributors contending for one slot's exclus
       await writeFixtureRecords(backward, [{ kind: "claim", value: silent }]);
 
       const forwardPath = await makeDbPath(`forward-${groupTag}.sqlite`);
-      const forwardIndex = new IndexDb(forwardPath);
+      using forwardIndex = new IndexDb(forwardPath);
       await forwardIndex.fold(storeOf(forward));
 
       const backwardPath = await makeDbPath(`backward-${groupTag}.sqlite`);
-      const backwardIndex = new IndexDb(backwardPath);
+      using backwardIndex = new IndexDb(backwardPath);
       await backwardIndex.fold(storeOf(backward));
 
       for (const index of [forwardIndex, backwardIndex]) {
@@ -1283,7 +1325,7 @@ describe("IndexDb.claimAtSlot, two contributors contending for one slot's exclus
     }
   });
 
-  test("two contributors declaring different groups is refused rather than one silently governing", async () => {
+  test("two contributors declaring different groups fork the slot, each group keeping its own member, rather than one silently governing", async () => {
     const repo = await makeRepo("fold-contended-conflict");
     repos.push(repo);
 
@@ -1293,11 +1335,15 @@ describe("IndexDb.claimAtSlot, two contributors contending for one slot's exclus
     await writeFixtureRecords(repo, [{ kind: "claim", value: second }]);
 
     const dbPath = await makeDbPath("conflict.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
-    expect(() => index.claimAtSlot(slotOf("conflicted-slot"))).toThrow(AmbiguousExclusiveGroupError);
-    expect(() => index.claimAtSlot(slotOf("conflicted-slot"))).toThrow("menu-a, menu-b");
+    const contributors = index.contributorsAtSlot(slotOf("conflicted-slot"));
+    expect(contributors.map(({ id }) => id).sort()).toEqual([contentId(first), contentId(second)].sort());
+    expect(index.forkAtSlot(slotOf("conflicted-slot"))).toEqual(contributors);
+    expect(index.forkedSlots()).toEqual([slotOf("conflicted-slot")]);
+    expect(index.claimsInGroup("menu-a").map(({ id }) => id)).toEqual([contentId(first)]);
+    expect(index.claimsInGroup("menu-b").map(({ id }) => id)).toEqual([contentId(second)]);
   });
 
   test("claimsInGroup answers with the contributor that actually declared the group, never an unrelated representative", async () => {
@@ -1310,7 +1356,7 @@ describe("IndexDb.claimAtSlot, two contributors contending for one slot's exclus
     await writeFixtureRecords(repo, [{ kind: "claim", value: silent }]);
 
     const dbPath = await makeDbPath("claims-in-group.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
     const members = index.claimsInGroup("menu-x");
@@ -1329,11 +1375,11 @@ describe("a folded evidence edge answers by its selector's own parts, in a stabl
     await writeFixtureRecords(repo, [{ kind: "claim", value: claim }]);
 
     const firstPath = await makeDbPath("first.sqlite");
-    const first = new IndexDb(firstPath);
+    using first = new IndexDb(firstPath);
     await first.fold(storeOf(repo));
 
     const secondPath = await makeDbPath("second.sqlite");
-    const second = new IndexDb(secondPath);
+    using second = new IndexDb(secondPath);
     await second.fold(storeOf(repo));
 
     const edges = first.evidenceEdgesOf(slotOf("selector-parts"));
@@ -1356,7 +1402,7 @@ describe("IndexDb folds a module's manifest without touching its bundle", () => 
     const [moduleId] = await writeFixtureRecords(repo, [{ kind: "module", value: module }]);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
     const contributions = index.contributionsOf("parser");
@@ -1381,7 +1427,7 @@ describe("IndexDb folds a module's manifest without touching its bundle", () => 
       { kind: "module", value: moduleDeclaring(contribution, "module-namespaced-point") },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.contributionsOf(point)).toEqual([
@@ -1406,7 +1452,7 @@ describe("IndexDb.installedModuleRecords, a scope holding two module names", () 
     await writeFixtureRecords(repo, [{ kind: "module", value: moduleNamed("zulu.demo") }]);
     await writeFixtureRecords(repo, [{ kind: "module", value: moduleNamed("alpha.demo") }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.installedModuleRecords().map((install) => install.name)).toEqual([
@@ -1445,12 +1491,12 @@ describe("IndexDb.fold, the position a record takes within its commit", () => {
       { kind: "module" as const, value: moduleWithContributions() },
       { kind: "claim" as const, value: contributorAt("positioned", "one") },
       { kind: "claim" as const, value: contributorAt("positioned", "two") },
-      { kind: "case" as const, value: caseCiting("positioned-case", []) },
+      { kind: "case" as const, value: fixtureCase("positioned-case", []) },
     ];
     const ids = await writeFixtureRecords(repo, items);
     const commit = (await gitRevParse(repo.ctx, scopeRefName(repo.scope)))!;
     const path = await makeDbPath("index.sqlite");
-    await new IndexDb(path).fold(storeOf(repo));
+    await foldClosed(path, storeOf(repo));
 
     const paths = items.map((item, index) => recordPath(item.kind, ids[index]!));
     const sorted = [...paths].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
@@ -1479,8 +1525,9 @@ describe("IndexDb.eventsAfter, reading the fold's events past a cursor", () => {
     expect(answered).toEqual(all.slice(all.findIndex((event) => event.commit === withinCommit) + 1));
     expect(answered?.[0]?.commit).toBe(withinCommit);
 
+    folded.close();
     await rm(path, { force: true });
-    const rebuilt = new IndexDb(path);
+    using rebuilt = new IndexDb(path);
     expect(rebuilt.watermark()).toBeNull();
     await rebuilt.fold(storeOf(repo));
     expect(rebuilt.eventsAfter(cursor)).toEqual(answered);
@@ -1490,7 +1537,7 @@ describe("IndexDb.eventsAfter, reading the fold's events past a cursor", () => {
     const repo = await makeRepo("events-bare-commit");
     repos.push(repo);
     await writeRichScope(repo);
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const all = index.eventsAfter()!;
@@ -1500,6 +1547,27 @@ describe("IndexDb.eventsAfter, reading the fold's events past a cursor", () => {
     expect(index.eventsAfter({ commit: withinCommit })).toEqual(pastIt);
     expect(index.eventsAfter({ commit: index.watermark()! })).toEqual([]);
     expect(index.eventsAfter({ commit: "0".repeat(40) })).toBeUndefined();
+  });
+});
+
+describe("IndexDb's refusals of one id in two commits", () => {
+  test("answer the one refused first in the log, whichever commit hash sorts first", async () => {
+    const path = recordPath("claim", REFUSED_ID);
+    const bytes = (n: number) => new TextEncoder().encode(`not a record, take ${n}`);
+    let repo: FixtureRepo | undefined;
+    let first = "";
+    let second = "";
+    for (let attempt = 0; second === "" || second > first; attempt += 1) {
+      repo = await makeRepo(`refused-twice-${attempt}`);
+      repos.push(repo);
+      first = await commitAroundTheStore(repo, path, bytes(1));
+      second = await commitAroundTheStore(repo, path, bytes(2));
+    }
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo!));
+
+    expect(index.refusalFor(REFUSED_ID)?.commit).toBe(first);
+    expect(index.refusals().map(({ commit }) => commit)).toEqual([first, second]);
   });
 });
 
@@ -1525,7 +1593,7 @@ describe("IndexDb.fold, a module record the store contract refuses", () => {
       },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.refusals().map((refusal) => ({ id: refusal.id, commit: refusal.commit, path: refusal.path }))).toEqual(
@@ -1555,6 +1623,71 @@ describe("IndexDb.fold, a module record the store contract refuses", () => {
   });
 });
 
+describe("IndexDb.fold, an attestation at a version later than the kernel writes", () => {
+  /** A revocation as a later version might write it, with a field no version here defines. */
+  const laterRevocation = (subject: RecordId, supersedes: unknown) => {
+    const bytes = canonicalBytes({
+      kind: "attestation",
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.attestation + 1,
+      subject,
+      principal: `key:SHA256:${"k".repeat(43)}`,
+      principalClass: "person",
+      via: "signature",
+      purpose: "revoked",
+      at: "2026-09-01T00:00:00.000Z",
+      supersedes,
+      scope: "a field no version this kernel reads defines",
+    });
+    const id = rawId(bytes);
+    return { id, path: recordPath("attestation", id), bytes };
+  };
+
+  test("is refused, and what every version fixes of it is kept by its subject for a reader to verify, cold or warm alike", async () => {
+    const repo = await makeRepo("later-attestation");
+    repos.push(repo);
+    const subject = recordId({ marker: "subject" });
+    const replaced = recordId({ marker: "replaced" });
+    const later = laterRevocation(subject, [replaced]);
+    const malformed = laterRevocation("not a record id" as RecordId, [replaced]);
+    using warm = new IndexDb(await makeDbPath("warm.sqlite"));
+    await warm.fold(storeOf(repo));
+    const before = warm.watermark()!;
+    const commit = await commitFilesAroundTheStore(repo, [later, malformed]);
+    await warm.fold(storeOf(repo));
+    expect(
+      warm
+        .refusals()
+        .map((refusal) => refusal.id)
+        .sort(),
+    ).toEqual([later.id, malformed.id].sort());
+    expect(warm.attestationsBySubject(subject)).toEqual([]);
+    expect(warm.withdrawingBySubject(subject)).toEqual([
+      {
+        id: later.id,
+        record: {
+          schemaVersion: CURRENT_SCHEMA_VERSIONS.attestation + 1,
+          subject,
+          principal: `key:SHA256:${"k".repeat(43)}`,
+          via: "signature",
+          purpose: "revoked",
+          at: "2026-09-01T00:00:00.000Z",
+          supersedes: [replaced],
+        },
+        verified: null,
+      },
+    ]);
+    expect(warm.laterLandedBy(later.id, commit)).toBe(true);
+    expect(warm.laterLandedBy(later.id, before)).toBe(false);
+    expect(warm.laterLandedBy(malformed.id, commit)).toBe(false);
+    expect(warm.laterLandedBy(subject, commit)).toBe(false);
+    expect(warm.withdrawingSuperseding(replaced).map((entry) => entry.id)).toEqual([later.id]);
+
+    using cold = new IndexDb(await makeDbPath("cold.sqlite"));
+    await cold.fold(storeOf(repo));
+    expect(cold.withdrawingBySubject(subject)).toEqual(warm.withdrawingBySubject(subject));
+  });
+});
+
 describe("IndexDb.latestCommitTimeOf, records landing in commits of different dates", () => {
   test("answers the committer date of the latest commit among the records named, never the earliest", async () => {
     const repo = await makeRepo("fold-latest-commit-time");
@@ -1570,7 +1703,7 @@ describe("IndexDb.latestCommitTimeOf, records landing in commits of different da
     });
     const [claimId] = await store.putMany([{ kind: "claim", value: contributorAt("dated", "only") }]);
     instant = "2026-03-02T00:00:00.000Z";
-    const [caseId] = await store.putMany([{ kind: "case", value: caseCiting("dated-case", [claimId!]) }]);
+    const [caseId] = await store.putMany([{ kind: "case", value: fixtureCase("dated-case", [claimId!]) }]);
     instant = "2026-03-03T00:00:00.000Z";
     const [artifactId] = await store.putMany([
       {
@@ -1587,11 +1720,12 @@ describe("IndexDb.latestCommitTimeOf, records landing in commits of different da
       },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const walked: CommitChanges[] = [];
-    for await (const commit of storeOf(repo).changesSince(null)) {
+    const reader = storeOf(repo);
+    for await (const commit of reader.changesSince(null, (await reader.tip())!)) {
       walked.push(commit);
     }
     const times = walked.map((commit) => commit.committedAt);
@@ -1625,7 +1759,7 @@ describe("IndexDb.anchorsOf: an artifact's own receipts section, derived at fold
     const [artifactId] = await writeFixtureRecords(repo, [{ kind: "artifact", value: artifact }]);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
 
     expect(index.anchorsOf(artifactId!)).toEqual([{ label, fullId: citedId }]);
@@ -1650,7 +1784,7 @@ describe("IndexDb.anchorsOf: an artifact's own receipts section, derived at fold
     const [firstId] = await writeFixtureRecords(repo, [{ kind: "artifact", value: first }]);
 
     const dbPath = await makeDbPath("index.sqlite");
-    const index = new IndexDb(dbPath);
+    using index = new IndexDb(dbPath);
     await index.fold(storeOf(repo));
     expect(index.anchorsOf(firstId!)).toHaveLength(1);
 
@@ -1696,7 +1830,7 @@ describe("succession: what a record replacing another does to the fold", () => {
     const corrected = { ...contributorAt("shared", "second"), supersedes: [firstId!] };
     const [secondId] = await writeFixtureRecords(repo, [{ kind: "claim", value: corrected }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const slot = slotOf("shared");
@@ -1713,7 +1847,7 @@ describe("succession: what a record replacing another does to the fold", () => {
     const first = contributorAt("shared", "first");
     const [firstId] = await writeFixtureRecords(repo, [{ kind: "claim", value: first }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
     const slot = slotOf("shared");
     expect(index.evidenceEdgesOf(slot).map((edge) => edge.run)).toEqual([first.evidence[0]!.run]);
@@ -1735,7 +1869,7 @@ describe("succession: what a record replacing another does to the fold", () => {
       { kind: "ruling", value: { ...rulingOver(claimId!, "fails"), supersedes: [firstRulingId!] } },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const found = index.rulingsFor(slotOf("ruled"), new Map());
@@ -1762,12 +1896,12 @@ describe("succession: what a record replacing another does to the fold", () => {
       (a, b) => (recordId(a) > recordId(b) ? -1 : 1),
     );
 
-    const warm = new IndexDb(await makeDbPath("warm.sqlite"));
+    using warm = new IndexDb(await makeDbPath("warm.sqlite"));
     const [earlyId] = await writeFixtureRecords(repo, [{ kind: "ruling", value: early! }]);
     await warm.fold(storeOf(repo));
     const [lateId] = await writeFixtureRecords(repo, [{ kind: "ruling", value: late! }]);
     await warm.fold(storeOf(repo));
-    const cold = new IndexDb(await makeDbPath("cold.sqlite"));
+    using cold = new IndexDb(await makeDbPath("cold.sqlite"));
     await cold.fold(storeOf(repo));
 
     const landed = [
@@ -1792,7 +1926,7 @@ describe("succession: what a record replacing another does to the fold", () => {
       { kind: "claim", value: { ...claimAtSlot("corrected"), rendering: "the correction", supersedes: [claimId!] } },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.rulingsFor(slotOf("corrected"), new Map())).toEqual([]);
@@ -1811,9 +1945,9 @@ describe("succession: what a record replacing another does to the fold", () => {
     await writeFixtureRecords(reversed, [{ kind: "claim", value: second }]);
     await writeFixtureRecords(reversed, [{ kind: "claim", value: first }]);
 
-    const forward = new IndexDb(await makeDbPath("forward.sqlite"));
+    using forward = new IndexDb(await makeDbPath("forward.sqlite"));
     await forward.fold(storeOf(ordered));
-    const backward = new IndexDb(await makeDbPath("backward.sqlite"));
+    using backward = new IndexDb(await makeDbPath("backward.sqlite"));
     await backward.fold(storeOf(reversed));
 
     const slot = slotOf("ordering");
@@ -1854,7 +1988,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
       { kind: "ruling", value: policyOver(CLAIM_TYPE, { chapter: { kind: "range", from: "01", to: "09" } }) },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.rulingsFor(slotOf("inside"), new Map()).map((ruling) => ruling.id)).toEqual([policyId!]);
@@ -1871,7 +2005,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
       { kind: "ruling", value: policyOver(CLAIM_TYPE, { chapter: { kind: "range", from: "2", to: "10" } }) },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     // "9" sorts past "10" as text and inside it as a number, so the registry decides the answer.
@@ -1897,7 +2031,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
       },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     // A numeric order cannot place a word, so the exclusion reads it as carved out; text order can.
@@ -1927,7 +2061,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
       },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     // Identity orders no two distinct values: "good" is not "bad", so the carve-out misses.
@@ -1943,7 +2077,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
     await writeFixtureRecords(repo, [{ kind: "claim", value: claimAtSlot("plain") }]);
     await writeFixtureRecords(repo, [{ kind: "ruling", value: policyOver(CLAIM_TYPE, { chapter: { kind: "any" } }) }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.rulingsFor(slotOf("plain"), new Map())).toEqual([]);
@@ -1956,7 +2090,7 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
     await writeFixtureRecords(repo, [{ kind: "claim", value: claimAtSlot("elsewhere") }]);
     await writeFixtureRecords(repo, [{ kind: "ruling", value: policyOver("musai.other@1", { id: { kind: "any" } }) }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.rulingsFor(slotOf("elsewhere"), new Map())).toEqual([]);
@@ -1986,12 +2120,107 @@ describe("a ruling's extent: one claim, or a type at a scope", () => {
       { kind: "ruling", value: policyOver(CLAIM_TYPE, { chapter: { kind: "range", from: "01", to: "09" } }) },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.rulingsFor(slotOf("both"), new Map()).map((ruling) => ruling.id)).toEqual(
       [boundId!, policyId!].sort((a, b) => (a < b ? -1 : 1)),
     );
+  });
+});
+
+describe("IndexDb's cases under a slug", () => {
+  test("a case under a slug answers with the record replacing it, whichever id sorts first", async () => {
+    const repo = await makeRepo("case-by-slug-succession");
+    repos.push(repo);
+    const pairs = Array.from({ length: 64 }, (_, n) => {
+      const replaced = { ...fixtureCase("revised", []), projectCommit: n.toString(16).padStart(40, "0") };
+      return { replaced, replacing: { ...replaced, overrides: { revised: true }, supersedes: [contentId(replaced)] } };
+    });
+    const { replaced, replacing } = pairs.find((pair) => contentId(pair.replaced) < contentId(pair.replacing))!;
+
+    await writeFixtureRecords(repo, [{ kind: "case", value: replaced }]);
+    const [replacingId] = await writeFixtureRecords(repo, [{ kind: "case", value: replacing }]);
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo));
+
+    expect(index.casesAtSlug("revised").map(({ id }) => id)).toEqual([replacingId!]);
+    expect(index.cases().map(({ id }) => id)).toEqual([replacingId!]);
+    expect(index.forkedSlugs()).toEqual([]);
+  });
+
+  test("two live cases under one slug both answer, and the slug reads forked rather than by id order", async () => {
+    const repo = await makeRepo("case-by-slug-fork");
+    repos.push(repo);
+    const one = { ...fixtureCase("twice", []), overrides: { side: "one" } };
+    const two = { ...fixtureCase("twice", []), overrides: { side: "two" } };
+    const [first] = await writeFixtureRecords(repo, [{ kind: "case", value: one }]);
+    const [second] = await writeFixtureRecords(repo, [{ kind: "case", value: two }]);
+    await writeFixtureRecords(repo, [{ kind: "case", value: fixtureCase("once", []) }]);
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo));
+
+    expect(index.casesAtSlug("twice").map(({ id }) => id)).toEqual([first!, second!].sort());
+    expect(index.forkedSlugs()).toEqual(["twice"]);
+  });
+
+  test("a case replacing another answers the artifacts drafted under the case it replaces", async () => {
+    const repo = await makeRepo("case-artifacts-succession");
+    repos.push(repo);
+    const replaced = fixtureCase("inherited", []);
+    const [replacedId] = await writeFixtureRecords(repo, [{ kind: "case", value: replaced }]);
+    const [artifactId] = await writeFixtureRecords(repo, [
+      {
+        kind: "artifact",
+        value: {
+          kind: "artifact",
+          schemaVersion: CURRENT_SCHEMA_VERSIONS.artifact,
+          case: replacedId!,
+          lifecycle: "drafted",
+          content: "Drafted under the case a successor replaces.",
+          format: "text/markdown",
+          supersedes: [],
+        },
+      },
+    ]);
+    const replacing = { ...replaced, overrides: { kept: true }, supersedes: [replacedId!] };
+    const [replacingId] = await writeFixtureRecords(repo, [{ kind: "case", value: replacing }]);
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo));
+
+    expect(index.artifactsOfCase(replacingId!).map(({ id }) => id)).toEqual([artifactId!]);
+  });
+
+  test("a claim two live cases cite answers both, never the lower id alone", async () => {
+    const repo = await makeRepo("case-for-claim-fork");
+    repos.push(repo);
+    const [claimId] = await writeFixtureRecords(repo, [
+      { kind: "claim", value: contributorAt("cited-by-two", "only") },
+    ]);
+    const cited = fixtureCase("cited-by-two", [claimId!]);
+    const [one] = await writeFixtureRecords(repo, [{ kind: "case", value: { ...cited, overrides: { side: "one" } } }]);
+    const [two] = await writeFixtureRecords(repo, [{ kind: "case", value: { ...cited, overrides: { side: "two" } } }]);
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo));
+
+    expect(index.casesForClaim(claimId!).map(({ id }) => id)).toEqual([one!, two!].sort());
+  });
+
+  test("a claim answers the live case citing it, never one a successor replaced", async () => {
+    const repo = await makeRepo("case-for-claim-succession");
+    repos.push(repo);
+    const [claimId] = await writeFixtureRecords(repo, [{ kind: "claim", value: contributorAt("kept-cited", "only") }]);
+    const pairs = Array.from({ length: 64 }, (_, n) => {
+      const replaced = { ...fixtureCase("kept-cited", [claimId!]), projectCommit: n.toString(16).padStart(40, "0") };
+      return { replaced, replacing: { ...replaced, overrides: { kept: true }, supersedes: [contentId(replaced)] } };
+    });
+    const { replaced, replacing } = pairs.find((pair) => contentId(pair.replaced) < contentId(pair.replacing))!;
+    await writeFixtureRecords(repo, [{ kind: "case", value: replaced }]);
+    const [replacingId] = await writeFixtureRecords(repo, [{ kind: "case", value: replacing }]);
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
+    await index.fold(storeOf(repo));
+
+    expect(index.casesForClaim(claimId!).map(({ id }) => id)).toEqual([replacingId!]);
   });
 });
 
@@ -2026,7 +2255,7 @@ describe("IndexDb.ruleFor, the live rule record naming a contribution", () => {
       { kind: "rule", value: ruleNaming("second", NAMED, "02", [firstId!]) },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const found = index.ruleFor(NAMED);
@@ -2043,7 +2272,7 @@ describe("IndexDb.ruleFor, the live rule record naming a contribution", () => {
       { kind: "rule", value: ruleNaming(NAMED, null, "02") },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.ruleFor(NAMED)).toBeUndefined();
@@ -2059,7 +2288,7 @@ describe("IndexDb.ruleFor, the live rule record naming a contribution", () => {
       { kind: "rule", value: ruleNaming("second", NAMED, "02") },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     let refusal: unknown;
@@ -2085,7 +2314,7 @@ describe("IndexDb.ruleFor, the live rule record naming a contribution", () => {
 
     await writeFixtureRecords(repo, [{ kind: "rule", value: ruleNaming("other", OTHER, "01") }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.ruleFor(NAMED)).toBeUndefined();
@@ -2104,7 +2333,7 @@ describe("what the fold makes of a sealed value", () => {
     const claim = { ...claimAtSlot("sealed"), rendering: SEALED };
     const [claimId] = await writeFixtureRecords(repo, [{ kind: "claim", value: claim }]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     const found = index.claimAtSlot(slotOf("sealed"));
@@ -2132,7 +2361,7 @@ describe("what the fold makes of a sealed value", () => {
       },
     ]);
 
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.anchorsOf(artifactId!)).toEqual([]);
@@ -2174,7 +2403,7 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     const repo = await makeRepo("reads-kinds");
     repos.push(repo);
     const runs = await readScope(repo);
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
 
     expect(index.readersOf(shared).map((row) => row.reader)).toEqual(
@@ -2192,14 +2421,14 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     const repo = await makeRepo("reads-cold-warm");
     repos.push(repo);
     const warmPath = await makeDbPath("warm.sqlite");
-    const warm = new IndexDb(warmPath);
+    using warm = new IndexDb(warmPath);
     await writeFixtureRecords(repo, [{ kind: "run", value: performedReader([entry(read("read before the rest"))]) }]);
     await warm.fold(storeOf(repo));
     await readScope(repo);
     await warm.fold(storeOf(repo));
 
     const coldPath = await makeDbPath("cold.sqlite");
-    await new IndexDb(coldPath).fold(storeOf(repo));
+    await foldClosed(coldPath, storeOf(repo));
 
     expect(tablesHeld(warmPath)["reads"]).toEqual(tablesHeld(coldPath)["reads"]);
     expect(tablesHeld(coldPath)["reads"]).toHaveLength(6);
@@ -2210,7 +2439,7 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     repos.push(repo);
     await readScope(repo);
     const path = await makeDbPath("index.sqlite");
-    await new IndexDb(path).fold(storeOf(repo));
+    await foldClosed(path, storeOf(repo));
 
     const raw = openIndexProvider().open(path);
     try {
@@ -2233,7 +2462,7 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     const [reader] = await writeFixtureRecords(repo, [
       { kind: "run", value: evaluation([entry(claim!, slotKey), entry(plain!)]) },
     ]);
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
     expect(index.reachOf(slotKey)).toEqual([]);
     expect(index.reachOf(plain!)).toEqual([]);
@@ -2261,7 +2490,7 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     await writeFixtureRecords(repo, [{ kind: "run", value: receipt("on another tree") }]);
     // Back on the first tree, the evaluation rests on the first receipt though a later one exists.
     const [reader] = await writeFixtureRecords(repo, [{ kind: "run", value: evaluation([entry(first!, recipeKey)]) }]);
-    const index = new IndexDb(await makeDbPath("index.sqlite"));
+    using index = new IndexDb(await makeDbPath("index.sqlite"));
     await index.fold(storeOf(repo));
     expect(index.reachOf(recipeKey)).toEqual([]);
 
@@ -2276,12 +2505,12 @@ describe("IndexDb, the reverse index over every run's read-set", () => {
     repos.push(repo);
     const runs = await readScope(repo);
     const path = await makeDbPath("index.sqlite");
-    await new IndexDb(path).fold(storeOf(repo));
+    await foldClosed(path, storeOf(repo));
     const raw = openIndexProvider().open(path);
     raw.exec("UPDATE schema_meta SET version = 19 WHERE id = 0; DELETE FROM reads;");
     raw.close();
 
-    const reopened = new IndexDb(path);
+    using reopened = new IndexDb(path);
     expect(reopened.watermark()).toBeNull();
     await reopened.fold(storeOf(repo));
 

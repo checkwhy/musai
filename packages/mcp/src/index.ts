@@ -24,6 +24,12 @@ export {
   type McpToolSession,
   registerResourceHandlers,
 } from "./extension.js";
-export { manifestContributionProjections, toolNameFor, toolsFromManifests, toolsFromRegistry } from "./project.js";
+export {
+  contributionProjections,
+  manifestContributionProjections,
+  operationProjections,
+  toolNameFor,
+} from "./project.js";
 export { registerPromptHandlers } from "./prompts.js";
+export type { ReadGuard } from "./refusal.js";
 export { callTool, checkForListChanges, createMcpServer, runMcpServer, serveStdio } from "./server.js";

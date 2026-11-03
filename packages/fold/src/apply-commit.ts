@@ -10,7 +10,13 @@ import {
   renderSelector,
 } from "@musai/records";
 import { type FoldRow, type FoldTable, rowStatementsFor } from "./fold-extension.js";
-import type { ContributedRows, FoldedRecord, FoldInterruptEvent, RefusedRecordPath } from "./rows.js";
+import type {
+  ContributedRows,
+  FoldedRecord,
+  FoldInterruptEvent,
+  IndexedWithdrawing,
+  RefusedRecordPath,
+} from "./rows.js";
 import type { IndexConnection } from "./sqlite-provider.js";
 
 interface FoldedCommit {
@@ -28,6 +34,8 @@ export function applyCommit(
   commit: FoldedCommit,
   added: readonly FoldedRecord[],
   refused: readonly RefusedRecordPath[],
+  withdrawing: readonly IndexedWithdrawing[],
+  replaced: readonly RecordId[],
   contributed: readonly ContributedRows[],
   onStep?: (event: FoldInterruptEvent) => void,
 ): void {
@@ -43,6 +51,15 @@ export function applyCommit(
         "INSERT INTO refusals (commit_sha, path, id, reason) VALUES (?, ?, ?, ?) " +
           "ON CONFLICT(commit_sha, path) DO UPDATE SET id = excluded.id, reason = excluded.reason",
       ).run(commit.sha, refusal.path, refusal.id, refusal.reason);
+    }
+    for (const { id, record, verified } of withdrawing) {
+      db.prepare(
+        "INSERT INTO withdrawing_attestations (id, subject, record_json, verified) VALUES (?, ?, ?, ?) " +
+          "ON CONFLICT(id) DO NOTHING",
+      ).run(id, record.subject, JSON.stringify(record), verified === null ? null : Number(verified));
+    }
+    for (const id of replaced) {
+      db.prepare("INSERT INTO withheld_replacements (id) VALUES (?) ON CONFLICT(id) DO NOTHING").run(id);
     }
     for (const { id, record, position } of added) {
       // A record belongs to the first commit that holds it; a later re-add does not move it.

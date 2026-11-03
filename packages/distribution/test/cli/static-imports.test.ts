@@ -36,8 +36,11 @@ async function builtEntryOf(name: string, importer: string): Promise<string> {
 }
 
 /** The files, specifiers and unnamed `import()` callers reachable from `entry`, following relative
- * and `@musai/*` imports only. */
-async function walkStaticImports(entry: string): Promise<{
+ * and `@musai/*` imports only, and an `import()` only where `followsCall` holds for its file. */
+async function walkStaticImports(
+  entry: string,
+  followsCall: (file: string) => boolean = () => true,
+): Promise<{
   readonly files: ReadonlySet<string>;
   readonly specifiers: ReadonlySet<string>;
   readonly importCallers: ReadonlySet<string>;
@@ -58,7 +61,10 @@ async function walkStaticImports(entry: string): Promise<{
     if (calls > imports.filter(({ kind }) => kind === "dynamic").length) {
       importCallers.add(file);
     }
-    for (const { specifier } of imports) {
+    for (const { specifier, kind } of imports) {
+      if (kind === "dynamic" && !followsCall(file)) {
+        continue;
+      }
       specifiers.add(specifier);
       if (specifier.startsWith(".")) {
         pending.push(resolve(dirname(file), specifier));
@@ -91,5 +97,17 @@ describe("the command line's binding, walked through its static imports", () => 
     expect([...server.specifiers].some((specifier) => specifier.startsWith("@modelcontextprotocol/sdk"))).toBe(true);
     expect([...cli.specifiers].filter(namesMcp)).toEqual([]);
     expect([...cli.importCallers]).toEqual([]);
+  });
+});
+
+describe("what every verb of the command line loads", () => {
+  test("reaches no part of @musai/devkit, which only the module verbs import, once the version check passes", async () => {
+    const cliEntry = await realpath(CLI_PATH);
+    const everyVerb = await walkStaticImports(CLI_PATH, (file) => file === cliEntry);
+    const devkitDist = await realpath(join(PACKAGES_DIR, "devkit", "dist"));
+
+    expect([...everyVerb.files].filter((file) => file.startsWith(`${devkitDist}${sep}`))).toEqual([]);
+    expect(everyVerb.files).toContain(await realpath(join(PACKAGES_DIR, "cli", "dist", "index.js")));
+    expect((await walkStaticImports(CLI_PATH)).specifiers).toContain("@musai/devkit");
   });
 });

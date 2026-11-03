@@ -137,6 +137,26 @@ export const KERNEL_INDEX_TABLES: ReadonlyMap<string, readonly string[]> = new M
     ],
   ],
   [
+    "withdrawing_attestations",
+    [
+      `CREATE TABLE withdrawing_attestations (
+        id TEXT PRIMARY KEY,
+        subject TEXT NOT NULL,
+        record_json TEXT NOT NULL,
+        verified INTEGER
+      );`,
+      "CREATE INDEX withdrawing_attestations_by_subject ON withdrawing_attestations (subject);",
+    ],
+  ],
+  [
+    "withheld_replacements",
+    [
+      `CREATE TABLE withheld_replacements (
+        id TEXT PRIMARY KEY
+      );`,
+    ],
+  ],
+  [
     "module_contributions",
     [
       `CREATE TABLE module_contributions (
@@ -295,7 +315,9 @@ export const QUERYABLE_KERNEL_TABLES: ReadonlySet<string> = new Set(
       name !== "walked" &&
       name !== "fold_tables" &&
       name !== "fold_refusals" &&
-      name !== "refusals",
+      name !== "refusals" &&
+      name !== "withdrawing_attestations" &&
+      name !== "withheld_replacements",
   ),
 );
 

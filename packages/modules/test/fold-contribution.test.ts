@@ -244,7 +244,7 @@ async function scopeWithFoldModule(
   ]);
   await writeFixtureRecords(repo, [{ kind: "module", value: moduleDeclaring(moduleName, entries) }]);
   const path = join(await trackedDir(), "index.sqlite");
-  return { repo, store: storeOf(repo), index: new IndexDb(path), path };
+  return { repo, store: storeOf(repo), index: repo.keep(new IndexDb(path)), path };
 }
 
 describe("a fold contribution's declared table", () => {
@@ -294,7 +294,7 @@ describe("a fold contribution's declared table", () => {
 
     // A fresh fold backfills from `records`, so the two compare the walk's tuple with the log's.
     const freshPath = join(await trackedDir(), "fresh.sqlite");
-    const fresh = new IndexDb(freshPath);
+    using fresh = new IndexDb(freshPath);
     await fresh.fold(store, undefined, handed(fresh));
 
     const walked = rowsOf(path, TABLE);
@@ -308,7 +308,7 @@ describe("a fold contribution's declared table", () => {
     const repo = await trackedRepo("fold-same-pass");
     await writeFixtureRecords(repo, [{ kind: "claim", value: claim("before") }]);
     const path = join(await trackedDir(), "index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
     const store = storeOf(repo);
     await index.fold(store, undefined, handed(index));
     expect(holdsTable(path, TABLE)).toBe(false);
@@ -411,6 +411,7 @@ function storeRefusingItsLog(store: Store): RecordStore {
     readSidecar: (id) => store.readSidecar(id),
     swapRef: (build, hooks) => store.swapRef(build, hooks),
     descends: (from, to) => store.descends(from, to),
+    holdsCommit: (commit) => store.holdsCommit(commit),
     changesSince: () => {
       throw new Error("a backfill reached for the log");
     },
@@ -572,7 +573,7 @@ async function scopeWithBundle(
   });
   await writeFixtureRecords(repo, [{ kind: "module", value: moduleDeclaring(MODULE_NAME, [entry], bundleId) }]);
   const path = join(await trackedDir(), "index.sqlite");
-  return { repo, store: storeOf(repo), index: new IndexDb(path), blobs, path, entry };
+  return { repo, store: storeOf(repo), index: repo.keep(new IndexDb(path)), blobs, path, entry };
 }
 
 /** The pair a fold is handed when its row functions come from a bundle loaded through a host. */
@@ -757,7 +758,7 @@ describe("a contributed table whose row function refuses", () => {
     expect(asked).toBeGreaterThan(0);
 
     // A second connection reads what was written, not what the first index remembered.
-    const second = new IndexDb(path);
+    using second = new IndexDb(path);
     await second.fold(store, undefined, loaded(second, blobs, counting.hosts));
 
     expect(holdsTable(path, TABLE)).toBe(false);
@@ -797,7 +798,7 @@ describe("a contributed table whose row function refuses", () => {
       { kind: "module", value: moduleDeclaring(MODULE_NAME, [foldEntry(CONTRIBUTION_ID)]) },
     ]);
     const path = join(await trackedDir(), "index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
     await index.fold(store, undefined, handed(index));
     const before = index.watermark();
 
@@ -851,7 +852,7 @@ describe("a contributed table whose row function refuses", () => {
       { kind: "module", value: moduleDeclaring("fixture-casebook", [foldEntry("fixture-casebook/entries")]) },
     ]);
     const path = join(await trackedDir(), "index.sqlite");
-    const index = new IndexDb(path);
+    using index = new IndexDb(path);
     // Both tables current first, so the pass meeting the refusal is a walk, not a reconcile.
     await index.fold(store, undefined, handed(index));
     expect(holdsTable(path, TABLE)).toBe(true);
@@ -896,7 +897,7 @@ describe("what an envelope's own failure code costs a contributed table", () => 
       const answering = countingHost((request) => ({
         rows: [{ ...(request.input as Record<string, unknown>), at: "a commit" }],
       }));
-      const second = new IndexDb(path);
+      using second = new IndexDb(path);
       await second.fold(store, undefined, loaded(second, blobs, answering.hosts));
 
       expect(answering.counts.invocations).toBeGreaterThan(0);
@@ -928,7 +929,7 @@ describe("what an envelope's own failure code costs a contributed table", () => 
 
     // With the refusal settled nothing is built, so no module is loaded.
     const counting = countingHost(() => ({ rows: [] }));
-    const second = new IndexDb(path);
+    using second = new IndexDb(path);
     await second.fold(store, undefined, loaded(second, blobs, counting.hosts));
 
     expect(counting.counts.loads).toBe(0);
@@ -949,7 +950,7 @@ describe("what an envelope's own failure code costs a contributed table", () => 
     const answering = countingHost((request) => ({
       rows: [{ ...(request.input as Record<string, unknown>), at: "a commit" }],
     }));
-    const second = new IndexDb(path);
+    using second = new IndexDb(path);
     await second.fold(store, undefined, loaded(second, blobs, answering.hosts));
 
     expect(answering.counts.invocations).toBeGreaterThan(0);
@@ -967,7 +968,7 @@ describe("what an envelope's own failure code costs a contributed table", () => 
     expect(index.foldRefusals()[0]!.settled).toBe(true);
     const asked = counting.counts.invocations;
 
-    const second = new IndexDb(path);
+    using second = new IndexDb(path);
     await second.fold(store, undefined, loaded(second, blobs, counting.hosts));
 
     expect(counting.counts.invocations).toBe(asked);
@@ -992,7 +993,7 @@ describe("a contributed table whose host gives out", () => {
     const answering = countingHost((request) => ({
       rows: [{ ...(request.input as Record<string, unknown>), at: "a commit" }],
     }));
-    const second = new IndexDb(path);
+    using second = new IndexDb(path);
     await second.fold(store, undefined, loaded(second, blobs, answering.hosts));
 
     expect(answering.counts.invocations).toBeGreaterThan(0);

@@ -2,11 +2,11 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { parseAllowedSigners } from "../src/allowed-signers.js";
-import { readSignerConfig, resolveSigningKey, SigningKeyError } from "../src/signing-key.js";
+import { keyPrincipalOf, parseAllowedSigners } from "../src/allowed-signers.js";
+import { heldKeyPrincipals, readSignerConfig, resolveSigningKey, SigningKeyError } from "../src/signing-key.js";
 
 const KEY_TYPE = "ssh-ed25519";
-const KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterialForOneFixtureOnly";
+const KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER";
 const SIGNERS = parseAllowedSigners(`florin ${KEY_TYPE} ${KEY}\n`);
 
 async function withDirs<T>(fn: (localDir: string, sshDir: string) => Promise<T>): Promise<T> {
@@ -65,7 +65,12 @@ describe("the key that signs, from the first of three places that names one", ()
 
   test("with nothing named or configured, the key pair beside the registered public key answers", async () => {
     await withDirs(async (localDir, sshDir) => {
-      await writeKeyPair(sshDir, "id_other", KEY_TYPE, "AAAAC3NzaC1lZDI1NTE5AAAAISomeOtherKeyEntirely");
+      await writeKeyPair(
+        sshDir,
+        "id_other",
+        KEY_TYPE,
+        "AAAAC3NzaC1lZDI1NTE5AAAAICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi",
+      );
       const expected = await writeKeyPair(sshDir, "id_ed25519", KEY_TYPE, KEY);
 
       const resolved = await resolveSigningKey({ localDir, principal: "florin", allowedSigners: SIGNERS, sshDir });
@@ -93,6 +98,21 @@ describe("the key that signs, from the first of three places that names one", ()
     await withDirs(async (localDir, sshDir) => {
       const resolved = await resolveSigningKey({ localDir, principal: "florin", allowedSigners: SIGNERS, sshDir });
       expect(resolved).toBeNull();
+    });
+  });
+
+  test("a registered public key with no private half beside it resolves no signing key, and the next pair is tried", async () => {
+    await withDirs(async (localDir, sshDir) => {
+      const halfOnly = "AAAAC3NzaC1lZDI1NTE5AAAAIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz";
+      const signers = parseAllowedSigners(`florin ${KEY_TYPE} ${halfOnly}\nflorin ${KEY_TYPE} ${KEY}\n`);
+      await writeFile(join(sshDir, "id_a.pub"), `${KEY_TYPE} ${halfOnly} florin@example\n`);
+
+      const alone = await resolveSigningKey({ localDir, principal: "florin", allowedSigners: signers, sshDir });
+      expect(alone).toBeNull();
+
+      const expected = await writeKeyPair(sshDir, "id_b", KEY_TYPE, KEY);
+      const resolved = await resolveSigningKey({ localDir, principal: "florin", allowedSigners: signers, sshDir });
+      expect(resolved).toEqual({ path: expected, source: "allowed-signers" });
     });
   });
 
@@ -130,6 +150,29 @@ describe("the key that signs, from the first of three places that names one", ()
 
       await writeSignerConfig(localDir, { keyPath: 42 });
       await expect(readSignerConfig(localDir)).rejects.toThrow(/non-empty string/);
+    });
+  });
+});
+
+describe("the keys this machine holds a private half for", () => {
+  const keyOf = (fill: string) => `AAAAC3NzaC1lZDI1NTE5AAAAI${fill.repeat(43)}`;
+  const principalOf = (key: string) => keyPrincipalOf(`${KEY_TYPE} ${key}`);
+
+  test("count the named key, the configured key and each registered pair, never a public half alone", async () => {
+    await withDirs(async (localDir, sshDir) => {
+      const [named, configured, paired, halfOnly, unregistered] = ["E", "F", "G", "H", "J"].map(keyOf);
+      const namedPath = await writeKeyPair(localDir, "named", KEY_TYPE, named!);
+      await writeSignerConfig(localDir, { keyPath: await writeKeyPair(localDir, "configured", KEY_TYPE, configured!) });
+      await writeKeyPair(sshDir, "id_paired", KEY_TYPE, paired!);
+      await writeFile(join(sshDir, "id_half.pub"), `${KEY_TYPE} ${halfOnly} florin@example\n`);
+      await writeKeyPair(sshDir, "id_unregistered", KEY_TYPE, unregistered!);
+      const allowedSigners = parseAllowedSigners(
+        [paired, halfOnly].map((key) => `florin ${KEY_TYPE} ${key}\n`).join(""),
+      );
+
+      const held = await heldKeyPrincipals({ named: namedPath, localDir, allowedSigners, sshDir });
+
+      expect([...held].sort()).toEqual([named!, configured!, paired!].map(principalOf).sort());
     });
   });
 });

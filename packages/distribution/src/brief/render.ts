@@ -1,12 +1,14 @@
 import type { Workspace } from "@musai/api-core";
-import { OperationError } from "@musai/api-core";
+import { givesPrincipalClass, makerFirst, OperationError } from "@musai/api-core";
 import { type AttestationPrincipalSource, EVIDENCE_ORDER, type EvidenceKind, evidenceKindOf } from "@musai/evaluate";
 import {
   type ArgumentRecord,
   type AttestationRecord,
+  type Audience,
   type CaseRecord,
   type ClaimRecord,
   type ComputedRecipe,
+  type ComputedRunRecord,
   type EvidenceEdge,
   idFromPath,
   isSidecarPath,
@@ -25,12 +27,13 @@ import {
 } from "@musai/records";
 import { gitCatFile, gitLsTree, isAbsentPathError, type LsTreeEntry } from "@musai/store";
 import { cited, citedEvidence } from "../cases.js";
-import { type HoldingCheck, holdingCheck } from "../evaluation.js";
+import { statusAdvice } from "../claim-ref.js";
+import { type ConcludedCheck, concludedCheck, unevaluatedSinceRebuild } from "../evaluation.js";
 import { inlineText } from "../text.js";
-import { parseBriefSubstrates } from "./recipe.js";
-import { type Omission, omissionLine, type TrimItem, trimToBudget } from "./trim.js";
+import { briefClearanceOf, parseBriefSubstrates } from "./recipe.js";
+import { byteLengthUtf8, type Omission, omissionLine, type TrimItem, type TrimResult, trimToBudget } from "./trim.js";
 
-/** One record a brief packed. `pinned` is never trimmed; `text` is the line the trim counted. */
+/** One record a brief packed. `pinned` is never trimmed; `text` is its line in the brief. */
 export interface PackedRecord {
   readonly id: RecordId;
   readonly kind: "claim" | "argument" | EvidenceKind;
@@ -59,7 +62,7 @@ export interface Contest {
 /** A line a brief packs: an evidence run, and for an attack the argument whose reason it quotes. */
 export interface BriefLine {
   readonly run: RecordId;
-  /** What reads the run as evidence: an edge's selector, or the rule a holding check rests on. */
+  /** What reads the run as evidence: an edge's selector, or the rule a check concluded by. */
   readonly by: string;
   readonly attack?: Contest;
 }
@@ -74,25 +77,30 @@ function contestOf(claimId: RecordId, { id, record }: StandingArgument): Contest
 }
 
 /** What a brief over `claim` packs before trimming, given what stands against each target and
- * the check it rests on where one holds: the one home for what a brief reads. */
+ * the check where it concluded, a failing one's receipts apart: the one home for what it reads. */
 export function briefLines(
   view: Workspace,
   claimId: RecordId,
   claim: ClaimRecord,
   against: (target: RecordId) => readonly StandingArgument[],
-  check: HoldingCheck | null,
+  check: ConcludedCheck | null,
 ): {
   readonly direct: readonly BriefLine[];
+  readonly failing: readonly BriefLine[];
   readonly attacking: readonly BriefLine[];
   readonly withheld: readonly Contest[];
 } {
-  const checked = check === null ? [] : check.receipts.map((run) => ({ run, by: `rule ${check.rule}` }));
-  // A run the claim rests on but this view withholds supports nothing here, so nothing contests it.
-  const direct = citedEvidence(view, [...claim.evidence.map(edgeLine), ...checked]);
-  const cites = [...new Set(direct.map((line) => line.run))].sort();
+  const ruled = (said: string) =>
+    check === null ? [] : check.receipts.map((run) => ({ run, by: `rule ${check.rule}${said}` }));
+  const holds = check?.verdict === "holds";
+  // A run the claim rests on but this view withholds counts for nothing, so nothing contests it.
+  const direct = citedEvidence(view, [...claim.evidence.map(edgeLine), ...(holds ? ruled("") : [])]);
+  const failing = citedEvidence(view, holds ? [] : ruled(", which fails"));
+  const cites = [...new Set([...direct, ...failing].map((line) => line.run))].sort();
   const standing = [claimId, ...cites].flatMap((target) => against(target));
   return {
     direct,
+    failing,
     attacking: standing.flatMap((argument) =>
       citedEvidence(view, argument.record.evidence).map((edge) => ({
         ...edgeLine(edge),
@@ -173,30 +181,29 @@ function headReader(view: Workspace, head: string): HeadReader {
   };
 }
 
-/** Whether an attestation gives its subject's principal class, which a testimony's kind reads. */
-export function givesPrincipalClass(record: AttestationRecord): boolean {
-  return record.purpose === "made" || record.purpose === "asserted";
-}
-
-/** The attestation behind a subject, unverified: a kind needs only the principal's class. */
-async function firstAttestation(
+/** The maker's attestation behind a subject, unverified, since a kind reads only its class. */
+async function makerAttestation(
   reader: HeadReader,
   subject: RecordId,
 ): Promise<(AttestationPrincipalSource & { readonly id: RecordId }) | null> {
-  const ids = await reader.list("attestation");
-  for (const id of [...ids].sort()) {
+  const found: { readonly id: RecordId; readonly record: AttestationRecord }[] = [];
+  for (const id of [...(await reader.list("attestation"))].sort()) {
     const record = (await reader.read(id, "attestation")) as AttestationRecord;
     if (record.subject === subject && givesPrincipalClass(record)) {
-      return { id, principalClass: record.principalClass };
+      found.push({ id, record });
+      if (record.purpose === "made") {
+        break;
+      }
     }
   }
-  return null;
+  const maker = makerFirst(found);
+  return maker === null ? null : { id: maker.id, principalClass: maker.record.principalClass };
 }
 
 async function evidenceItem(reader: HeadReader, line: BriefLine, pinned: boolean): Promise<PackedRecord> {
   const { attack } = line;
   const run = (await reader.read(line.run, "run")) as RunRecord;
-  const attestation = run.runKind === "testimony" ? await firstAttestation(reader, line.run) : null;
+  const attestation = run.runKind === "testimony" ? await makerAttestation(reader, line.run) : null;
   const kind = evidenceKindOf(run, attestation);
   const by = inlineText(line.by);
   const against = attack?.run === undefined ? "" : ` against the run ${attack.run}`;
@@ -250,7 +257,6 @@ function toTrimItem(record: PackedRecord): TrimItem {
     evidenceKind: ladderKindOf(record.kind),
     setAside: record.setAside,
     pinned: record.pinned,
-    bytes: new TextEncoder().encode(record.text).byteLength,
   };
 }
 
@@ -271,7 +277,6 @@ function argumentTrimItems(
       const item: TrimItem = {
         ...toTrimItem(strongest),
         id: pinned.has(argument) ? `the evidence of ${argument}` : argument,
-        bytes: lines.reduce((total, line) => total + toTrimItem(line).bytes, 0),
       };
       return [argument, item];
     }),
@@ -286,13 +291,39 @@ function renderHeader(caseId: RecordId, caseRecord: CaseRecord, gateClaimId: Rec
   ].join("\n");
 }
 
-/** Every evidence item a claim's brief would pack at a head, before trimming: the one home for what
- * a claim's evidence means, shared with the staleness check. */
+/** The runs and modules landed at the head `reader` reads, which choose a check's evaluation. */
+async function landedAtHead(reader: HeadReader): Promise<(id: RecordId) => boolean> {
+  const landed = new Set([...(await reader.list("run")), ...(await reader.list("module"))]);
+  return (id) => landed.has(id);
+}
+
+/** The pinned line a brief carries where its claim's check has not run since its rule's rebuild,
+ * naming its status for any reader, since the brief then packs none of the check's receipts. */
+function unrunCheckLine(view: Workspace, landed: (id: RecordId) => boolean, claimRecord: ClaimRecord): string | null {
+  return unevaluatedSinceRebuild(view.index, claimRecord, landed, view.clearance)
+    ? `- the claim's check has not run since its rule was rebuilt; ${statusAdvice(claimRecord.slot, view.clearance, undefined)} evaluates it`
+    : null;
+}
+
+/** The check a rendered brief packed, read at its head under the clearance it was rendered in. */
+export async function packedCheck(
+  view: Workspace,
+  brief: ComputedRunRecord,
+  claimRecord: ClaimRecord,
+): Promise<ConcludedCheck | null> {
+  const reader = headReader(view, parseBriefSubstrates(brief.recipe).head);
+  return concludedCheck(view.index, claimRecord, await landedAtHead(reader), briefClearanceOf(brief.recipe));
+}
+
+/** Every evidence item a claim's brief under `clearance` would pack at a head, before trimming: the
+ * one home for what a claim's evidence means, shared with the staleness check. */
 async function gatherEvidence(
   view: Workspace,
   reader: HeadReader,
+  landed: (id: RecordId) => boolean,
   gateClaimId: RecordId,
-): Promise<{ direct: PackedRecord[]; attacking: PackedRecord[]; withheld: PackedRecord[] }> {
+  clearance: Audience | undefined,
+): Promise<{ direct: PackedRecord[]; failing: PackedRecord[]; attacking: PackedRecord[]; withheld: PackedRecord[] }> {
   const claimRecord = (await reader.read(gateClaimId, "claim")) as ClaimRecord;
 
   // Read off the head, not the fold, so a re-render at an older head packs what stood then.
@@ -312,17 +343,20 @@ async function gatherEvidence(
       standing.set(argument.record.target, [...(standing.get(argument.record.target) ?? []), argument]);
     }
   }
-  const landedAtHead = new Set([...(await reader.list("run")), ...(await reader.list("module"))]);
   const lines = briefLines(
     view,
     gateClaimId,
     claimRecord,
     (target) => standing.get(target) ?? [],
-    holdingCheck(view.index, claimRecord, (id) => landedAtHead.has(id), view.clearance),
+    concludedCheck(view.index, claimRecord, landed, clearance),
   );
   const direct: PackedRecord[] = [];
   for (const line of lines.direct) {
     direct.push(await evidenceItem(reader, line, true));
+  }
+  const failing: PackedRecord[] = [];
+  for (const line of lines.failing) {
+    failing.push(await evidenceItem(reader, line, true));
   }
   const attacking: PackedRecord[] = [];
   for (const line of lines.attacking) {
@@ -330,20 +364,27 @@ async function gatherEvidence(
   }
 
   const withheld = lines.withheld.map((attack) => withheldItem(view, attack));
-  return { direct: sortPacked(direct), attacking: sortPacked(attacking), withheld };
+  return { direct: sortPacked(direct), failing: sortPacked(failing), attacking: sortPacked(attacking), withheld };
 }
 
-/** Every record id a claim's brief would read at a head, before trimming, so a budget never narrows
- * what staleness is checked against. */
+/** Every record id a claim's brief under `clearance` would read at a head, before trimming, so a
+ * budget never narrows what staleness is checked against. */
 export async function fullReadIds(
   view: Workspace,
   caseId: RecordId,
   gateClaimId: RecordId,
   head: string,
+  clearance: Audience | undefined,
 ): Promise<RecordId[]> {
   const reader = headReader(view, head);
-  const { direct, attacking, withheld } = await gatherEvidence(view, reader, gateClaimId);
-  return [caseId, gateClaimId, ...[...direct, ...attacking, ...withheld].flatMap((item) => item.reads)];
+  const { direct, failing, attacking, withheld } = await gatherEvidence(
+    view,
+    reader,
+    await landedAtHead(reader),
+    gateClaimId,
+    clearance,
+  );
+  return [caseId, gateClaimId, ...[...direct, ...failing, ...attacking, ...withheld].flatMap((item) => item.reads)];
 }
 
 /** Renders a brief as a pure function of the view and its recipe's substrates: no clock, no
@@ -356,12 +397,14 @@ export async function renderBrief(view: Workspace, recipe: ComputedRecipe): Prom
   }
 
   const reader = headReader(view, head);
+  const landed = await landedAtHead(reader);
   const caseRecord = (await reader.read(caseId, "case")) as CaseRecord;
   const {
     direct: sortedDirect,
+    failing,
     attacking: sortedAttacking,
     withheld,
-  } = await gatherEvidence(view, reader, gateClaimId);
+  } = await gatherEvidence(view, reader, landed, gateClaimId, view.clearance);
   const claimRecord = (await reader.read(gateClaimId, "claim")) as ClaimRecord;
 
   const claimItem: PackedRecord = {
@@ -373,33 +416,43 @@ export async function renderBrief(view: Workspace, recipe: ComputedRecipe): Prom
     reads: [gateClaimId],
   };
 
+  const unrun = unrunCheckLine(view, landed, claimRecord);
+  const unrunItem: TrimItem[] =
+    unrun === null ? [] : [{ id: unrun, evidenceKind: "receipt", setAside: false, pinned: true }];
+
+  const header = renderHeader(caseId, caseRecord, gateClaimId, kernelVersion);
   const byArgument = argumentTrimItems(sortedAttacking, withheld);
-  const { kept, omissions } = trimToBudget(
-    [...[claimItem, ...sortedDirect, ...withheld].map(toTrimItem), ...byArgument.values()],
+  const compose = ({ kept, omissions }: TrimResult) => {
+    const keptItems = new Set(kept);
+    const keptAttacking = [
+      ...failing,
+      ...sortedAttacking.filter((item) => keptItems.has(byArgument.get(item.argument!)!)),
+      ...withheld,
+    ];
+    const sections: string[] = [
+      header,
+      "",
+      "## Claim under judgment",
+      claimItem.text,
+      ...(unrun === null ? [] : [unrun]),
+      "",
+      "## Direct evidence",
+      ...(sortedDirect.length > 0 ? sortedDirect.map((item) => item.text) : ["(none)"]),
+      "",
+      "## Attacking evidence",
+      ...(keptAttacking.length > 0 ? keptAttacking.map((item) => item.text) : ["(none)"]),
+    ];
+    if (omissions.length > 0) {
+      sections.push("", "## Omitted", ...omissions.map((omission) => omissionLine(omission)));
+    }
+    return { output: sections.join("\n"), keptAttacking };
+  };
+  const trimmed = trimToBudget(
+    [...[claimItem, ...sortedDirect, ...failing, ...withheld].map(toTrimItem), ...unrunItem, ...byArgument.values()],
     budget,
+    (result) => byteLengthUtf8(compose(result).output),
   );
-  const keptItems = new Set(kept);
-
-  const keptAttacking = [
-    ...sortedAttacking.filter((item) => keptItems.has(byArgument.get(item.argument!)!)),
-    ...withheld,
-  ];
-
-  const sections: string[] = [
-    renderHeader(caseId, caseRecord, gateClaimId, kernelVersion),
-    "",
-    "## Claim under judgment",
-    claimItem.text,
-    "",
-    "## Direct evidence",
-    ...(sortedDirect.length > 0 ? sortedDirect.map((item) => item.text) : ["(none)"]),
-    "",
-    "## Attacking evidence",
-    ...(keptAttacking.length > 0 ? keptAttacking.map((item) => item.text) : ["(none)"]),
-  ];
-  if (omissions.length > 0) {
-    sections.push("", "## Omitted", ...omissions.map((omission) => omissionLine(omission)));
-  }
+  const { output, keptAttacking } = compose(trimmed);
 
   const reads: ReadEntry[] = [
     readEntryFor(caseId),
@@ -407,5 +460,5 @@ export async function renderBrief(view: Workspace, recipe: ComputedRecipe): Prom
     ...[...sortedDirect, ...keptAttacking].flatMap((item) => item.reads).map((id) => readEntryFor(id)),
   ];
 
-  return { output: sections.join("\n"), reads, omissions };
+  return { output, reads, omissions: trimmed.omissions };
 }

@@ -48,6 +48,25 @@
     ]
   },
   {
+    "name": "revoked-unsigned",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as revoked, every revocation landing with no signature beside it: a revocation in the name of a holder of publish withdraws its release whether or not it verifies, so a stripped one lets nothing leave again",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "revoked-unsigned-unauthorised",
+    "verdict": "verified",
+    "entitlement": "covered",
+    "what": "as revoked-unsigned, every revocation in the name of a signer the roles file grants nothing and who wrote no release: an unverified revocation in such a name withdraws nothing",
+    "codes": [
+      "ref.pin-absent"
+    ]
+  },
+  {
     "name": "unauthorised",
     "verdict": "verified",
     "entitlement": "uncovered",
@@ -109,6 +128,47 @@
     "codes": [
       "attestation.version-unknown",
       "ref.pin-absent"
+    ]
+  },
+  {
+    "name": "later-version-superseding",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as released, each release superseded by its signer's release written by hand at a schema version later than the kernel reads: each later one is skipped and covers nothing, yet withdraws the release it supersedes, so skipping it never widens what stands",
+    "codes": [
+      "attestation.version-unknown",
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "later-version-revocation",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as revoked, every revocation written by hand at a schema version later than the kernel reads: a withdrawal only narrows what leaves, so each still withdraws the release it supersedes",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "later-version-revocation-malformed",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as revoked-unsigned, every revocation written by hand at a fractional schema version later than the kernel reads, with no time, a channel no version names and an entry in supersedes that is no record id: a withdrawal needs only its subject and the ids it supersedes, so each still withdraws its release",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
+    ]
+  },
+  {
+    "name": "superseded-across-subjects",
+    "verdict": "verified",
+    "entitlement": "uncovered",
+    "what": "as released, with one release of the first root, to peer, superseding every release of another record: a release that counts withdraws what it supersedes whatever its subject",
+    "codes": [
+      "ref.pin-absent",
+      "release.uncovered"
     ]
   },
   {

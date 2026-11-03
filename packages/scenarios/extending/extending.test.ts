@@ -108,7 +108,7 @@ describe("over the built MCP server, a pack's operation and its query's tool rea
     steps = await runScenarioInto(SCENARIO_DIR, workspace);
     const transport = new StdioClientTransport({
       command: "node",
-      args: [SERVER_PATH, "--workspace", workspace, "--scope", "default"],
+      args: [SERVER_PATH, "--workspace", workspace, "--scope", "default", "--lab"],
       env: {
         ...getDefaultEnvironment(),
         PATH: scenarioPath(REPO_ROOT),

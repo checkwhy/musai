@@ -1,5 +1,24 @@
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { canonicalBytes, isKernelError, type KernelError } from "@musai/records";
+import { OperationError } from "@musai/api-core";
+import { canonicalBytes, isKernelError, type KernelError, type Reason } from "@musai/records";
+
+/** Runs a list or read as one request of the session, refusing a dropped scope; hands it the tools
+ * that make a workspace where none stands, or `undefined` where one does. */
+export type ReadGuard = <T>(read: (makers: readonly string[] | undefined) => Promise<T>) => Promise<T>;
+
+export function noWorkspaceRefusal(
+  reason: Reason,
+  name: string,
+  workspace: string,
+  makers: readonly string[],
+): OperationError {
+  const remedy = makers.length === 0 ? "this server offers no tool that makes one" : `${makers.join(" or ")} makes one`;
+  return new OperationError({
+    reason,
+    about: [name],
+    detail: `no workspace stands at ${workspace} yet to answer ${name}: ${remedy}`,
+  });
+}
 
 /** What a refusal says on the wire, whether in a tool result's text or a JSON-RPC error's data. */
 function refusalBody(error: KernelError): { reason: string; about: readonly string[]; detail: string } {

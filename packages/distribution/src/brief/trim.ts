@@ -19,7 +19,6 @@ export interface TrimItem {
   readonly evidenceKind: EvidenceKind;
   readonly setAside: boolean;
   readonly pinned: boolean;
-  readonly bytes: number;
 }
 
 export interface Omission {
@@ -32,7 +31,7 @@ export interface TrimResult {
   readonly omissions: readonly Omission[];
 }
 
-/** An omitted item's line, shared by the trim's sizing and the render so the two agree on bytes. */
+/** An omitted item's line as the rendered brief prints it under its omissions. */
 export function omissionLine(omission: Omission): string {
   return `- ${omission.id} — omitted (${omission.reason})`;
 }
@@ -49,19 +48,14 @@ function compareForTrim(a: TrimItem, b: TrimItem): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-function sumBytes(items: readonly TrimItem[]): number {
-  return items.reduce((total, item) => total + item.bytes, 0);
-}
-
-function omissionBytes(omissions: readonly Omission[]): number {
-  return omissions.reduce((total, omission) => total + byteLengthUtf8(omissionLine(omission)), 0);
-}
-
-/** Trims unpinned items weakest first until they and the omission list fit the budget. A budget the
- * pinned items and the list overflow is refused rather than exceeded. */
-export function trimToBudget(items: readonly TrimItem[], budget: number): TrimResult {
+/** Trims unpinned items weakest first until what `sizeOf` measures of the result fits the budget.
+ * A budget the pinned items and the omission list overflow is refused rather than exceeded. */
+export function trimToBudget(
+  items: readonly TrimItem[],
+  budget: number,
+  sizeOf: (result: TrimResult) => number,
+): TrimResult {
   const pinned = items.filter((item) => item.pinned);
-  const pinnedBytes = sumBytes(pinned);
 
   let kept = items
     .filter((item) => !item.pinned)
@@ -69,7 +63,7 @@ export function trimToBudget(items: readonly TrimItem[], budget: number): TrimRe
     .sort(compareForTrim);
   const omissions: Omission[] = [];
 
-  const totalBytes = (): number => pinnedBytes + sumBytes(kept) + omissionBytes(omissions);
+  const totalBytes = (): number => sizeOf({ kept: [...pinned, ...kept], omissions });
 
   while (totalBytes() > budget && kept.length > 0) {
     const weakest = kept[0]!;
@@ -81,7 +75,7 @@ export function trimToBudget(items: readonly TrimItem[], budget: number): TrimRe
     throw new OperationError({
       reason: "over-budget",
       about: pinned.map((item) => item.id),
-      detail: `refusing to trim: even with every trimmable item removed, the claim under judgment, its direct evidence, any contest on withheld grounds and the omission list occupy ${String(totalBytes())} bytes against a budget of ${String(budget)}`,
+      detail: `refusing to trim: even with every trimmable item removed, the brief's header, the claim under judgment, its direct evidence, any contest on withheld grounds and the omission list occupy ${String(totalBytes())} bytes against a budget of ${String(budget)}`,
     });
   }
 

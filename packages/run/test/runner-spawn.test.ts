@@ -5,7 +5,15 @@ import { fileURLToPath } from "node:url";
 import type { ContributionEntry, RunRecipe } from "@musai/records";
 import { canonicalBytes, textOf, versionString } from "@musai/records";
 import { currentKey, readKeyFile } from "@musai/store";
-import { bindCheckouts, COMMIT_ENV, headCommit, headTree, makeCheckout } from "@musai/test-support";
+import {
+  bindCheckouts,
+  COMMIT_ENV,
+  headCommit,
+  headTree,
+  makeCheckout,
+  processEndedWithin,
+  processRunning,
+} from "@musai/test-support";
 import { execa } from "execa";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -20,6 +28,7 @@ import {
   ABSENT_CHANNELS,
   AMBIENT_CHANNELS,
   hygienicEnvironment,
+  onHost,
   RunRefusedError,
   UndeclaredBinaryError,
   withScratch,
@@ -118,7 +127,7 @@ describe("requirementsFromModules: two modules declaring one binary", () => {
 describe("hygienicEnvironment: the exact record a child receives", () => {
   test("a recipe declaring no environment sees exactly the assigned channels, with every absent channel left out", async () => {
     await withScratch(async (scratch) => {
-      const env = hygienicEnvironment(recipe(), scratch, {});
+      const env = hygienicEnvironment(recipe(), onHost(scratch), {});
       const absent: readonly string[] = ABSENT_CHANNELS;
       expect(Object.keys(env).sort()).toEqual(AMBIENT_CHANNELS.filter((name) => !absent.includes(name)).sort());
     });
@@ -127,16 +136,18 @@ describe("hygienicEnvironment: the exact record a child receives", () => {
   test("a recipe literal or a declared name carrying a channel left absent is refused, naming the variable", async () => {
     await withScratch(async (scratch) => {
       const literal = recipe({ environment: { GIT_DIR: "/elsewhere/.git" } });
-      expect(() => hygienicEnvironment(literal, scratch, {})).toThrow(/GIT_DIR/);
+      expect(() => hygienicEnvironment(literal, onHost(scratch), {})).toThrow(/GIT_DIR/);
       const declared = recipe({ declared: [{ name: "GIT_WORK_TREE", secret: false }] });
-      expect(() => hygienicEnvironment(declared, scratch, { GIT_WORK_TREE: "/elsewhere" })).toThrow(RunRefusedError);
+      expect(() => hygienicEnvironment(declared, onHost(scratch), { GIT_WORK_TREE: "/elsewhere" })).toThrow(
+        RunRefusedError,
+      );
     });
   });
 
   test("a declared name bound to the empty string is present and empty, distinct from a name never declared", async () => {
     await withScratch(async (scratch) => {
       const withDeclared = recipe({ declared: [{ name: "MUSAI_TEST_DECLARED", secret: false }] });
-      const env = hygienicEnvironment(withDeclared, scratch, { MUSAI_TEST_DECLARED: "" });
+      const env = hygienicEnvironment(withDeclared, onHost(scratch), { MUSAI_TEST_DECLARED: "" });
       expect(env["MUSAI_TEST_DECLARED"]).toBe("");
       expect("MUSAI_TEST_UNDECLARED" in env).toBe(false);
     });
@@ -145,23 +156,23 @@ describe("hygienicEnvironment: the exact record a child receives", () => {
   test("a recipe literal named HOME is refused before spawn, naming the variable", async () => {
     await withScratch(async (scratch) => {
       const collides = recipe({ environment: { HOME: "/elsewhere" } });
-      expect(() => hygienicEnvironment(collides, scratch, {})).toThrow(RunRefusedError);
-      expect(() => hygienicEnvironment(collides, scratch, {})).toThrow(/HOME/);
+      expect(() => hygienicEnvironment(collides, onHost(scratch), {})).toThrow(RunRefusedError);
+      expect(() => hygienicEnvironment(collides, onHost(scratch), {})).toThrow(/HOME/);
     });
   });
 
   test("a declared name PATH is refused the same way", async () => {
     await withScratch(async (scratch) => {
       const declaresPath = recipe({ declared: [{ name: "PATH", secret: false }] });
-      expect(() => hygienicEnvironment(declaresPath, scratch, {})).toThrow(RunRefusedError);
-      expect(() => hygienicEnvironment(declaresPath, scratch, {})).toThrow(/PATH/);
+      expect(() => hygienicEnvironment(declaresPath, onHost(scratch), {})).toThrow(RunRefusedError);
+      expect(() => hygienicEnvironment(declaresPath, onHost(scratch), {})).toThrow(/PATH/);
     });
   });
 
   test("a recipe literal named PATH is refused", async () => {
     await withScratch(async (scratch) => {
       const literalPath = recipe({ environment: { PATH: "/usr/bin" } });
-      expect(() => hygienicEnvironment(literalPath, scratch, {})).toThrow(RunRefusedError);
+      expect(() => hygienicEnvironment(literalPath, onHost(scratch), {})).toThrow(RunRefusedError);
     });
   });
 });
@@ -246,50 +257,35 @@ describe("performRecipe: a run ends with every process it started", () => {
     'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)';
   const IGNORING_SIGTERM = `process.on("SIGTERM", () => {}); ${LINGERING}`;
 
-  /** A command starting `grandchild` with the run's own output streams, then waiting forever. */
-  function startingGrandchild(grandchild: string, pidFile: string): string[] {
-    const child = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}, ${JSON.stringify(pidFile)}], { stdio: "inherit" }); setInterval(() => {}, 1000)`;
+  /** A command starting `grandchild` with the run's own output streams, then waiting forever;
+   * `detached` has the grandchild call `setsid`, leaving the run's session and process group. */
+  function startingGrandchild(grandchild: string, pidFile: string, detached = false): string[] {
+    const child = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}, ${JSON.stringify(pidFile)}], { stdio: "inherit", detached: ${detached} }); setInterval(() => {}, 1000)`;
     return ["node", "-e", child];
   }
 
-  /** A zombie has ended: PID 1 in a container may never reap an orphan. */
-  async function running(pid: number): Promise<boolean> {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return false;
-    }
-    if (process.platform !== "linux") {
-      return true;
-    }
-    const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
-    return stat !== "" && stat.slice(stat.lastIndexOf(")") + 2)[0] !== "Z";
-  }
+  const PID_POLLS = 200;
 
   async function pidIn(file: string): Promise<number> {
-    for (;;) {
+    for (let poll = 0; poll < PID_POLLS; poll++) {
       const written = await readFile(file, "utf8").catch(() => "");
       if (written !== "") {
         return Number(written);
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-  }
-
-  async function endedWithin(pid: number, ms: number): Promise<boolean> {
-    for (const until = Date.now() + ms; Date.now() < until; ) {
-      if (!(await running(pid))) {
-        return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return false;
+    throw new Error(`no grandchild wrote its pid to ${file}`);
   }
 
   const dirs: string[] = [];
 
+  // A grandchild a failing test leaves behind would outlive the suite, a setsid one beyond reach.
   afterEach(async () => {
     for (const dir of dirs.splice(0)) {
+      const written = await readFile(join(dir, "pid"), "utf8").catch(() => "");
+      if (written !== "" && (await processRunning(Number(written)))) {
+        process.kill(Number(written), "SIGKILL");
+      }
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -308,7 +304,7 @@ describe("performRecipe: a run ends with every process it started", () => {
     });
 
     expect(timedOut).toBe(true);
-    expect(await running(await pidIn(file))).toBe(false);
+    expect(await processRunning(await pidIn(file))).toBe(false);
   });
 
   test("a grandchild ignoring SIGTERM is killed once the deadline's grace has passed", async () => {
@@ -319,7 +315,7 @@ describe("performRecipe: a run ends with every process it started", () => {
     });
 
     expect(timedOut).toBe(true);
-    expect(await running(await pidIn(file))).toBe(false);
+    expect(await processRunning(await pidIn(file))).toBe(false);
   });
 
   test("a grandchild ignoring SIGTERM ends at the deadline though it holds none of the run's output", async () => {
@@ -331,26 +327,82 @@ describe("performRecipe: a run ends with every process it started", () => {
     });
 
     expect(timedOut).toBe(true);
-    expect(await endedWithin(await pidIn(file), 1000)).toBe(true);
+    expect(await processEndedWithin(await pidIn(file), 1000)).toBe(true);
   });
 
-  test("a caller interrupted mid-run ends the grandchildren of its run", async () => {
+  test("a grandchild that calls setsid ends with the run at its deadline", async () => {
     const file = await pidFile();
-    const command = JSON.stringify(startingGrandchild(LINGERING, file));
-    const caller = execa(
+    const { timedOut } = await performRecipe(recipe({ command: startingGrandchild(LINGERING, file, true) }), {
+      requirementRegistry: registryDeclaring("node"),
+      timeoutMs: 2000,
+    });
+
+    expect(timedOut).toBe(true);
+    expect(await processEndedWithin(await pidIn(file), 1000)).toBe(true);
+  });
+
+  test("a grandchild that calls setsid and ignores SIGTERM is killed once the deadline's grace has passed", async () => {
+    const file = await pidFile();
+    const { timedOut } = await performRecipe(recipe({ command: startingGrandchild(IGNORING_SIGTERM, file, true) }), {
+      requirementRegistry: registryDeclaring("node"),
+      timeoutMs: 2000,
+    });
+
+    expect(timedOut).toBe(true);
+    expect(await processEndedWithin(await pidIn(file), 1000)).toBe(true);
+  });
+
+  /** A caller performing `command` in a process of its own, which the test interrupts. */
+  function callerPerforming(command: readonly string[]) {
+    return execa(
       process.execPath,
       [
         "--input-type=module",
         "-e",
-        `import { performRecipe } from ${JSON.stringify(RUN_DIST)}; await performRecipe({ command: ${command}, workingDirectory: "/", environment: {}, declared: [], substrates: [], isolation: "hygiene" });`,
+        `import { performRecipe } from ${JSON.stringify(RUN_DIST)}; await performRecipe({ command: ${JSON.stringify(command)}, workingDirectory: "/", environment: {}, declared: [], substrates: [], isolation: "hygiene" });`,
       ],
       { reject: false },
     );
+  }
+
+  test("a caller interrupted mid-run ends the grandchildren of its run", async () => {
+    const file = await pidFile();
+    const caller = callerPerforming(startingGrandchild(LINGERING, file));
     const grandchild = await pidIn(file);
     caller.kill("SIGINT");
 
     expect((await caller).signal).toBe("SIGINT");
-    expect(await endedWithin(grandchild, 5000)).toBe(true);
+    expect(await processEndedWithin(grandchild, 5000)).toBe(true);
+  });
+
+  test("an interrupted caller's run is ended even where a grandchild ignores SIGTERM", async () => {
+    const file = await pidFile();
+    const caller = callerPerforming(startingGrandchild(IGNORING_SIGTERM, file));
+    const grandchild = await pidIn(file);
+    caller.kill("SIGINT");
+
+    expect((await caller).signal).toBe("SIGINT");
+    expect(await processEndedWithin(grandchild, 10_000)).toBe(true);
+  });
+
+  test("an interrupted caller's setsid grandchild is ended with its run", async () => {
+    const file = await pidFile();
+    const caller = callerPerforming(startingGrandchild(LINGERING, file, true));
+    const grandchild = await pidIn(file);
+    caller.kill("SIGINT");
+
+    expect((await caller).signal).toBe("SIGINT");
+    expect(await processEndedWithin(grandchild, 5000)).toBe(true);
+  });
+
+  test("an interrupted caller's setsid grandchild ignoring SIGTERM is killed once the grace has passed", async () => {
+    const file = await pidFile();
+    const caller = callerPerforming(startingGrandchild(IGNORING_SIGTERM, file, true));
+    const grandchild = await pidIn(file);
+    caller.kill("SIGINT");
+
+    expect((await caller).signal).toBe("SIGINT");
+    expect(await processEndedWithin(grandchild, 10_000)).toBe(true);
   });
 });
 
@@ -1218,16 +1270,42 @@ describe("performRecipe: a plain binding's recorded value names no path of this 
     });
   });
 
-  test("an absolute path under no root is refused before anything runs, naming the binding", async () => {
+  test("an absolute path under no root is refused before anything runs as a workspace to fix, naming the binding and the remedy", async () => {
     for (const value of ["/opt/elsewhere/tool.js", "C:\\tools\\tool.js"]) {
-      await expect(
-        performRecipe(recipe({ command: PRINTS_IT, declared: DECLARED }), {
-          requirementRegistry: registryDeclaring("node"),
-          bindings: { MUSAI_TEST_PATH: { secret: false, value } },
-        }),
-      ).rejects.toThrow(/MUSAI_TEST_PATH/);
+      const error = await performRecipe(recipe({ command: PRINTS_IT, declared: DECLARED }), {
+        requirementRegistry: registryDeclaring("node"),
+        bindings: { MUSAI_TEST_PATH: { secret: false, value } },
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(RunRefusedError);
+      expect(error).toMatchObject({ reason: "workspace-incomplete", about: ["MUSAI_TEST_PATH"] });
+      expect((error as Error).message).toContain("the binding MUSAI_TEST_PATH");
+      expect((error as Error).message).toContain("bind it to a path under the checkout the run stands on");
     }
   });
+
+  test.skipIf(process.platform === "win32")(
+    "a Windows path on a POSIX host lies under no root, even run from a directory under the working root",
+    async () => {
+      await withRoot(async (root) => {
+        const before = process.cwd();
+        await mkdir(join(root, "sub"));
+        process.chdir(join(root, "sub"));
+        try {
+          const error = await performRecipe(recipe({ command: PRINTS_IT, declared: DECLARED }), {
+            requirementRegistry: registryDeclaring("node"),
+            workingRoot: root,
+            bindings: { MUSAI_TEST_PATH: { secret: false, value: "C:\\tools\\tool.js" } },
+          }).catch((caught: unknown) => caught);
+
+          expect(error).toBeInstanceOf(RunRefusedError);
+          expect(error).toMatchObject({ reason: "workspace-incomplete", about: ["MUSAI_TEST_PATH"] });
+        } finally {
+          process.chdir(before);
+        }
+      });
+    },
+  );
 
   test("a value that names no path is recorded as it is", async () => {
     const { observation } = await performRecipe(recipe({ command: PRINTS_IT, declared: DECLARED }), {

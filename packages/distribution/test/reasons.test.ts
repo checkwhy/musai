@@ -1,4 +1,4 @@
-import { buildRegistry, type OperationDescriptor } from "@musai/api-core";
+import { buildRegistry, KERNEL_LEVEL_REASONS, type OperationDescriptor } from "@musai/api-core";
 import {
   CODE_CLASSES,
   codeForReason,
@@ -84,15 +84,6 @@ describe("every reason in REASONS is either carried by a claim status or declare
   /** Raised by a transport's dispatch before any descriptor is reached. */
   const DISPATCH_LEVEL_REASONS: readonly Reason[] = ["unknown-operation"];
 
-  /** Raised beneath every operation by a store, runner or fold, and passed through as raised. */
-  const KERNEL_LEVEL_REASONS: readonly Reason[] = [
-    "workspace-incomplete",
-    "tool-unavailable",
-    "undeclared-binary",
-    "record-corrupted",
-    "declaration-conflict",
-  ];
-
   test("no reason is an orphan beyond those reserved for an operation not yet built, or raised by the kernel and a transport's own dispatch layer", () => {
     const declaredByOperations = new Set<Reason>();
     for (const descriptor of REGISTRY.values()) {
@@ -111,8 +102,8 @@ describe("every reason in REASONS is either carried by a claim status or declare
     expect(orphans.sort()).toEqual([...RESERVED_FOR_A_LATER_OPERATION].sort());
   });
 
-  test("claim.status@3, claim.why@4 and case.soundcheck@1 each declare no-such-record, the reason their own lookup can refuse with", () => {
-    for (const key of ["claim.status@3", "claim.why@4", "case.soundcheck@1"]) {
+  test("claim.status@3, claim.why@5 and case.soundcheck@1 each declare no-such-record, the reason their own lookup can refuse with", () => {
+    for (const key of ["claim.status@3", "claim.why@5", "case.soundcheck@1"]) {
       const descriptor = REGISTRY.get(key);
       expect(descriptor, `registry entry ${key}`).toBeDefined();
       expect(descriptor!.reasons).toContain("no-such-record");
@@ -120,10 +111,17 @@ describe("every reason in REASONS is either carried by a claim status or declare
   });
 });
 
+describe("a rerun declares what its scratch workspace refuses with", () => {
+  test("bundle.rerun@3 declares workspace-incomplete, which a name the scratch leaves unbound refuses", () => {
+    expect(REGISTRY.get("bundle.rerun@3")!.reasons).toContain("workspace-incomplete");
+  });
+});
+
 describe("the verbs a cleared surface refuses as the author's", () => {
   test("the verbs working for the author alone are these", () => {
     const refusable = [...REGISTRY].filter(([, descriptor]) => descriptor.authorOnly === true);
     expect(refusable.map(([key]) => key).sort()).toEqual([
+      "attestation.show@1",
       "case.open@1",
       "case.save@1",
       "config.get@1",
@@ -143,7 +141,7 @@ describe("a verb declares the refusals its own reads can raise", () => {
 
   const RAISED: Readonly<Record<string, readonly Reason[]>> = {
     "claim.status@3": LABELLING,
-    "claim.why@4": LABELLING,
+    "claim.why@5": LABELLING,
     "case.soundcheck@1": LABELLING,
     "case.status@2": LABELLING,
     "case.open@1": LABELLING,

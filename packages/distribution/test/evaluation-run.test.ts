@@ -85,7 +85,8 @@ describe("a performed evaluation is a run naming what its rule was handed", () =
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: CLAIM_TYPES });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
     for (const dir of [CORE_MODULE_DIR, RECORD_NEED_MODULE_DIR]) {
-      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: await foldedIndex(store), now });
+      using folded = await foldedIndex(store);
+      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: folded, now });
     }
   }, 120_000);
 
@@ -180,7 +181,11 @@ describe("a performed evaluation is a run naming what its rule was handed", () =
     await runHandler(claimStatus, { claim: slotOf("shares-the-recipe") }, { ...ctx(), now: clockFromEnvironment() });
     const read = await runHandler(claimStatus, { claim: slotOf("receipt-landed") }, { ...ctx(), mode: "plan" });
 
-    expect(read).toMatchObject({ label: "open", reason: "stale" });
+    expect(read).toMatchObject({
+      label: "open",
+      reason: "stale",
+      detail: "a newer receipt landed for a recipe this check's evaluation read",
+    });
   }, 60_000);
 
   test("a second status over unchanged reads mints no evaluation", async () => {
@@ -197,7 +202,8 @@ describe("a performed evaluation is a run naming what its rule was handed", () =
     await store.putMany([{ kind: "claim", value: claim("recorded", { [DECLARATIVE]: exitsCleanly() }) }]);
     const before = (await evaluations()).length;
 
-    await labelledClaim(await openWorkspace({ workspace, scope, now }), slotOf("recorded"), "recorded");
+    using opened = await openWorkspace({ workspace, scope, now });
+    await labelledClaim(opened, slotOf("recorded"), "recorded");
 
     expect((await evaluations()).length).toBe(before);
   }, 60_000);
@@ -226,7 +232,36 @@ describe("a performed evaluation is a run naming what its rule was handed", () =
     ]);
     const read = await runHandler(claimStatus, { claim: slotOf("rests-on") }, { ...ctx(), mode: "plan" });
 
-    expect(read).toMatchObject({ label: "open", reason: "stale" });
+    expect(read).toMatchObject({
+      label: "open",
+      reason: "stale",
+      detail: "a record this check's evaluation read holds another now",
+    });
+  }, 60_000);
+
+  test("a check whose claim a successor at its slot replaced reads stale, naming the claim's change", async () => {
+    const [first] = await store.putMany([
+      { kind: "claim", value: claim("restated", { [DECLARATIVE]: exitsCleanly("restated") }) },
+    ]);
+    expect((await runHandler(claimStatus, { claim: slotOf("restated") }, ctx())).label).toBe("holds");
+
+    await store.putMany([
+      {
+        kind: "claim",
+        value: {
+          ...claim("restated", { [DECLARATIVE]: exitsCleanly("restated") }),
+          rendering: "restated, said again",
+          supersedes: [first!],
+        },
+      },
+    ]);
+    const read = await runHandler(claimStatus, { claim: slotOf("restated") }, { ...ctx(), mode: "plan" });
+
+    expect(read).toMatchObject({
+      label: "open",
+      reason: "stale",
+      detail: "this claim changed since its check was evaluated",
+    });
   }, 60_000);
 
   test("a claim that read nothing that moved keeps its status", async () => {
@@ -245,7 +280,8 @@ describe("a performed evaluation is a run naming what its rule was handed", () =
 
   test("an evaluation returning to an earlier verdict supersedes the latest and reads as latest", async () => {
     await store.putMany([{ kind: "claim", value: claim("flips", { [DECLARATIVE]: exitsCleanly() }) }]);
-    const opened = async () => openWorkspace({ workspace, scope, now });
+    using held = new DisposableStack();
+    const opened = async () => held.use(await openWorkspace({ workspace, scope, now }));
     const contribution = (await opened()).index.contributionById(DECLARATIVE)!;
     const recipe = evaluationRecipe(contribution, slotOf("flips"), undefined);
     const verdicts = ["holds", "fails", "holds"] as const;
@@ -277,7 +313,8 @@ describe("a claim read without performing answers from an evaluation nothing has
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: CLAIM_TYPES });
     await declareClaimTypes(store, [CLAIM_DECLARATION]);
     for (const dir of [CORE_MODULE_DIR, RECORD_NEED_MODULE_DIR]) {
-      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: await foldedIndex(store), now });
+      using folded = await foldedIndex(store);
+      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: folded, now });
     }
   }, 120_000);
 
@@ -290,7 +327,7 @@ describe("a claim read without performing answers from an evaluation nothing has
     await store.putMany([{ kind: "claim", value: claim("rests-on-it", { [RECORD_NEED_RULE]: cited! }) }]);
     const performed = await runHandler(claimStatus, { claim: slotOf("rests-on-it") }, { workspace, scope, now });
     expect(performed.label).toBe("holds");
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const contribution = opened.index.contributionById(RECORD_NEED_RULE)!;
     const module = opened.read(contribution.moduleRecord) as ModuleRecord;
 

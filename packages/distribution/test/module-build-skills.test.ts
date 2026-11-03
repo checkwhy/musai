@@ -57,7 +57,8 @@ describe("module.build@1 over a fold whose slot set the registry refuses", () =>
       (error: unknown) => error,
     );
 
-    const landed = (await installedModules(await openWorkspace({ workspace, scope, now }))).byName.get("skillful");
+    using opened = await openWorkspace({ workspace, scope, now });
+    const landed = (await installedModules(opened)).byName.get("skillful");
     expect(landed).toBeDefined();
     expect(outcome).toBeInstanceOf(KernelError);
     const detail = (outcome as KernelError).detail;

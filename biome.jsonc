@@ -17,6 +17,10 @@
       "!**/goldens",
       "!**/fixtures/**/*.json",
       "!packages/records/src/canonical/vectors.json",
+      // Ajv's code for the draft-07 meta-schema and the kernel's own schemas, written by their
+      // generators and checked by the build.
+      "!packages/records/src/conditions/draft-07-meta.js",
+      "!packages/distribution/src/kernel-schemas.js",
       // The corpus both implementations of the record form run is written by its generator,
       // and the Go verifier is a module of its own with its own formatter and linter.
       "!conformance",

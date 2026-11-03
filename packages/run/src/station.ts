@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import type { Audience, ResourceDescriptor, RunRecipe } from "@musai/records";
-import { KernelError } from "@musai/records";
+import { KernelError, TrustFileError } from "@musai/records";
 import { CONTAINER_IMAGE_MEDIA_TYPE, containerEngineAvailable, isContainerImageSubstrate } from "./container.js";
 import { pathWithin } from "./substrate.js";
 
@@ -35,11 +35,10 @@ export function stationImageFromConfig(config: {
   }
   const parsed = typeof declared === "string" ? DIGEST_REFERENCE.exec(declared)?.groups : undefined;
   if (parsed === undefined) {
-    throw new KernelError({
-      reason: "workspace-incomplete",
-      about: [STATION_IMAGE_CONFIG_KEY],
-      detail: `refusing to read ${STATION_IMAGE_CONFIG_KEY} from the workspace's configuration: it must name an image by digest, as <repository>@sha256:<64 hex digits>`,
-    });
+    throw TrustFileError.atKey(
+      STATION_IMAGE_CONFIG_KEY,
+      `refusing to read ${STATION_IMAGE_CONFIG_KEY} from the workspace's configuration: it must name an image by digest, as <repository>@sha256:<64 hex digits>`,
+    );
   }
   return {
     uri: parsed["repository"]!,

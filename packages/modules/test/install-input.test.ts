@@ -33,7 +33,7 @@ async function installRefused(manifest: unknown): Promise<unknown> {
   cleanups.push(repo.cleanup);
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
   const blobs = blobStoreOf(repo.workspace);
-  const index = new IndexDb(":memory:");
+  using index = new IndexDb(":memory:");
   await index.fold(store);
   const tipBefore = await store.tip();
   const refusal = await installModule(

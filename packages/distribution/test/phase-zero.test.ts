@@ -80,7 +80,8 @@ describe("loom's phase 0 loop, on a fixture world musai owns", () => {
     store = new Store({ ctx: { gitDir }, scope, now, claimTypes: claimTypesFrom([ATOM, BEAT]) });
     await declareClaimTypes(store, [ATOM, BEAT]);
     for (const dir of [CORE_MODULE_DIR, ATOMS_MODULE_DIR]) {
-      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: await foldedIndex(store), now });
+      using folded = await foldedIndex(store);
+      await buildModule(dir, store, { blobs: blobStoreOf(workspace), index: folded, now });
     }
     for (const [key, record] of [
       ["ada-sword", atom("ada", "sword")],
@@ -122,7 +123,7 @@ describe("loom's phase 0 loop, on a fixture world musai owns", () => {
     const sword = (await store.read(swordId, "claim")) as ClaimRecord;
     await store.putMany([{ kind: "claim", value: { ...atom("ada", "sword", "lost"), supersedes: [swordId] } }]);
 
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const evaluation = await evaluationOf("ada");
     expect(opened.index.readersOf(`slot:${sword.slot}`).map((read) => read.reader)).toContain(evaluation.id);
     expect(opened.index.reachOf(`slot:${sword.slot}`).map((read) => read.reader)).toEqual([evaluation.id]);

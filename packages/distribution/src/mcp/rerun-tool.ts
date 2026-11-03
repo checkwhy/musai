@@ -7,8 +7,8 @@ import {
   validateAgainstSchema,
 } from "@musai/api-core";
 import { type CallToolResult, elicitGateAnswer, type Server, type Tool, titledSingleSelect } from "@musai/mcp";
+import { commandLine } from "@musai/run";
 import { RERUN_OUTPUT_SCHEMA, type RerunOutput } from "../ops/rerun.js";
-import { commandText } from "../text.js";
 import { structuredResult } from "./result.js";
 
 const RERUN_OPERATION_KEY = "bundle.rerun@3";
@@ -60,7 +60,7 @@ function confirmationMessage(bundle: string, shown: RerunOutput): string {
   const commands = runs.map((run) => {
     const tree =
       run.tree === null ? "" : run.tree.here === run.tree.recorded ? ", on the tree it recorded" : ", on another tree";
-    return `- ${commandText(run.command)}${tree}`;
+    return `- ${commandLine(run.command)}${tree}`;
   });
   return [`Run these commands from ${bundle} in this checkout?`, ...commands].join("\n");
 }

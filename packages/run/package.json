@@ -15,13 +15,15 @@
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "conformance": "node --import ../test-support/src/ts-esm.mjs scripts/conformance.ts"
   },
   "dependencies": {
     "@musai/fold": "workspace:*",
     "@musai/records": "workspace:*",
     "@musai/store": "workspace:*",
-    "execa": "10.0.1"
+    "execa": "10.0.1",
+    "signal-exit": "4.1.0"
   },
   "devDependencies": {
     "@musai/trust": "workspace:*",

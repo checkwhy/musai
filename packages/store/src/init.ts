@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
-import type { Clock } from "@musai/records";
+import type { Clock, RecordId } from "@musai/records";
 import { hexOfRecordId, KernelError, rawId } from "@musai/records";
 import {
   type GitContext,
@@ -14,14 +15,17 @@ import {
   gitIsBareRepository,
   gitMkTree,
   gitRevParse,
+  gitUpdateRefCas,
   type TreeEntry,
 } from "./git.js";
-import { withCasRetry } from "./retry.js";
 
 export const MUSAI_DIR = ".musai";
 
 /** Holds the index and the workspace key; a bare repository has no work tree to track it from. */
 export const LOCAL_DIR = "local";
+
+/** Under `local/`, the MCP sessions' call logs: disposable, and never a record. */
+export const CALL_LOG_DIR = "calls";
 
 /** One level below `local/`, so no scope name collides with the workspace's own files there. */
 const SCOPES_DIR = "scopes";
@@ -42,9 +46,10 @@ export function scopeClearedIndexPath(gitDir: string, scope: string, audience: s
   return join(scopeLocalDir(gitDir, scope), "cleared", `${name}.sqlite`);
 }
 
-/** Beside the fold, never in it: what an allowed-signers file grants is not in the log. */
-export function scopeVerificationCachePath(gitDir: string, scope: string): string {
-  return join(scopeLocalDir(gitDir, scope), "attestation-verification.json");
+/** Beside the fold, never in it: what an allowed-signers file grants is not in the log. Named by
+ * that file's digest, so a process reading two trust commits keeps both caches. */
+export function scopeVerificationCachePath(gitDir: string, scope: string, allowedSigners: RecordId): string {
+  return join(scopeLocalDir(gitDir, scope), `attestation-verification-${hexOfRecordId(allowedSigners)}.json`);
 }
 
 /** Seeded on `main` so the empty-files default has files to be empty. */
@@ -75,7 +80,7 @@ export interface WorkspaceInit {
   created: boolean;
 }
 
-/** A bare repository with no `main` is an interrupted initialisation, not a workspace. */
+/** A bare repository with no `main` is no workspace: init moves one into place only once seeded. */
 async function isBareMusaiRepository(gitDir: string): Promise<boolean> {
   const ctx: GitContext = { gitDir };
   return (await gitIsBareRepository(ctx)) && (await gitRevParse(ctx, "refs/heads/main")) !== null;
@@ -149,24 +154,50 @@ export async function adoptWorkspace(gitDir: string): Promise<WorkspaceAdoption>
     await ignoreLocalDir(gitDir);
     return "adopted";
   }
-  let entries: string[];
+  return (await workspaceAbsent(gitDir)) ? "absent" : "foreign";
+}
+
+/** Nothing stands at `gitDir` for `initWorkspace` to refuse; reads, and writes nothing. */
+export async function workspaceAbsent(gitDir: string): Promise<boolean> {
   try {
-    entries = await readdir(gitDir);
+    return (await readdir(gitDir)).length === 0;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      return "absent";
+      return true;
     }
     if (code === "ENOTDIR") {
-      return "foreign";
+      return false;
     }
     throw error;
   }
-  return entries.length === 0 ? "absent" : "foreign";
 }
 
-/** Creates `<dir>/.musai` with a seeded `main`, or adopts the workspace already there. Anything
- * else at that path is refused before any write. */
+const HOLDER_PREFIX = `${MUSAI_DIR}-init-`;
+
+/** `mkdtemp` appends six characters drawn from these. */
+const HOLDER_SUFFIX = /^[A-Za-z0-9]{6}$/;
+
+/** Written before the workspace it holds, so a holder an init killed mid-build leaves is one an
+ * enclosing working tree stages nothing from. */
+const HOLDER_IGNORE: readonly [name: string, content: string] = [".gitignore", "*\n"];
+
+/** The holders beside `<dir>/.musai` an init left: one killed outright never removes its own. */
+export async function initHolders(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        entry.name.startsWith(HOLDER_PREFIX) &&
+        HOLDER_SUFFIX.test(entry.name.slice(HOLDER_PREFIX.length)),
+    )
+    .map((entry) => join(dir, entry.name))
+    .sort();
+}
+
+/** Creates `<dir>/.musai` with a seeded `main`, or adopts the workspace there, a racing init's
+ * included. Anything else at that path is refused, and a failed init leaves no `.musai`. */
 export async function initWorkspace(dir: string, options: { now: Clock }): Promise<WorkspaceInit> {
   const workspaceDir = resolve(dir);
   const gitDir = join(workspaceDir, MUSAI_DIR);
@@ -184,15 +215,72 @@ export async function initWorkspace(dir: string, options: { now: Clock }): Promi
     });
   }
 
-  await gitInitBare(gitDir);
-  await setCollectionSettings(gitDir);
+  await mkdir(workspaceDir, { recursive: true });
+  // A sibling, so the rename is atomic; `mkdir` inside it, as `mkdtemp`'s mode is owner-only.
+  const holder = await mkdtemp(join(workspaceDir, HOLDER_PREFIX));
+  const staging = join(holder, MUSAI_DIR);
+  let created: boolean;
+  try {
+    await writeFile(join(holder, HOLDER_IGNORE[0]), HOLDER_IGNORE[1]);
+    await mkdir(staging);
+    await gitInitBare(staging);
+    await setCollectionSettings(staging);
+    await seedMain({ gitDir: staging }, options.now);
+    await mkdir(join(staging, LOCAL_DIR));
+    await ignoreLocalDir(staging);
+    created = await moveIntoPlace(staging, gitDir);
+  } finally {
+    await rm(holder, { recursive: true, force: true });
+  }
 
-  const ctx: GitContext = { gitDir };
-  await seedMain(ctx, options.now);
-  await mkdir(localDir, { recursive: true });
-  await ignoreLocalDir(gitDir);
+  return { gitDir, localDir, created };
+}
 
-  return { gitDir, localDir, created: true };
+/** An `rmdir` that finds the path gone or occupied leaves the rename to decide. */
+const OCCUPIED_OR_ABSENT: ReadonlySet<string> = new Set(["ENOENT", "ENOTEMPTY", "EEXIST", "ENOTDIR"]);
+
+/** An empty `.musai` is removed first: POSIX renames onto an empty directory, Windows onto none.
+ * Answers false where a racing init's workspace landed first, which is adopted instead. */
+async function moveIntoPlace(staging: string, gitDir: string): Promise<boolean> {
+  try {
+    await rmdir(gitDir);
+  } catch (error) {
+    if (!OCCUPIED_OR_ABSENT.has((error as NodeJS.ErrnoException).code ?? "")) {
+      throw error;
+    }
+  }
+  try {
+    await rename(staging, gitDir);
+    return true;
+  } catch (error) {
+    const occupant = await lstat(gitDir).catch(() => null);
+    if (occupant === null) {
+      throw error;
+    }
+    const adoption = await adoptWorkspace(gitDir);
+    if (adoption === "adopted") {
+      return false;
+    }
+    throw new KernelError({
+      reason: "invalid-input",
+      detail: `refusing to initialise a workspace at ${gitDir}: ${occupantKind(occupant, adoption)} was put there while this call built the workspace`,
+      about: [gitDir],
+      cause: error,
+    });
+  }
+}
+
+function occupantKind(occupant: Stats, adoption: WorkspaceAdoption): string {
+  if (occupant.isSymbolicLink()) {
+    return "a symbolic link";
+  }
+  if (occupant.isFile()) {
+    return "a file";
+  }
+  if (!occupant.isDirectory()) {
+    return "something that is neither a file nor a directory";
+  }
+  return adoption === "absent" ? "an empty directory" : "a directory that is not a workspace";
 }
 
 async function seedMain(ctx: GitContext, now: Clock): Promise<void> {
@@ -216,14 +304,9 @@ async function seedMain(ctx: GitContext, now: Clock): Promise<void> {
     }));
 
     const treeSha = await gitMkTree(ctx, entries);
-    await withCasRetry({ ctx, ref: "refs/heads/main" }, async (tip) => {
-      if (tip !== null) {
-        // Another initialisation seeded the same files first, so its root stands.
-        return { commitSha: tip, value: undefined };
-      }
-      const commitSha = await gitCommitTree(ctx, treeSha, [], "seed workspace configuration\n", now);
-      return { commitSha, value: undefined };
-    });
+    const commitSha = await gitCommitTree(ctx, treeSha, [], "seed workspace configuration\n", now);
+    // The repository is unpublished, so no other writer contends for `main`.
+    await gitUpdateRefCas(ctx, "refs/heads/main", commitSha, null);
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@ import {
   refusedThroughRelay,
 } from "@musai/api-core";
 import { FLOOR_CONFIG_KEY, floorFrom } from "@musai/evaluate";
-import { BLOB_THRESHOLD_CONFIG_KEY, isRelayedChannel, versionString } from "@musai/records";
+import { BLOB_THRESHOLD_CONFIG_KEY, isRelayedChannel, TrustFileError, versionString } from "@musai/records";
 import {
   DECLARED_NAMES_CONFIG_KEY,
   layerDeclarationsFromConfig,
@@ -205,7 +205,8 @@ export const configSet: OperationDescriptor<ConfigSetInput, ConfigValue> = {
       throw new OperationError({
         reason: "invalid-input",
         about: [input.key],
-        detail: error instanceof Error ? error.message : String(error),
+        detail:
+          error instanceof TrustFileError ? error.problem : error instanceof Error ? error.message : String(error),
       });
     }
     await trustHeldToConfigure(input.key, context);

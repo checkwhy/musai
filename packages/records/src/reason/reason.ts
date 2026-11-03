@@ -5,6 +5,7 @@ export const STATUS_REASONS = [
   "over-budget",
   "stale",
   "inapplicable",
+  "forked-slot",
 ] as const;
 
 /** A claim's open-status reason, a subset of `REASONS`. */
@@ -63,6 +64,7 @@ export const REASON_CODES: Record<Reason, CodeClass> = {
   "over-budget": "workspace",
   stale: "refold",
   inapplicable: "workspace",
+  "forked-slot": "workspace",
   // Operation refusal reasons.
   "undeclared-binary": "requirement",
   "sibling-conflict": "invocation",
@@ -89,9 +91,10 @@ export function codeForReason(reason: Reason): CodeClass {
   return REASON_CODES[reason];
 }
 
-/** Which reason an open status records when several apply: `inapplicable` first, since nothing
- * was attempted, and `no-evidence` last, as the residual. */
+/** Which reason an open status records when several apply: `forked-slot` and `inapplicable` first,
+ * since nothing was attempted, and `no-evidence` last, as the residual. */
 export const REASON_PRECEDENCE: readonly ReasonClass[] = [
+  "forked-slot",
   "inapplicable",
   "over-budget",
   "cycle",

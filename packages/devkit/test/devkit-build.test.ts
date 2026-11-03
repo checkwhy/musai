@@ -95,7 +95,7 @@ describe("building the fixture module produces a manifest nobody wrote and a rec
   it("mints one module record id and byte-identical manifest bytes across two builds of one unchanged source", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
     const options = { blobs: blobStoreOf(repo.workspace), index, sourceGitDir, now: FIXED_NOW };
 
@@ -114,7 +114,7 @@ describe("building the fixture module produces a manifest nobody wrote and a rec
   it("names the source tree and both toolchain binaries by digest on the build's own receipt", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
     const result = await buildModule(MINIMAL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(repo.workspace),
@@ -136,7 +136,7 @@ describe("building the fixture module produces a manifest nobody wrote and a rec
   it("names the stored bundle blob's own digest as the receipt's output", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const sourceGitDir = await repoGitDir();
     const result = await buildModule(MINIMAL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(repo.workspace),
@@ -159,7 +159,7 @@ describe("producing a build's artefacts needs no workspace, and storing them mov
 
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const result = await buildModule(MINIMAL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(repo.workspace),
       index,
@@ -184,7 +184,7 @@ describe("a build's recipe names nothing about where this checkout sits on disk"
   it("carries no path under the checkout root in its command, and names the bundler by its package, never its path", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const root = await checkoutRoot();
     const result = await buildModule(MINIMAL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(repo.workspace),
@@ -210,7 +210,7 @@ describe("a build's recipe names nothing about where this checkout sits on disk"
   it("yields one module record from one source built at two paths: the same recipe bytes, the same manifest bytes, the same record id", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const files = {
       "package.json": await readFile(join(MINIMAL_FIXTURE_DIR, "package.json"), "utf8"),
       "module.ts": await readFile(join(MINIMAL_FIXTURE_DIR, "module.ts"), "utf8"),
@@ -247,7 +247,7 @@ describe("a declared binary is named by the digest of the tool itself, not of a 
   it("names the esbuild entry by the digest of the executable its own package manifest declares", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const result = await buildModule(MINIMAL_FIXTURE_DIR, store, {
       blobs: blobStoreOf(repo.workspace),
       index,
@@ -292,7 +292,7 @@ describe("which repository a source tree is captured against is resolved from th
   it("captures a module nested inside a larger checkout against that checkout, with no git directory named", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const blobs = blobStoreOf(repo.workspace);
 
     const named = await buildModule(MINIMAL_FIXTURE_DIR, store, {
@@ -310,7 +310,7 @@ describe("which repository a source tree is captured against is resolved from th
   it("captures a module checked out in a linked worktree, whose .git is a pointer file, against that worktree", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const source = await trackedSource("worktree", {
       "package.json": await readFile(join(MINIMAL_FIXTURE_DIR, "package.json"), "utf8"),
       "module.ts": await readFile(join(MINIMAL_FIXTURE_DIR, "module.ts"), "utf8"),
@@ -343,7 +343,7 @@ describe("which repository a source tree is captured against is resolved from th
   it("refuses a source directory belonging to no repository, by name", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const dir = await mkdtemp(join(tmpdir(), "musai-module-source-unversioned-"));
     cleanups.push(async () => {
       await rm(dir, { recursive: true, force: true });
@@ -410,7 +410,7 @@ describe("a module contributing nothing is not a special case", () => {
   it("builds and produces an empty contribution array", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const source = await trackedSource("empty", {
       "package.json": packageJsonFor("empty-module"),
       "module.ts": [
@@ -561,7 +561,7 @@ describe("a build draws from outside its module's directory only the packages th
   it("refuses a module whose source imports a file from outside its directory, naming the input, before anything is stored", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const moduleDir = await moduleBeside(await trackedRoot("outside"), "../shared/value.js", {
       "shared/value.ts": 'export const reason: string = "not evaluated";\n',
     });
@@ -982,7 +982,7 @@ describe("a bundle that reaches for a runtime built-in fails the build rather th
   it("names the specifier in the build's own refusal", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const source = await trackedSource("builtin", {
       "package.json": packageJsonFor("builtin-module"),
       "module.ts": [
@@ -1005,7 +1005,7 @@ describe("the one possible refusals a describe answer can still earn before any 
   it("refuses two contributions sharing one id and version, by name", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const source = await trackedSource("dup-id", {
       "package.json": packageJsonFor("dup-module"),
       "module.ts": [
@@ -1031,7 +1031,7 @@ describe("the one possible refusals a describe answer can still earn before any 
   it("refuses a contribution id not namespaced by its own module's name, by name", async () => {
     const repo = await trackedRepo();
     const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
-    const index = await foldedIndex(store);
+    using index = await foldedIndex(store);
     const source = await trackedSource("bad-namespace", {
       "package.json": packageJsonFor("owner-module"),
       "module.ts": [

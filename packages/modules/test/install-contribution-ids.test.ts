@@ -25,7 +25,7 @@ function entry(kind: string, id: string, version = "1"): ContributionEntry {
 }
 
 async function foldedIndex(repo: FixtureRepo): Promise<IndexDb> {
-  const index = new IndexDb(":memory:");
+  const index = repo.keep(new IndexDb(":memory:"));
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   return index;
 }

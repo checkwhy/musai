@@ -12,6 +12,7 @@ import {
   ListToolsResultSchema,
   ReadResourceRequestSchema,
   type ReadResourceResult,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   installedManifests,
@@ -19,20 +20,22 @@ import {
   type NamedManifest,
   type OperationContext,
   openWorkspace,
+  Workspace,
 } from "@musai/api-core";
 import { buildModule } from "@musai/devkit";
 import {
   callTool,
+  contributionProjections,
   manifestContributionProjections,
+  type ReadGuard,
   registerPromptHandlers,
   registerResourceHandlers,
-  toolsFromManifests,
 } from "@musai/mcp";
 import { ENVELOPE_PROTOCOL } from "@musai/modules";
 import { type ContributionEntry, type ModuleManifest, versionString } from "@musai/records";
 import { initWorkspace } from "@musai/store";
 import { blobStoreOf, fixedClock } from "@musai/test-support";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { REGISTRY } from "../../src/index.js";
 import { MUSAI_MCP } from "../../src/mcp/extension.js";
 import { MUSAI_RESOURCES } from "../../src/mcp/resources.js";
@@ -64,6 +67,25 @@ function handlerRecorder(): {
       return (await handler({ params } as never)) as T;
     },
   };
+}
+
+/** Each suite registers its handlers over a workspace it made. */
+const standing: ReadGuard = (read) => read(undefined);
+
+/** Every workspace opened while `run` runs, and every one closed by then. */
+async function workspacesOpenedBy(
+  run: () => Promise<unknown>,
+): Promise<{ readonly opened: readonly Workspace[]; readonly closed: readonly Workspace[] }> {
+  const open = vi.spyOn(Workspace, "open");
+  const close = vi.spyOn(Workspace.prototype, "close");
+  try {
+    await run().catch(() => undefined);
+    const opened = await Promise.all(open.mock.results.map((result) => result.value as Promise<Workspace>));
+    return { opened, closed: [...close.mock.contexts] as Workspace[] };
+  } finally {
+    open.mockRestore();
+    close.mockRestore();
+  }
 }
 
 function fixtureManifest(moduleName: string, contributions: readonly ContributionEntry[]): NamedManifest {
@@ -115,7 +137,7 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
       ]),
     ];
 
-    const tools = toolsFromManifests(REGISTRY, manifests);
+    const tools = projectedTools(manifests);
     const names = tools.map((tool) => tool.name);
     expect(names).toContain("pack_decides");
     expect(names).toContain("pack_selects");
@@ -161,7 +183,7 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
     ];
 
     // A query's input schema carries two words Ajv ignores, so it projects as the object it is.
-    const [projected] = manifestContributionProjections(manifests);
+    const [projected] = manifestContributionProjections(manifests).projected;
     expect(projected?.tool.name).toBe("pack_cases");
     expect(projected?.tool.inputSchema).toEqual(manifests[0]!.manifest.contributions[0]!.input);
     expect(projected?.tool.outputSchema).toEqual(manifests[0]!.manifest.contributions[0]!.output);
@@ -189,7 +211,7 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
       ]),
     ];
 
-    const tools = toolsFromManifests(REGISTRY, manifests);
+    const tools = projectedTools(manifests);
     expect(tools.map((tool) => tool.name)).toEqual([]);
   });
 
@@ -209,19 +231,19 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
       ]),
     ];
 
-    expect(toolsFromManifests(REGISTRY, manifests)).toEqual([
+    expect(projectedTools(manifests)).toEqual([
       {
         name: "pack_an-operation",
         description: "an operation contribution, whose plan the kernel checks and applies",
         inputSchema: { type: "object", properties: { subject: { type: "string" } } },
       },
     ]);
-    expect(manifestContributionProjections(manifests).map((projected) => projected.entry.id)).toEqual([
+    expect(manifestContributionProjections(manifests).projected.map((projected) => projected.entry.id)).toEqual([
       "pack/an-operation",
     ]);
   });
 
-  test("two modules whose contributions project to one tool name are refused, naming both modules", () => {
+  test("two modules whose contributions project to one tool name project neither, and the collision names both", () => {
     const manifests = [
       fixtureManifest("pack", [
         {
@@ -245,11 +267,13 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
       ]),
     ];
 
-    expect(() => toolsFromManifests(REGISTRY, manifests)).toThrow(/pack/);
-    expect(() => toolsFromManifests(REGISTRY, manifests)).toThrow(/pack\.x/);
+    const { projected, collisions } = contributionProjections(REGISTRY, manifests);
+
+    expect(projected).toEqual([]);
+    expect(collisions).toEqual([{ name: "pack_x_y", claimants: ["pack.x's pack.x/y", "pack's pack/x.y"] }]);
   });
 
-  test("a contribution whose own name would shadow one of the distribution's own operations is refused the same way", () => {
+  test("a contribution whose own name would shadow one of the distribution's own operations is not projected, and the collision names both", () => {
     // A contribution `claim/status` folds through the same transform to `claim_status`.
     const shadowedKey = "claim.status@3";
     const [moduleName, localId] = shadowedKey.replace(/@\d+$/, "").split(".") as [string, string];
@@ -268,7 +292,15 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
         },
       ]),
     ];
-    expect(() => toolsFromManifests(REGISTRY, manifests)).toThrow(DuplicateToolNameErrorPattern(shadowedName));
+    expect(contributionProjections(REGISTRY, manifests)).toEqual({
+      projected: [],
+      collisions: [
+        {
+          name: shadowedName,
+          claimants: [`the distribution's own operation ${shadowedKey}`, `${moduleName}'s ${moduleName}/${localId}`],
+        },
+      ],
+    });
 
     const operationManifests = [
       fixtureManifest(moduleName, [
@@ -284,7 +316,7 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
         },
       ]),
     ];
-    expect(() => toolsFromManifests(REGISTRY, operationManifests)).toThrow(DuplicateToolNameErrorPattern(shadowedName));
+    expect(contributionProjections(REGISTRY, operationManifests).projected).toEqual([]);
   });
 
   test("the projected list is ordered by contribution id ascending, byte-equal across two reads at one head", () => {
@@ -317,8 +349,8 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
       ]),
     ];
 
-    const first = toolsFromManifests(REGISTRY, manifests);
-    const second = toolsFromManifests(REGISTRY, manifests);
+    const first = projectedTools(manifests);
+    const second = projectedTools(manifests);
     expect(first.map((tool) => tool.name)).toEqual(["pack_aaa", "pack_mmm", "pack_zzz"]);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
@@ -336,13 +368,13 @@ describe("the mechanical projection, over hand-built fixture manifests", () => {
         },
       ]),
     ];
-    const [projected] = manifestContributionProjections(manifests);
+    const [projected] = manifestContributionProjections(manifests).projected;
     expect(projected!.tool.inputSchema).toBe(projected!.entry.input);
   });
 });
 
-function DuplicateToolNameErrorPattern(name: string): RegExp {
-  return new RegExp(name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+function projectedTools(manifests: readonly NamedManifest[]): Tool[] {
+  return contributionProjections(REGISTRY, manifests).projected.map((projection) => projection.tool);
 }
 
 describe("with no modules installed", () => {
@@ -359,15 +391,15 @@ describe("with no modules installed", () => {
   });
 
   test("the tool list is exactly the distribution's own operations and nothing else, and no prompt or manifest tool appears", async () => {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const manifests = await installedManifests(opened);
     expect(manifests).toEqual([]);
 
-    const tools = toolsFromManifests(REGISTRY, manifests);
+    const tools = projectedTools(manifests);
     expect(tools).toEqual([]);
 
     const { server, call } = handlerRecorder();
-    registerPromptHandlers(server, { workspace, scope, now });
+    registerPromptHandlers(server, { workspace, scope, now }, standing);
     expect(await call<ListPromptsResult>(ListPromptsRequestSchema, {})).toEqual({ prompts: [] });
   });
 });
@@ -382,7 +414,7 @@ describe("a module installed mid-session, genuinely esbuild-bundled through a re
     await initWorkspace(workspace, { now });
     context = { workspace, scope, now };
     const sourceGitDir = await repoGitDir();
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     await buildModule(GREETER_FIXTURE_DIR, opened.store, {
       blobs: blobStoreOf(workspace),
       index: opened.index,
@@ -396,10 +428,10 @@ describe("a module installed mid-session, genuinely esbuild-bundled through a re
   });
 
   test("its parser contribution appears as a tool a client accepts, and calling it with valid arguments really invokes the bundle", async () => {
-    const opened = await openWorkspace({ workspace, scope, now });
+    using opened = await openWorkspace({ workspace, scope, now });
     const manifests = await installedManifests(opened);
 
-    const tools = toolsFromManifests(REGISTRY, manifests);
+    const tools = projectedTools(manifests);
     const parsed = ListToolsResultSchema.safeParse({ tools });
     expect(parsed.success ? null : parsed.error.issues).toBe(null);
     expect(tools.some((tool) => tool.name === "greeter_greets")).toBe(true);
@@ -422,7 +454,7 @@ describe("a module installed mid-session, genuinely esbuild-bundled through a re
 
   test("its template contribution appears as a prompt, and getting it with real arguments really invokes the bundle", async () => {
     const { server, call } = handlerRecorder();
-    registerPromptHandlers(server, context);
+    registerPromptHandlers(server, context, standing);
 
     const listed = await call<ListPromptsResult>(ListPromptsRequestSchema, {});
     const parsed = ListPromptsResultSchema.safeParse(listed);
@@ -438,6 +470,22 @@ describe("a module installed mid-session, genuinely esbuild-bundled through a re
     });
     expect(result.messages).toEqual([{ role: "user", content: { type: "text", text: "a note for Ada" } }]);
   }, 15_000);
+
+  test("a prompt read opens its workspace once and closes it", async () => {
+    const { server, call } = handlerRecorder();
+    registerPromptHandlers(server, context, standing);
+
+    const reads = [
+      () => call(ListPromptsRequestSchema, {}),
+      () => call(GetPromptRequestSchema, { name: "greeter_note", arguments: { who: "Ada" } }),
+      () => call(GetPromptRequestSchema, { name: "no_such_prompt", arguments: {} }),
+    ];
+    for (const read of reads) {
+      const { opened, closed } = await workspacesOpenedBy(read);
+      expect(opened).toHaveLength(1);
+      expect(closed).toContain(opened[0]);
+    }
+  }, 15_000);
 }, 30_000);
 
 describe("resources, addressed by URI", () => {
@@ -449,10 +497,12 @@ describe("resources, addressed by URI", () => {
     workspace = await mkdtemp(join(tmpdir(), "musai-mcp-resources-"));
     await initWorkspace(workspace, { now });
     const { server, call } = handlerRecorder();
-    registerResourceHandlers(server, MUSAI_RESOURCES, {
-      distribution: MUSAI_MCP,
-      context: { workspace, scope, now },
-    });
+    registerResourceHandlers(
+      server,
+      MUSAI_RESOURCES,
+      { distribution: MUSAI_MCP, context: { workspace, scope, now } },
+      standing,
+    );
     read = <T>(uri: string) => call<T>(ReadResourceRequestSchema, { uri });
   });
 
@@ -475,6 +525,17 @@ describe("resources, addressed by URI", () => {
     const content = result.contents[0]!;
     const text = "text" in content ? content.text : "";
     expect(JSON.parse(text)).toEqual({ gates: [] });
+  });
+
+  test("a resource read closes every workspace it opens, answered or refused", async () => {
+    const session = { distribution: MUSAI_MCP, context: { workspace, scope, now } };
+    for (const uri of ["gates://pending", "case://no-such-case", "claim://no-such-slot"]) {
+      const { opened, closed } = await workspacesOpenedBy(() => MUSAI_RESOURCES.read(session, uri));
+      expect([uri, opened.length > 0]).toEqual([uri, true]);
+      for (const held of opened) {
+        expect(closed).toContain(held);
+      }
+    }
   });
 
   test("a URI naming no known shape refuses with a closed reason", async () => {

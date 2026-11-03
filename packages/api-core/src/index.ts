@@ -13,7 +13,7 @@ export {
   rulesNamedBy,
 } from "./check-receipts.js";
 export { walkCitations } from "./citations.js";
-export { operationsUnderClearance, refuseInputFileUnderClearance } from "./cleared-operations.js";
+export { offeredUnderClearance, refuseInputFileUnderClearance } from "./cleared-operations.js";
 export {
   clearanceFromEnvironment,
   clearanceNamedBy,
@@ -38,7 +38,7 @@ export {
   headCursor,
   installedModules,
 } from "./events.js";
-export { verifiedEvidenceEdge } from "./evidence.js";
+export { admitCitedEdge, verifiedEvidenceEdge } from "./evidence.js";
 export { assertHeadUnmoved, HeadMovedError } from "./expect-head.js";
 export {
   assertHeadUnmovedFor,
@@ -48,7 +48,14 @@ export {
   type PlannedOperation,
   runHandler,
 } from "./handler.js";
-export { closingWorkspaces, openWorkspace, verifiedAttestationFor, verifiedAttestationsFor } from "./open-workspace.js";
+export {
+  closingWorkspaces,
+  givesPrincipalClass,
+  makerFirst,
+  openWorkspace,
+  verifiedAttestationFor,
+  verifiedAttestationsFor,
+} from "./open-workspace.js";
 export {
   type AdmittedDeclaration,
   type AppliedPlan,
@@ -68,6 +75,7 @@ export {
   type CliProjection,
   DuplicateOperationError,
   type JsonSchema,
+  KERNEL_LEVEL_REASONS,
   lookupOperation,
   type OperationDescriptor,
   type OperationInputValidation,
@@ -78,14 +86,23 @@ export {
   validateOperationOutput,
 } from "./registry.js";
 export {
+  type CoverageMember,
   coveringRelease,
+  type ReleaseCoverage,
   type ReleaseStanding,
+  type RevokedRelease,
+  releaseCoverage,
   releaseStanding,
+  releaseStandingAmong,
   type SealStanding,
   type StandingRelease,
   type StandingSeal,
   sealStanding,
+  type Withdrawal,
+  type Withdrawing,
+  type Withholding,
   windowHolds,
+  withdrawnUnverified,
 } from "./release.js";
 export { signatureCheck } from "./signature-check.js";
 export {
@@ -95,7 +112,7 @@ export {
   type WeighedRuling,
   weighedRulingsFor,
 } from "./succession.js";
-export { Workspace, type WorkspaceOptions } from "./workspace.js";
+export { declaresClearance, Workspace, type WorkspaceOptions } from "./workspace.js";
 export {
   MINTED_ARRAY_SCHEMA,
   type MintedRecord,

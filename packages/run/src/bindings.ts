@@ -2,12 +2,13 @@ import type { Stats } from "node:fs";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { DeclaredName } from "@musai/records";
-import { isPlainObject, KernelError } from "@musai/records";
+import { isPlainObject, KernelError, TrustFileError } from "@musai/records";
 import { execa } from "execa";
+import { isAnyAbsolute, recordsPortably } from "./portable.js";
 
 const BINDINGS_FILE_MODE = 0o600;
 
-const BINDINGS_FILE_NAME = "bindings.json";
+export const BINDINGS_FILE_NAME = "bindings.json";
 
 function bindingsFilePath(localDir: string): string {
   return join(localDir, BINDINGS_FILE_NAME);
@@ -23,7 +24,8 @@ export interface BindingSource {
 
 export type BindingsFile = Readonly<Record<string, BindingSource>>;
 
-/** Raised when a declared name cannot resolve. */
+/** A local bindings or checkouts file no reader takes, or a declared name that cannot be bound,
+ * its credential helper failing included. */
 export class BindingError extends KernelError {
   constructor(message: string) {
     super({ reason: "workspace-incomplete", detail: message });
@@ -216,20 +218,64 @@ export function layerDeclarationsFromConfig(config: {
     return new Map();
   }
   if (!isPlainObject(declared)) {
-    throw new BindingError(
+    throw TrustFileError.atKey(
+      DECLARED_NAMES_CONFIG_KEY,
       `refusing to read ${DECLARED_NAMES_CONFIG_KEY} from the workspace's configuration: it must be an object keyed by variable name`,
     );
   }
   const layerDeclarations = new Map<string, LayerDeclaration>();
   for (const [name, entry] of Object.entries(declared)) {
     if (!isPlainObject(entry) || typeof entry["secret"] !== "boolean") {
-      throw new BindingError(
+      throw TrustFileError.atKey(
+        DECLARED_NAMES_CONFIG_KEY,
         `refusing declaration ${name} in ${DECLARED_NAMES_CONFIG_KEY}: its secret flag must be a boolean`,
       );
     }
     layerDeclarations.set(name, { secret: entry["secret"] });
   }
   return layerDeclarations;
+}
+
+/** What clears a run's refusal of a binding that names an absolute path under no root. */
+export const UNRECORDABLE_BINDING_REMEDY = "bind it to a path under the checkout the run stands on";
+
+/** A directory a run here can stand on: a checkout bound by name, or, with no name, the working
+ * tree holding the workspace, where a checkout `checkouts.json` leaves unbound stands. */
+export interface StandingRoot {
+  readonly checkout: string | null;
+  readonly directory: string;
+}
+
+/** A plain binding naming an absolute path, and the roots holding every such path it names. */
+export interface PathBinding {
+  readonly name: string;
+  readonly roots: readonly StandingRoot[];
+  /** Whether each such path lies under some root, though `roots` may hold none holding them all. */
+  readonly eachRooted: boolean;
+}
+
+/** A run records such a binding only under one of its roots or a root its caller names; a verb's
+ * run whose recipe names no checkout stands on none, and refuses it. */
+export function pathBindings(
+  bindings: BindingsFile,
+  layerDeclarations: ReadonlyMap<string, LayerDeclaration>,
+  roots: readonly StandingRoot[],
+): readonly PathBinding[] {
+  return Object.entries(bindings)
+    .filter(([name, source]) => !source.secret && !(layerDeclarations.get(name)?.secret ?? false))
+    .flatMap(([name, source]) => {
+      const paths = (source.command?.slice(1) ?? [source.value!]).filter(isAnyAbsolute);
+      const directories = roots.map((root) => root.directory);
+      return paths.length === 0
+        ? []
+        : [
+            {
+              name,
+              roots: roots.filter((root) => paths.every((path) => recordsPortably(path, [root.directory]))),
+              eachRooted: paths.every((path) => recordsPortably(path, directories)),
+            },
+          ];
+    });
 }
 
 export interface BindDeclaredNamesResult {

@@ -233,7 +233,7 @@ describe("a case booked and soundchecked through the CLI and through the MCP ser
     await client.connect(
       new StdioClientTransport({
         command: "node",
-        args: [SERVER_PATH, "--workspace", workspace, "--scope", SCOPE],
+        args: [SERVER_PATH, "--workspace", workspace, "--scope", SCOPE, "--lab"],
         env: { ...getDefaultEnvironment(), MUSAI_NOW: FIXED_INSTANT },
       }),
     );

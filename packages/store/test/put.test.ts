@@ -203,7 +203,7 @@ describe("the log a write leaves", () => {
         observation: { output: "{}", reads: [], cost: {} },
       });
       const times: string[] = [];
-      for await (const { committedAt } of store.changesSince(null)) {
+      for await (const { committedAt } of store.changesSince(null, (await store.tip())!)) {
         times.push(committedAt);
       }
 

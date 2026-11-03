@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && node scripts/build-artefacts.mjs",
+    "build": "tsup && node scripts/kernel-schemas.mjs --check && tsc -p tsconfig.build.json && node scripts/build-artefacts.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "conformance": "node --import ../test-support/src/ts-esm.mjs scripts/conformance-export.ts"
@@ -32,7 +32,8 @@
     "@musai/records": "workspace:*",
     "@musai/run": "workspace:*",
     "@musai/store": "workspace:*",
-    "@musai/trust": "workspace:*"
+    "@musai/trust": "workspace:*",
+    "fast-deep-equal": "3.1.3"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

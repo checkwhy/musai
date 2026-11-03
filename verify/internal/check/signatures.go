@@ -2,8 +2,6 @@ package check
 
 import (
 	"encoding/json/v2"
-	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,18 +21,10 @@ func Signatures(tree *Tree, index *Index, trusted trust.Set) ([]Finding, int) {
 			findings = append(findings, unreadable(anchor.Path, anchor.ReadErr))
 		}
 		for _, problem := range anchor.Problems {
-			findings = append(findings, Finding{Code: "trust.line-invalid", Severity: Warning, Path: anchor.Path, Detail: problem.Error() + "; skipped"})
-		}
-		for _, signer := range anchor.Signers {
-			if signer.Zoneless {
-				findings = append(findings, Finding{Code: "trust.zoneless-time", Severity: Warning, Path: anchor.Path, Detail: fmt.Sprintf("line %d gives a time with no zone, read here as UTC; ssh-keygen reads it in its own host's local time", signer.Line)})
-			}
-			if foreign := signer.ForeignKeyForm(); foreign != "" {
-				findings = append(findings, Finding{Code: "trust.key-mismatch", Severity: Error, Path: anchor.Path, Detail: fmt.Sprintf("line %d names %s for the key %s, and one key never speaks as another; the line is not trusted", signer.Line, foreign, signer.OwnKeyForm())})
-			}
+			findings = append(findings, lineRefused(anchor.Path, problem))
 		}
 	}
-	signers := slices.DeleteFunc(trusted.Signers(), func(signer sig.Signer) bool { return signer.ForeignKeyForm() != "" })
+	signers := trusted.Signers()
 	verified := 0
 	signed := map[string]bool{}
 	for _, file := range tree.Files {
@@ -66,6 +56,18 @@ func Signatures(tree *Tree, index *Index, trusted trust.Set) ([]Finding, int) {
 		}
 	}
 	return findings, verified
+}
+
+// lineRefused fails a verification on a trust file the kernel would refuse to
+// open; a GitHub account's line that is no key is no trust file's, and skipped.
+func lineRefused(path string, problem sig.LineError) Finding {
+	switch problem.Class {
+	case "":
+		return Finding{Code: "trust.line-invalid", Severity: Warning, Path: path, Detail: problem.Error() + "; skipped"}
+	case sig.RefusedKeyForeign:
+		return Finding{Code: "trust.key-mismatch", Severity: Error, Path: path, Detail: problem.Error() + "; the line is not trusted"}
+	}
+	return Finding{Code: "trust.line-invalid", Severity: Error, Path: path, Detail: problem.Error() + "; the line is not trusted"}
 }
 
 func verify(record File, armored []byte, signers []sig.Signer) Finding {

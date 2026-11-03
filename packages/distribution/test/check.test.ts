@@ -2,23 +2,40 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
-import { type RecordId, timestamp } from "@musai/records";
+import { DECLARATIVE_RULE, type OperationContext, openWorkspace, runHandler } from "@musai/api-core";
+import {
+  type CaseRecord,
+  type ClaimRecord,
+  type ClaimTypeDeclaration,
+  CURRENT_SCHEMA_VERSIONS,
+  claimTypesFrom,
+  type ModuleRecord,
+  type RecordId,
+  recordId,
+  slotFor,
+  timestamp,
+  versionString,
+} from "@musai/records";
 import { LOCAL_DIR, MUSAI_DIR, readTrustBranch, Store, writeMainFiles } from "@musai/store";
 import {
   bindCheckouts,
   type Checkout,
+  declareClaimTypes,
   fixedClock,
+  fixtureRunRecord,
   fixWorkspaceKey,
   makeCheckout,
   pseudonymOf,
   receiptIds,
+  rewriteBlob,
 } from "@musai/test-support";
 import { execa } from "execa";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, onTestFinished, test } from "vitest";
+import { labelledClaim } from "../src/claim.js";
+import { checkEvaluation, recordedEvaluation } from "../src/evaluation.js";
 import { caseBook } from "../src/ops/case.js";
 import { caseStatus } from "../src/ops/case-status.js";
-import { checkRun } from "../src/ops/check.js";
+import { type CheckRunOutput, checkRun } from "../src/ops/check.js";
 import { claimStatus } from "../src/ops/claim.js";
 import { moduleBuild } from "../src/ops/module.js";
 import { viewRun } from "../src/ops/view.js";
@@ -30,7 +47,7 @@ const now = fixedClock("2026-10-01T00:00:00.000Z");
 
 /** Exits 0 while `tracked.txt` holds what the checkout committed. */
 const TRACKED_IS_HELLO = ["node", "-e", "process.exit(require('fs').readFileSync('tracked.txt','utf8')==='hello'?0:1)"];
-const TRACKED_IS_HELLO_TEXT = `node -e "process.exit(require('fs').readFileSync('tracked.txt','utf8')==='hello'?0:1)"`;
+const TRACKED_IS_HELLO_TEXT = `node -e 'process.exit(require('\\''fs'\\'').readFileSync('\\''tracked.txt'\\'','\\''utf8'\\'')==='\\''hello'\\''?0:1)'`;
 
 const checkouts: Checkout[] = [];
 const scratch: string[] = [];
@@ -56,7 +73,7 @@ async function repositoryWithWorkspace(): Promise<{ readonly dir: string; readon
 
 /** The tooling the claim's check recipe names. */
 async function toolingOf(workspace: string, slot: string): Promise<unknown> {
-  const opened = await openWorkspace({ workspace, scope, now });
+  using opened = await openWorkspace({ workspace, scope, now });
   const claim = opened.index.claimAtSlot(slot)!;
   if (claim.record.kind !== "claim") {
     throw new Error(`no claim at ${slot}`);
@@ -69,6 +86,22 @@ async function toolingOf(workspace: string, slot: string): Promise<unknown> {
 
 async function runCount(workspace: string): Promise<number> {
   return (await receiptIds(new Store({ ctx: { gitDir: join(workspace, MUSAI_DIR) }, scope, now }))).length;
+}
+
+/** The check read without performing once its rule's bundle is gone, so invoking the rule would
+ * throw, beside the receipts its status concluded on and those its brief's evaluation rests on. */
+async function readWithNoRule(dir: string, context: OperationContext, checked: CheckRunOutput) {
+  const before = await openWorkspace(context);
+  const contribution = before.index.contributionById(DECLARATIVE_RULE)!;
+  await rewriteBlob(dir, (before.read(contribution.moduleRecord) as ModuleRecord).bundle!, null);
+  before.close();
+  const read = await runHandler(claimStatus, { claim: checked.short }, { ...context, mode: "plan" });
+  const opened = await openWorkspace({ ...context, mode: "plan" });
+  onTestFinished(() => opened.close());
+  const record = opened.index.claimAtSlot(checked.slot)!.record as ClaimRecord;
+  const chosen = checkEvaluation(opened.index, record, () => true, opened.clearance)!;
+  const { concluded } = await labelledClaim(opened, checked.slot, "recorded");
+  return { read, concluded: concluded?.runs, packed: recordedEvaluation(chosen.evaluation).receipts };
 }
 
 describe("check: a sentence and a command become a claim and a receipt", () => {
@@ -92,7 +125,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect(second.claim).toBe(first.claim);
     expect(second.slot).toBe(first.slot);
     expect(await runCount(dir)).toBe(runsAfterFirst);
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     const claim = opened.index.claimAtSlot(first.slot)!;
     expect(claim.record.kind === "claim" && claim.record.type).toBe("musai.core/check@1");
     const root = (await execa("git", ["-C", dir, "rev-list", "--max-parents=0", "HEAD"])).stdout.trim();
@@ -134,23 +167,26 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
 
     expect(refused).toMatchObject({ reason: "invalid-input", about: [first.short] });
     expect((refused as Error).message).toContain("--replace");
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     expect(opened.index.claimAtSlot(first.slot)?.id).toBe(first.claim);
     expect(await runCount(dir)).toBe(runsBefore);
   }, 120_000);
 
-  test("a run outliving the call's run deadline ends the call, its claim open with no receipt", async () => {
+  test("a run outliving the call's run deadline ends the call, naming its command as a shell line, its claim open with no receipt", async () => {
     const { dir, context } = await repositoryWithWorkspace();
     const runsBefore = await runCount(dir);
+    const command = ["node", "-e", "setTimeout(() => {}, 30000)", "$HOME `id`\n"];
 
     const ended = await runHandler(
       checkRun,
-      { statement: "a slow check holds", command: ["sleep", "30"] },
+      { statement: "a slow check holds", command },
       { ...context, runTimeoutMs: 200 },
     ).catch((error: unknown) => error);
 
     expect(ended).toMatchObject({ reason: "over-budget" });
-    expect((ended as Error).message).toContain("outlived its 200 ms deadline");
+    expect((ended as Error).message).toContain(
+      "the run of node -e 'setTimeout(() => {}, 30000)' $'$HOME `id`\\n' outlived its 200 ms deadline",
+    );
     expect(await runCount(dir)).toBe(runsBefore);
     const status = await runHandler(claimStatus, { claim: "a slow check holds" }, { ...context, mode: "plan" });
     expect(status.label).toBe("open");
@@ -199,7 +235,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     );
 
     expect(checked.label).toBe("holds");
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     expect(opened.read(checked.claim as RecordId)).toMatchObject({
       kind: "claim",
       salt: expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -219,7 +255,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect(salted.claim).not.toBe(unsalted.claim);
     expect(saltedAgain.claim).toBe(salted.claim);
     expect(plain.claim).toBe(salted.claim);
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     expect(opened.read(salted.claim as RecordId)).toMatchObject({
       kind: "claim",
       salt: expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -273,18 +309,36 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     let second = 0;
     const context = { ...fixed, now: () => timestamp(new Date(Date.UTC(2026, 9, 1, 0, 0, second++)).toISOString()) };
     const sentence = { statement: "the tracked file says hello", command: TRACKED_IS_HELLO };
-    const first = await runHandler(checkRun, sentence, context);
+    await runHandler(checkRun, sentence, context);
     await writeFile(join(dir, "tracked.txt"), "goodbye");
     await runHandler(checkRun, sentence, context);
     const runs = await runCount(dir);
 
     await writeFile(join(dir, "tracked.txt"), "hello");
-    const read = await runHandler(claimStatus, { claim: first.short }, { ...context, mode: "plan" });
     const restored = await runHandler(checkRun, sentence, context);
 
-    expect(read.label).toBe("holds");
     expect(restored.label).toBe("holds");
     expect(await runCount(dir)).toBe(runs);
+  }, 120_000);
+
+  test("a tree returned to an earlier receipt reads stale without performing, on the evaluation its brief packs, invoking no rule", async () => {
+    const { dir, context: fixed } = await repositoryWithWorkspace();
+    let second = 0;
+    const context = { ...fixed, now: () => timestamp(new Date(Date.UTC(2026, 9, 1, 0, 0, second++)).toISOString()) };
+    const sentence = { statement: "the tracked file says hello", command: TRACKED_IS_HELLO };
+    const first = await runHandler(checkRun, sentence, context);
+    const [earlier] = await receiptIds(new Store({ ctx: { gitDir: join(dir, MUSAI_DIR) }, scope, now }));
+    await writeFile(join(dir, "tracked.txt"), "goodbye");
+    expect((await runHandler(checkRun, sentence, context)).label).toBe("fails");
+
+    await writeFile(join(dir, "tracked.txt"), "hello");
+    const { read, concluded, packed } = await readWithNoRule(dir, context, first);
+
+    expect(read).toMatchObject({ label: "open", reason: "stale" });
+    expect(read.detail).toContain("the working tree `tree` moved");
+    expect(packed).toHaveLength(1);
+    expect(packed).not.toContain(earlier);
+    expect(concluded).toEqual(packed);
   }, 120_000);
 
   test("check exits 0 when its claim holds and 7 when it fails", async () => {
@@ -365,7 +419,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
       comparison: { winner: "(none)", rival: null, via: "evidence", corroborated: [] },
     });
 
-    expect(text).toBe(`✓ holds · 0123456789ab · run cdcdcdcdcdcd · sh -c "echo ok\\n✓ holds" "\\u009b2J" ""`);
+    expect(text).toBe(`✓ holds · 0123456789ab · run cdcdcdcdcdcd · sh -c $'echo ok\\n✓ holds' $'\\302\\2332J' ''`);
   });
 
   test("a claim with nothing to decide it prints check's open line and names no record", () => {
@@ -516,7 +570,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
 
     expect(second.slot).toBe(first.slot);
     expect(second.claim).not.toBe(first.claim);
-    const opened = await openWorkspace({ workspace: dir, scope, now });
+    using opened = await openWorkspace({ workspace: dir, scope, now });
     const successor = opened.index.claimAtSlot(second.slot)!;
     expect(successor.record.kind === "claim" && successor.record.supersedes).toEqual([first.claim]);
     expect(await toolingOf(dir, second.slot)).toEqual(["sh"]);
@@ -585,7 +639,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect((refusal as Error).message).toContain("sh ./t.sh");
     expect(viaTool).toMatchObject({ reason: "invalid-input" });
     expect((await readTrustBranch({ gitDir: join(dir, MUSAI_DIR) })).config.values["tools"]).toBeUndefined();
-    await expect(openWorkspace({ workspace: dir, scope, now })).resolves.toBeDefined();
+    (await openWorkspace({ workspace: dir, scope, now })).close();
   }, 120_000);
 
   test("check outside a workspace is refused naming init", async () => {
@@ -659,6 +713,21 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect(output).toMatchObject({ label: "holds", hint: null });
   }, 120_000);
 
+  test("a check answered by a receipt it reuses performs nothing and carries no hint", async () => {
+    const { dir, context } = await repositoryWithWorkspace();
+    await runHandler(checkRun, { statement: "the tracked file says hello", command: TRACKED_IS_HELLO }, context);
+    const runs = await runCount(dir);
+
+    const again = await runHandler(
+      checkRun,
+      { statement: "the tracked file still says hello", command: TRACKED_IS_HELLO },
+      context,
+    );
+
+    expect(again).toMatchObject({ label: "holds", hint: null });
+    expect(await runCount(dir)).toBe(runs);
+  }, 120_000);
+
   test("a checked claim reads stale when the tree it read moves and nothing has re-run it", async () => {
     const { dir, context } = await repositoryWithWorkspace();
     const checked = await runHandler(
@@ -673,6 +742,23 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
 
     expect(read).toMatchObject({ label: "open", reason: "stale" });
     expect(await runCount(dir)).toBe(runs);
+  }, 120_000);
+
+  test("a check whose tree moved reads stale without performing, on the evaluation its brief packs, invoking no rule", async () => {
+    const { dir, context } = await repositoryWithWorkspace();
+    const checked = await runHandler(
+      checkRun,
+      { statement: "the tracked file says hello", command: TRACKED_IS_HELLO },
+      context,
+    );
+
+    await writeFile(join(dir, "tracked.txt"), "goodbye");
+    const { read, concluded, packed } = await readWithNoRule(dir, context, checked);
+
+    expect(read).toMatchObject({ label: "open", reason: "stale" });
+    expect(read.detail).toContain("the working tree `tree` moved");
+    expect(packed).toHaveLength(1);
+    expect(concluded).toEqual(packed);
   }, 120_000);
 
   test("a case whose checks' tree moved reads stale in list as in progress --plan, and neither runs anything", async () => {
@@ -694,6 +780,63 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     expect(await runCount(dir)).toBe(runs);
   }, 240_000);
 
+  test("a gate its own receipt holds, with no ruling, outranks a stale check: progress names it next and counts it open", async () => {
+    const { dir, context } = await repositoryWithWorkspace();
+    await runHandler(moduleBuild, { dir: fileURLToPath(new URL("./fixtures/tree-command", import.meta.url)) }, context);
+    await runHandler(caseBook, { slug: "watched", kind: "tree-command/watch" }, context);
+    const declaration: ClaimTypeDeclaration = { type: "musai.check-test/gate@1", identityDimensions: ["id"] };
+    const store = new Store({
+      ctx: { gitDir: join(dir, MUSAI_DIR) },
+      scope,
+      now,
+      claimTypes: claimTypesFrom([declaration]),
+    });
+    await declareClaimTypes(store, [declaration]);
+    const [receipt] = await store.putMany([{ kind: "run", value: fixtureRunRecord("it ran clean") }]);
+    const conditions = { id: "ship", gateClass: "intent" };
+    const gateClaim: ClaimRecord = {
+      kind: "claim",
+      supersedes: [],
+      schemaVersion: CURRENT_SCHEMA_VERSIONS.claim,
+      type: declaration.type,
+      about: [],
+      slot: slotFor(declaration, conditions),
+      conditions,
+      canonical: conditions,
+      rendering: "ship it",
+      evidence: [
+        {
+          run: receipt!,
+          selector: { module: "musai.core", parser: "exit-code", version: versionString("1"), key: "result" },
+          item: recordId({ run: receipt!, key: "result" }),
+        },
+      ],
+      exclusiveGroup: null,
+    };
+    const [gate] = await store.putMany([{ kind: "claim", value: gateClaim }]);
+    const opened = await openWorkspace(context);
+    const watched = opened.index.cases().find(({ record }) => record.slug === "watched")!;
+    opened.close();
+    const widened: CaseRecord = {
+      ...watched.record,
+      supersedes: [watched.id],
+      claims: [...watched.record.claims, gate!],
+    };
+    await store.putMany([{ kind: "case", value: widened }]);
+    await writeFile(join(dir, "tracked.txt"), "goodbye");
+
+    const held = await runHandler(claimStatus, { claim: gateClaim.slot }, { ...context, mode: "plan" });
+    const previewed = await runHandler(caseStatus, { case: "watched" }, { ...context, mode: "plan" });
+
+    expect(held.label).toBe("holds");
+    expect(previewed).toMatchObject({
+      next: { gate, class: "intent" },
+      done: false,
+      reason: "claim-open",
+      counts: { holds: 0, fails: 0, open: 3 },
+    });
+  }, 240_000);
+
   test("why answers a failing check with its sentence, command, exit code and the output's last lines", async () => {
     const { context } = await repositoryWithWorkspace();
     const command = ["node", "-e", "for (let i = 1; i <= 7; i++) console.log('line ' + i); process.exit(1)"];
@@ -708,7 +851,7 @@ describe("check: a sentence and a command become a claim and a receipt", () => {
     ]);
     expect(text.split("\n")[0]).toBe(`✗ fails · seven lines are printed (${checked.short})`);
     expect(text).toContain(
-      `· node -e "for (let i = 1; i <= 7; i++) console.log('line ' + i); process.exit(1)" · exit 1`,
+      `· node -e 'for (let i = 1; i <= 7; i++) console.log('\\''line '\\'' + i); process.exit(1)' · exit 1`,
     );
     expect(text).toContain("line 7");
     expect("derivation" in why).toBe(false);

@@ -1,14 +1,18 @@
 // Package sig verifies an attestation's detached SSH signature the way
-// `ssh-keygen -Y verify` does against an allowed-signers file: the
-// signature's own namespace and cryptography first, then a line naming the
-// principal with the signing key, whose namespaces and validity window
-// admit the signature at the attestation's own time.
+// `ssh-keygen -Y verify` does against an allowed-signers file read by the
+// kernel's rules: the signature's own namespace and cryptography first,
+// then a line naming the principal with the signing key, whose namespaces
+// and validity window admit the signature at the attestation's own time.
 package sig
 
 import (
+	"crypto/elliptic"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,7 +23,7 @@ import (
 
 // Signer is one usable line of an allowed-signers file.
 type Signer struct {
-	// Principals is the line's comma-separated principal pattern list.
+	// Principals is the line's comma-separated list of literal principals.
 	Principals string
 	// Key is the signer's key; where it is nil, Fingerprint names the key
 	// by its SHA256 fingerprint instead, as a pin a person handed over.
@@ -33,9 +37,6 @@ type Signer struct {
 	// ValidAfter and ValidBefore bound the line's window; zero is unbounded.
 	ValidAfter  time.Time
 	ValidBefore time.Time
-	// Zoneless is true where a bound was written with no zone and read as
-	// UTC, where ssh-keygen would read it in its host's local time.
-	Zoneless bool
 	// Line is the line's number in the file, from 1; zero for a signer not
 	// read from a file.
 	Line int
@@ -56,17 +57,6 @@ func (s Signer) OwnKeyForm() string {
 	return KeyPrefix + ssh.FingerprintSHA256(s.Key)
 }
 
-// ForeignKeyForm is a principal on the line naming a key other than the
-// line's own, or "": one key never speaks as another.
-func (s Signer) ForeignKeyForm() string {
-	for _, principal := range strings.Split(s.Principals, ",") {
-		if strings.HasPrefix(principal, KeyPrefix) && principal != s.OwnKeyForm() {
-			return principal
-		}
-	}
-	return ""
-}
-
 // Alias is the first name a line binding the key principal lists beside
 // it, or "".
 func Alias(signers []Signer, principal string) string {
@@ -84,32 +74,52 @@ func Alias(signers []Signer, principal string) string {
 	return ""
 }
 
-// LineError is a line ssh-keygen would log and skip.
+// The classes of reason a line is refused for, named alike by the kernel.
+const (
+	RefusedUnreadCharacter  = "unread-character"
+	RefusedIncomplete       = "incomplete"
+	RefusedPrincipalPattern = "principal-pattern"
+	RefusedPrincipalQuoted  = "principal-quoted"
+	RefusedOptionUnknown    = "option-unknown"
+	RefusedOptionUnquoted   = "option-unquoted"
+	RefusedOptionRepeated   = "option-repeated"
+	RefusedTime             = "option-time"
+	RefusedWindowEmpty      = "window-empty"
+	RefusedKeyTypeUnknown   = "key-type-unknown"
+	RefusedKeyInvalid       = "key-invalid"
+	RefusedKeyForeign       = "key-foreign"
+)
+
+// LineError is a line refused, with the class of its reason where the
+// kernel's rules refused it.
 type LineError struct {
 	Line   int
+	Class  string
 	Reason string
 }
 
 func (e LineError) Error() string {
-	return fmt.Sprintf("line %d: %s", e.Line, e.Reason)
+	if e.Class == "" {
+		return fmt.Sprintf("line %d: %s", e.Line, e.Reason)
+	}
+	return fmt.Sprintf("line %d: %s (%s)", e.Line, e.Reason, e.Class)
 }
 
-// ParseAllowedSigners reads an allowed-signers file as OpenSSH's sshsig.c
-// does, but for one thing: a timestamp with no Z or UTC suffix is read as
-// UTC, so a verdict is the same on every machine, and its line is marked
-// Zoneless. Blank and comment lines are skipped silently, malformed ones
-// with a LineError, and neither stops the lines after them from being read.
+type refusal struct{ class, reason string }
+
+// ParseAllowedSigners reads a file by the kernel's rules, skipping blank and
+// comment lines; a refused line is a LineError and stops none after it.
 func ParseAllowedSigners(data []byte) ([]Signer, []LineError) {
 	var signers []Signer
 	var problems []LineError
 	for i, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimLeft(raw, whitespace)
+		line := strings.TrimRight(strings.TrimLeft(raw, " \t"), " \t\r")
 		if line == "" || line[0] == '#' {
 			continue
 		}
-		signer, err := parseLine(line)
-		if err != nil {
-			problems = append(problems, LineError{Line: i + 1, Reason: err.Error()})
+		signer, refused := readLine(line)
+		if refused != nil {
+			problems = append(problems, LineError{Line: i + 1, Class: refused.class, Reason: refused.reason})
 			continue
 		}
 		signer.Line, signer.Origin = i+1, fmt.Sprintf("allowed-signers line %d", i+1)
@@ -118,85 +128,101 @@ func ParseAllowedSigners(data []byte) ([]Signer, []LineError) {
 	return signers, problems
 }
 
-const whitespace = " \t\r\n"
+// unreadCharacter is what OpenSSH reads as part of a name though it reads
+// as a space elsewhere: controls, Unicode's spaces and the byte-order mark.
+var unreadCharacter = regexp.MustCompile(`[\x00-\x20\x7f-\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`)
 
-func parseLine(line string) (Signer, error) {
-	principals, rest, err := token(line)
-	if err != nil {
-		return Signer{}, err
+// keyFields is each key type OpenSSH 9.6 reads, and the fields its blob
+// holds after the type's own name.
+var keyFields = map[string]int{
+	"ssh-ed25519":                        1,
+	"sk-ssh-ed25519@openssh.com":         2,
+	"ssh-rsa":                            2,
+	"ssh-dss":                            4,
+	"ecdsa-sha2-nistp256":                2,
+	"ecdsa-sha2-nistp384":                2,
+	"ecdsa-sha2-nistp521":                2,
+	"sk-ecdsa-sha2-nistp256@openssh.com": 3,
+}
+
+// retiredKeyType is read by no OpenSSH since 10, so a line naming one is
+// trust a current OpenSSH cannot check.
+const retiredKeyType = "ssh-dss"
+
+func readLine(line string) (Signer, *refusal) {
+	if strings.Contains(line, "\x00") {
+		return Signer{}, &refusal{RefusedUnreadCharacter, "a NUL, where OpenSSH ends the line"}
 	}
-	if rest == "" {
-		return Signer{}, errors.New("invalid line")
+	tokens := splitOutsideQuotes(line, " \t", true)
+	options, at := "", 1
+	if len(tokens) > 1 {
+		if _, isType := keyFields[tokens[1]]; !isType {
+			options, at = tokens[1], 2
+		}
+	}
+	if len(tokens) < at+2 {
+		return Signer{}, &refusal{RefusedIncomplete, "no principals, options and key"}
+	}
+	principals, keyType, encoded := tokens[0], tokens[at], tokens[at+1]
+	if unread := unreadCharacter.FindString(principals); unread != "" {
+		return Signer{}, &refusal{RefusedUnreadCharacter, fmt.Sprintf("principals holding U+%04X, which OpenSSH reads as a name's", []rune(unread)[0])}
+	}
+	// OpenSSH matches these as patterns, so a line read as granting may match nobody there.
+	if strings.ContainsAny(principals, "!*?") {
+		return Signer{}, &refusal{RefusedPrincipalPattern, "principals OpenSSH matches as patterns, " + principals}
+	}
+	// OpenSSH strips the quotes and ends the principals at the closing one, reading other names.
+	if strings.Contains(principals, `"`) {
+		return Signer{}, &refusal{RefusedPrincipalQuoted, "principals OpenSSH reads without their quotes, " + principals}
 	}
 	signer := Signer{Principals: principals}
-	key, keyErr := readKey(rest)
-	if keyErr != nil {
-		options, afterOptions, ok := optionsToken(rest)
-		if !ok {
-			return Signer{}, errors.New("invalid options")
-		}
-		if afterOptions == "" {
-			return Signer{}, errors.New("missing key")
-		}
-		if key, err = readKey(afterOptions); err != nil {
-			return Signer{}, errors.New("invalid key")
-		}
-		if err := signer.parseOptions(options); err != nil {
-			return Signer{}, fmt.Errorf("bad options: %w", err)
+	if at == 2 {
+		if refused := signer.parseOptions(options); refused != nil {
+			return Signer{}, refused
 		}
 	}
+	if _, known := keyFields[keyType]; !known {
+		return Signer{}, &refusal{RefusedKeyTypeUnknown, "a key type OpenSSH does not read, " + keyType}
+	}
+	if keyType == retiredKeyType {
+		return Signer{}, &refusal{RefusedKeyTypeUnknown, "a key type OpenSSH no longer reads, " + keyType}
+	}
+	key, ok := keyOf(keyType, encoded)
+	if !ok {
+		return Signer{}, &refusal{RefusedKeyInvalid, "a key that is no " + keyType + " key OpenSSH reads"}
+	}
 	signer.Key = key
+	own := signer.OwnKeyForm()
+	for _, member := range strings.Split(principals, ",") {
+		if strings.HasPrefix(member, KeyPrefix) && member != own {
+			return Signer{}, &refusal{RefusedKeyForeign, fmt.Sprintf("the principal %s beside the key %s, and one key never speaks as another", member, own)}
+		}
+	}
 	return signer, nil
 }
 
-// token is OpenSSH's strdelimw: a token ends at whitespace, and a double
-// quote anywhere in it opens a quoted run, dropped with its closing quote,
-// after which the token ends. What follows has its leading whitespace
-// skipped.
-func token(s string) (string, string, error) {
-	end := strings.IndexAny(s, whitespace+`"`)
-	if end == -1 {
-		return s, "", nil
-	}
-	if s[end] != '"' {
-		return s[:end], strings.TrimLeft(s[end:], whitespace), nil
-	}
-	quoted := s[end+1:]
-	closing := strings.IndexByte(quoted, '"')
-	if closing == -1 {
-		return "", "", errors.New("unterminated quote")
-	}
-	return s[:end] + quoted[:closing], strings.TrimLeft(quoted[closing+1:], whitespace), nil
-}
-
-// optionsToken is OpenSSH's sshkey_advance_past_options: the options run
-// to the first space or tab outside double quotes, a backslash-escaped
-// quote opening nothing.
-func optionsToken(s string) (string, string, bool) {
-	quoted := false
-	i := 0
-	for ; i < len(s) && (quoted || (s[i] != ' ' && s[i] != '\t')); i++ {
-		switch {
-		case s[i] == '\\' && i+1 < len(s) && s[i+1] == '"':
-			i++
-		case s[i] == '"':
+// splitOutsideQuotes splits s at any of seps outside double quotes, which
+// stay in the parts; dropEmpty drops the empty parts runs of seps leave.
+func splitOutsideQuotes(s, seps string, dropEmpty bool) []string {
+	var parts []string
+	quoted, start := false, 0
+	for i := 0; i <= len(s); i++ {
+		if i < len(s) && s[i] == '"' {
 			quoted = !quoted
 		}
+		if i == len(s) || (!quoted && strings.IndexByte(seps, s[i]) != -1) {
+			if part := s[start:i]; part != "" || !dropEmpty {
+				parts = append(parts, part)
+			}
+			start = i + 1
+		}
 	}
-	if quoted {
-		return "", "", false
-	}
-	return s[:i], strings.TrimLeft(s[i:], whitespace), true
+	return parts
 }
 
 // ParseKey reads a public key written as its type and base64 blob, with
 // anything after them ignored, as an authorized key without options.
 func ParseKey(s string) (ssh.PublicKey, error) {
-	return readKey(s)
-}
-
-// readKey reads a key type, its base64 blob and nothing it requires after.
-func readKey(s string) (ssh.PublicKey, error) {
 	fields := strings.Fields(s)
 	if len(fields) < 2 {
 		return nil, errors.New("no key")
@@ -215,118 +241,169 @@ func readKey(s string) (ssh.PublicKey, error) {
 	return key, nil
 }
 
-// parseOptions is OpenSSH's sshsigopt_parse: options separated by commas,
-// names in any case, each value double-quoted, no option twice, nothing
-// after a trailing comma, and a window that is not empty.
-func (s *Signer) parseOptions(options string) error {
-	for options != "" {
-		switch {
-		case hasFold(options, "cert-authority"):
+var strictBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+
+// keyOf reads strict base64 of a keyType blob OpenSSH reads: its name, then
+// the fields the type holds, each as the type holds it.
+func keyOf(keyType, encoded string) (ssh.PublicKey, bool) {
+	if !strictBase64.MatchString(encoded) || len(encoded)%4 != 0 {
+		return nil, false
+	}
+	blob, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return nil, false
+	}
+	var fields [][]byte
+	for rest := blob; len(rest) > 0; {
+		if len(rest) < 4 || uint64(binary.BigEndian.Uint32(rest)) > uint64(len(rest)-4) {
+			return nil, false
+		}
+		length := binary.BigEndian.Uint32(rest)
+		fields, rest = append(fields, rest[4:4+length]), rest[4+length:]
+	}
+	if len(fields) == 0 || string(fields[0]) != keyType || len(fields)-1 != keyFields[keyType] {
+		return nil, false
+	}
+	held := len(fields[1]) == 32
+	switch curve := nistCurve.FindString(keyType); {
+	case curve != "":
+		held = string(fields[1]) == curve && onCurve(curve, fields[2])
+	case keyType == "ssh-rsa":
+		held = holdsRSAKey(fields[1], fields[2])
+	}
+	if !held {
+		return nil, false
+	}
+	// The checks above leave nothing for x/crypto's parser to refuse.
+	key, err := ssh.ParsePublicKey(blob)
+	return key, err == nil
+}
+
+var nistCurve = regexp.MustCompile(`nistp\d+`)
+
+var curves = map[string]*elliptic.CurveParams{
+	"nistp256": elliptic.P256().Params(),
+	"nistp384": elliptic.P384().Params(),
+	"nistp521": elliptic.P521().Params(),
+}
+
+// onCurve is an uncompressed point on curve as OpenSSH's validate_public
+// takes one: each coordinate over half the order's bits and short of it less one.
+func onCurve(curve string, point []byte) bool {
+	params := curves[curve]
+	size := (params.BitSize + 7) / 8
+	if len(point) != 1+2*size || point[0] != 4 {
+		return false
+	}
+	x, y := new(big.Int).SetBytes(point[1:1+size]), new(big.Int).SetBytes(point[1+size:])
+	limit := new(big.Int).Sub(params.N, big.NewInt(1))
+	for _, coordinate := range []*big.Int{x, y} {
+		if coordinate.BitLen() <= params.N.BitLen()/2 || coordinate.Cmp(limit) >= 0 {
+			return false
+		}
+	}
+	right := new(big.Int).Mul(x, x)
+	right.Mul(right, x).Sub(right, new(big.Int).Mul(x, big.NewInt(3))).Add(right, params.B)
+	left := new(big.Int).Mul(y, y)
+	return left.Sub(left, right).Mod(left, params.P).Sign() == 0
+}
+
+// canonicalMpint is an SSH mpint in its one canonical form: OpenSSH
+// fingerprints the key it re-encodes, so a padded one names another key.
+func canonicalMpint(field []byte) (*big.Int, bool) {
+	if len(field) > 0 && (field[0]&0x80 != 0 || (field[0] == 0 && (len(field) == 1 || field[1]&0x80 == 0))) {
+		return nil, false
+	}
+	return new(big.Int).SetBytes(field), true
+}
+
+// holdsRSAKey is an RSA key OpenSSH reads, of 1024 to 16384 bits, whose
+// exponent is odd, at least 3 and of at most 24 bits, as x/crypto parses.
+func holdsRSAKey(exponent, modulus []byte) bool {
+	e, eOK := canonicalMpint(exponent)
+	n, nOK := canonicalMpint(modulus)
+	return eOK && nOK && e.Cmp(big.NewInt(3)) >= 0 && e.Bit(0) == 1 && e.BitLen() <= 24 &&
+		n.BitLen() >= 1024 && n.BitLen() <= 16384
+}
+
+// parseOptions reads options as the kernel does: split at commas outside
+// quotes, each value quoted, none twice, times in UTC.
+func (s *Signer) parseOptions(options string) *refusal {
+	seen := map[string]bool{}
+	for _, spec := range splitOutsideQuotes(options, ",", false) {
+		name, quoted, valued := strings.Cut(spec, "=")
+		name = asciiLower(name)
+		if name == "cert-authority" && !valued {
 			s.CertAuthority = true
-			options = options[len("cert-authority"):]
-		case hasFold(options, "namespaces="):
-			if s.HasNamespaces {
-				return errors.New(`multiple "namespaces" clauses`)
-			}
-			value, rest, err := dequote(options[len("namespaces="):])
-			if err != nil {
-				return err
-			}
-			s.Namespaces, s.HasNamespaces, options = value, true, rest
-		case hasFold(options, "valid-after="), hasFold(options, "valid-before="):
-			name := options[:strings.IndexByte(options, '=')]
-			value, rest, err := dequote(options[len(name)+1:])
-			if err != nil {
-				return err
-			}
-			bound := &s.ValidAfter
-			if strings.EqualFold(name, "valid-before") {
-				bound = &s.ValidBefore
-			}
-			if !bound.IsZero() {
-				return fmt.Errorf("multiple %q clauses", name)
-			}
-			at, zoneless, err := parseTime(value)
-			if err != nil || at.Unix() <= 0 {
-				return fmt.Errorf("invalid %q time", name)
-			}
-			*bound, options = at, rest
-			s.Zoneless = s.Zoneless || zoneless
-		default:
-			return errors.New("unsupported option")
+			continue
 		}
-		if options == "" {
-			break
+		if !valued || (name != "namespaces" && name != "valid-after" && name != "valid-before") {
+			shown := spec
+			if shown == "" {
+				shown = "an empty one"
+			}
+			return &refusal{RefusedOptionUnknown, "an option OpenSSH does not read, " + shown}
 		}
-		if options[0] != ',' {
-			return errors.New("unknown key option")
+		// OpenSSH reads a backslash before the closing quote as escaping it, so the value never ends.
+		if len(quoted) < 2 || quoted[0] != '"' || quoted[len(quoted)-1] != '"' ||
+			strings.Contains(quoted[1:len(quoted)-1], `"`) || strings.HasSuffix(quoted, `\"`) {
+			return &refusal{RefusedOptionUnquoted, "the option " + name + " with a value not in quotes"}
 		}
-		if options = options[1:]; options == "" {
-			return errors.New("unexpected end-of-options")
+		if seen[name] {
+			return &refusal{RefusedOptionRepeated, "the option " + name + " more than once"}
+		}
+		seen[name] = true
+		value := quoted[1 : len(quoted)-1]
+		if name == "namespaces" {
+			s.Namespaces, s.HasNamespaces = value, true
+			continue
+		}
+		at, ok := parseTime(value)
+		if !ok {
+			return &refusal{RefusedTime, "the option " + name + " with no time in UTC OpenSSH reads"}
+		}
+		if name == "valid-after" {
+			s.ValidAfter = at
+		} else {
+			s.ValidBefore = at
 		}
 	}
 	if !s.ValidAfter.IsZero() && !s.ValidBefore.IsZero() && !s.ValidBefore.After(s.ValidAfter) {
-		return errors.New(`"valid-before" time is before "valid-after"`)
+		return &refusal{RefusedWindowEmpty, "a window closing before it opens"}
 	}
 	return nil
 }
 
-func hasFold(s, prefix string) bool {
-	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
-}
-
-// dequote is OpenSSH's opt_dequote: a double-quoted value, in which a
-// backslash before a quote escapes it.
-func dequote(s string) (string, string, error) {
-	if !strings.HasPrefix(s, `"`) {
-		return "", "", errors.New("missing start quote")
-	}
-	var value strings.Builder
-	for i := 1; i < len(s); i++ {
-		switch {
-		case s[i] == '"':
-			return value.String(), s[i+1:], nil
-		case s[i] == '\\' && i+1 < len(s) && s[i+1] == '"':
-			i++
+// asciiLower lowers ASCII letters only, as OpenSSH's strncasecmp compares:
+// Unicode folding would read namespaceſ as namespaces.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
 		}
-		value.WriteByte(s[i])
-	}
-	return "", "", errors.New("missing end quote")
+		return r
+	}, s)
 }
 
-// parseTime is OpenSSH's parse_absolute_time: YYYYMMDD, YYYYMMDDHHMM or
-// YYYYMMDDHHMMSS with an optional Z or UTC suffix in any case, each field
-// in strptime's range and the whole normalised as mktime normalises it, so
-// the 30th of February is the 2nd of March. Every time is read as UTC; it
-// reports whether the suffix that says so was missing.
-func parseTime(s string) (time.Time, bool, error) {
-	upper := strings.ToUpper(s)
-	zoneless := false
-	switch {
-	case len(s) > 1 && strings.HasSuffix(upper, "Z"):
-		s = s[:len(s)-1]
-	case len(s) > 3 && strings.HasSuffix(upper, "UTC"):
-		s = s[:len(s)-3]
-	default:
-		zoneless = true
-	}
-	if len(s) != 8 && len(s) != 12 && len(s) != 14 {
-		return time.Time{}, false, fmt.Errorf("not a time: %q", s)
+var utcTime = regexp.MustCompile(`(?i)^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?)?(?:z|utc)$`)
+
+// parseTime is OpenSSH's parse_absolute_time over a UTC time after the epoch
+// and short of a leap second, normalised as mktime normalises it.
+func parseTime(s string) (time.Time, bool) {
+	parts := utcTime.FindStringSubmatch(s)
+	if parts == nil {
+		return time.Time{}, false
 	}
 	fields := make([]int, 6)
-	limits := [6][2]int{{0, 9999}, {1, 12}, {1, 31}, {0, 23}, {0, 59}, {0, 60}}
-	widths := []int{4, 2, 2, 2, 2, 2}
-	at := 0
-	for i := 0; at < len(s); i++ {
-		n, err := strconv.Atoi(s[at : at+widths[i]])
-		if err != nil || n < limits[i][0] || n > limits[i][1] || !digits(s[at:at+widths[i]]) {
-			return time.Time{}, false, fmt.Errorf("not a time: %q", s)
-		}
-		fields[i], at = n, at+widths[i]
+	for i, part := range parts[1:] {
+		fields[i], _ = strconv.Atoi(part)
 	}
-	return time.Date(fields[0], time.Month(fields[1]), fields[2], fields[3], fields[4], fields[5], 0, time.UTC), zoneless, nil
-}
-
-func digits(s string) bool {
-	return strings.Trim(s, "0123456789") == ""
+	limits := [6][2]int{{1970, 9999}, {1, 12}, {1, 31}, {0, 23}, {0, 59}, {0, 59}}
+	for i, field := range fields {
+		if field < limits[i][0] || field > limits[i][1] {
+			return time.Time{}, false
+		}
+	}
+	at := time.Date(fields[0], time.Month(fields[1]), fields[2], fields[3], fields[4], fields[5], 0, time.UTC)
+	return at, at.Unix() > 0
 }

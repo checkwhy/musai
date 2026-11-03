@@ -1,0 +1,47 @@
+{
+  "steps": [
+    { "id": "init", "args": ["init", "$WORKSPACE"] },
+    {
+      "id": "core",
+      "args": ["lab", "module", "build", "$REPO/packages/core-module", "--source-git-dir", "$REPO/.git"]
+    },
+    {
+      "id": "pack",
+      "args": [
+        "lab",
+        "module",
+        "build",
+        "$REPO/packages/scenarios/casebook/modules/casebook",
+        "--source-git-dir",
+        "$REPO/.git"
+      ]
+    },
+    { "id": "fork", "args": ["lab", "scope", "fork", "elsewhere"] },
+    { "id": "book-here", "args": ["lab", "book", "kept-1", "--kind", "fixture-casebook/report"] },
+    {
+      "id": "book-elsewhere",
+      "args": [
+        "lab",
+        "book",
+        "kept-1",
+        "--kind",
+        "fixture-casebook/report",
+        "--overrides",
+        "{\"suite\":\"process.exit(1)\"}",
+        "--scope",
+        "elsewhere"
+      ]
+    },
+    { "id": "merge", "args": ["lab", "scope", "merge", "elsewhere"] },
+    { "id": "progress-forked", "args": ["lab", "progress", "kept-1"], "exit": 2 },
+    { "id": "keep-case", "args": ["lab", "keep", "${book-here.case}"] },
+    { "id": "progress-kept", "args": ["lab", "progress", "kept-1"] },
+    { "id": "status-forked", "args": ["status", "${book-here.minted.1.record.slot}"], "exit": 7 },
+    { "id": "keep", "args": ["lab", "keep", "${book-here.minted.1.id}"] },
+    { "id": "status-kept", "args": ["status", "${book-here.minted.1.record.slot}"] },
+    { "id": "why-kept", "args": ["why", "${book-here.minted.1.record.slot}", "--full"] }
+  ],
+  "replay": ["status-kept", "why-kept"],
+  "holds": ["why-kept"],
+  "unrecorded": []
+}

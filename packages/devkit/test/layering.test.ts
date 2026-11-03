@@ -15,7 +15,6 @@ import {
   type SlotLayers,
   SlotRefusedError,
   type SlotRegistry,
-  slotReadId,
   validatePresetAssignments,
   validateRecord,
   versionString,
@@ -193,19 +192,6 @@ describe("a value in the wrong number form", () => {
   });
 });
 
-describe("resolving a slot", () => {
-  it("records a read whose content id changes when the value changes and not otherwise", () => {
-    const registry = registryOf(boundedCount("example/count", ["booking"]));
-    const first = resolveSlot("example/count", registry, { booking: { "example/count": 1 } });
-    const same = resolveSlot("example/count", registry, { booking: { "example/count": 1 } });
-    const changed = resolveSlot("example/count", registry, { booking: { "example/count": 2 } });
-
-    expect(first.readId).toBe(same.readId);
-    expect(first.readId).not.toBe(changed.readId);
-    expect(first.readId).toBe(slotReadId("example/count", recordId(1)));
-  });
-});
-
 /** The one instant every commit and receipt this file mints is stamped with. */
 const FIXED_NOW = fixedClock("2026-08-30T00:00:00.000Z");
 
@@ -237,11 +223,13 @@ async function scratchRepo(
   const dir = await mkdtemp(join(tmpdir(), "musai-restart-slots-"));
   const { gitDir } = await initWorkspace(dir, { now: FIXED_NOW });
   const ctx: GitContext = { gitDir };
+  const index = new IndexDb(":memory:");
   return {
     store: new Store({ ctx, scope, now: FIXED_NOW }),
-    index: new IndexDb(":memory:"),
+    index,
     ctx,
     async cleanup() {
+      index.close();
       await rm(dir, { recursive: true, force: true });
     },
   };
@@ -290,6 +278,7 @@ describe("the restart loop's satisfaction and concurrency, consulted from the re
         now: FIXED_NOW,
       });
       expect(withAge.verdict).toEqual(HOLDS_WITH_NO_EVIDENCE);
+      expect(withAge.readSet).toEqual(fresh.readSet);
     } finally {
       await repo.cleanup();
     }

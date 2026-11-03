@@ -35,7 +35,7 @@ import {
 } from "@musai/records";
 import { LOCAL_DIR, listKeys } from "@musai/store";
 import { citedClaims, type FoundCase, findCase, findCaseRecord } from "../cases.js";
-import { labelledClaim } from "../claim.js";
+import { labelledClaims } from "../claim.js";
 import { checkSpelling } from "../claim-ref.js";
 import { optionValue } from "../gate/menu.js";
 
@@ -109,17 +109,15 @@ export const caseSoundcheck: OperationDescriptor<CaseSoundcheckInput, CaseSoundc
   async handler(input, context) {
     const opened = await openWorkspace(context);
     const caseRecord = await findCase(opened, input.case);
-    const claims: CaseSoundcheckOutput["claims"][number][] = [];
-    for (const { record } of citedClaims(opened, caseRecord)) {
-      const claim = record as ClaimRecord;
-      const { status } = await labelledClaim(opened, claim.slot, context.mode === "plan" ? "recorded" : "perform");
-      claims.push({
-        slot: claim.slot,
+    const slots = citedClaims(opened, caseRecord).map(({ record }) => (record as ClaimRecord).slot);
+    const labelled = await labelledClaims(opened, slots, context.mode === "plan" ? "recorded" : "perform");
+    return {
+      claims: labelled.map(({ status }, position) => ({
+        slot: slots[position]!,
         label: status.label,
         reason: status.label === "open" ? status.reason : null,
-      });
-    }
-    return { claims };
+      })),
+    };
   },
 };
 
@@ -284,7 +282,7 @@ export interface PlannedClaim {
 }
 
 /** Refuses a claim naming an exclusive group unless its plan opens that group whole. A slot whose
- * contributors name different groups is unreadable for good, since nothing retires a claim. */
+ * contributors name different groups reads forked until a successor supersedes them all. */
 export function admitExclusiveGroup(
   claim: PlannedClaim,
   siblings: readonly PlannedClaim[],
@@ -367,9 +365,12 @@ export async function admitDraftedCase(
   const refusal = (detail: string): OperationError =>
     new OperationError({ reason: "invalid-input", about: [id], detail: `case ${drafted.slug}: ${detail}` });
 
-  const booked = await findCaseRecord(opened, drafted.slug);
-  if (booked !== null && booked.id !== id) {
-    throw refusal(`the slug is already booked as ${booked.id}`);
+  const booked = opened.index
+    .casesAtSlug(drafted.slug)
+    .map((held) => held.id)
+    .filter((held) => held !== id);
+  if (booked.length > 0) {
+    throw refusal(`the slug is already booked as ${booked.join(", ")}`);
   }
   const preset = await resolvePreset(opened, drafted.preset.contribution);
   if (preset.module !== drafted.preset.module || preset.moduleRecord !== drafted.preset.moduleRecord) {

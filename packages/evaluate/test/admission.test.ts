@@ -90,7 +90,7 @@ async function makeFixture(): Promise<Fixture> {
   const modulePath = join(repo.workspace, "parser-fixture.ts");
   await writeFile(modulePath, PARSER_FIXTURE_SOURCE);
   await writeFixtureRecords(repo, [{ kind: "module", value: fixtureModuleRecord() }]);
-  const index = new IndexDb();
+  const index = repo.keep(new IndexDb());
   await index.fold(new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now }));
   const store = new Store({ ctx: repo.ctx, scope: repo.scope, now: repo.now });
   const workspace: AdmissionWorkspace = { index, store, modulePath: () => modulePath };

@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openWorkspace, runHandler } from "@musai/api-core";
+import { type OperationError, openWorkspace, runHandler } from "@musai/api-core";
 import type { ModuleArtefacts } from "@musai/devkit";
 import { IndexDb } from "@musai/fold";
 import { ENVELOPE_PROTOCOL } from "@musai/modules";
@@ -14,7 +14,7 @@ import {
   versionString,
 } from "@musai/records";
 import { initWorkspace, Store } from "@musai/store";
-import { blobStoreOf, fixedClock } from "@musai/test-support";
+import { blobStoreOf, fixedClock, splitByShell } from "@musai/test-support";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { installDistributionModule, readDistributionArtefacts } from "../src/distribution.js";
 import { caseBook } from "../src/ops/case.js";
@@ -100,7 +100,7 @@ describe("case.open@1 and case.save@1", () => {
 
   async function bookBareCase(slug: string) {
     const store = storeAt();
-    const index = new IndexDb(":memory:");
+    using index = new IndexDb(":memory:");
     await index.fold(store);
     await installDistributionModule(artefacts, store, blobStoreOf(workspace), index);
     return runHandler(caseBook, { slug }, ctx());
@@ -132,6 +132,40 @@ describe("case.open@1 and case.save@1", () => {
 
     expect(output.minted).toEqual([]);
     expect(output.refused).toEqual([]);
+  });
+
+  test("a save with no open worktree names the open as one command that pastes back under a slug holding a space and a $", async () => {
+    await bookBareCase("a b$HOME");
+
+    const detail = await runHandler(caseSave, { case: "a b$HOME" }, ctx()).then(
+      () => "",
+      (error: OperationError) => error.detail,
+    );
+
+    const command = /`([^`]+)`/.exec(detail)?.[1] ?? "";
+    expect(await splitByShell(command)).toEqual(["musai", "lab", "open", "a b$HOME"]);
+  });
+
+  test("a save's refusals name a case escaped where its name holds a control or a bidirectional character", async () => {
+    const slug = "a\u001b[2Kb\u202e";
+    await bookBareCase(slug);
+
+    const refusals: string[] = [];
+    for (const name of [slug, `${slug}-unbooked`]) {
+      refusals.push(
+        await runHandler(caseSave, { case: name }, ctx()).then(
+          () => "",
+          (error: OperationError) => error.detail,
+        ),
+      );
+    }
+
+    expect(refusals[0]).toContain("case a\\u001b[2Kb\\u202e has no open worktree");
+    expect(refusals[1]).toContain("no case found named a\\u001b[2Kb\\u202e-unbooked");
+    for (const detail of refusals) {
+      expect(detail).not.toContain("\u001b");
+      expect(detail).not.toContain("\u202e");
+    }
   });
 
   test("save with one changed draft mints exactly one artifact record carrying the draft's bytes, its format, and an empty supersedes for a first draft", async () => {
@@ -367,7 +401,7 @@ describe("case.open@1 and case.save@1", () => {
     const record = saved.minted[0]!.record as ArtifactRecord;
     expect(Object.keys(record)).not.toContain("anchors");
 
-    const reopened = await openWorkspace({ workspace, scope, now });
+    using reopened = await openWorkspace({ workspace, scope, now });
     const anchors = reopened.index.anchorsOf(artifactId);
     expect(anchors.length).toBeGreaterThan(0);
     expect(anchors[0]!.fullId.startsWith("sha256:")).toBe(true);

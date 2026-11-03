@@ -13,6 +13,7 @@ import {
   type RecordId,
   recipeOfReadKey,
   recordId,
+  slotReadKey,
 } from "@musai/records";
 import { RUNNER_PERFORMER } from "@musai/run";
 import type { HeldWrites } from "@musai/store";
@@ -81,12 +82,12 @@ export interface IndexedEvaluation {
   readonly run: ComputedRunRecord;
 }
 
-/** Whether an evaluation read anything that has moved since: the fold's first hop, per read. */
-export function evaluationMoved(index: IndexDb, evaluation: IndexedEvaluation): boolean {
-  return evaluation.run.observation.reads.some((read) => index.readMoved(evaluation.id, read));
+/** The evaluation's reads that have moved since: the fold's first hop, per read. */
+export function movedReads(index: IndexDb, evaluation: IndexedEvaluation): readonly ReadEntry[] {
+  return evaluation.run.observation.reads.filter((read) => index.readMoved(evaluation.id, read));
 }
 
-/** An unmoved evaluation's verdict and the receipts its run and fetch needs rested on, read back
+/** An evaluation's verdict and the receipts its run and fetch needs rested on, read back
  * with no rule invoked. */
 export function recordedEvaluation(evaluation: IndexedEvaluation): {
   readonly verdict: RuleVerdict;
@@ -118,23 +119,43 @@ export function checkEvaluation(
     : { rule, evaluation: { id: latest.recordId, run: latest.record as ComputedRunRecord } };
 }
 
-/** The rule a check rests on and the receipts it holds on. */
-export interface HoldingCheck {
+/** The rule a check rests on, the verdict it concluded and the receipts it concluded on. */
+export interface ConcludedCheck {
   readonly rule: string;
+  readonly verdict: "holds" | "fails";
   readonly receipts: readonly RecordId[];
 }
 
-/** The rule and receipts of the evaluation a check is read from, where that evaluation holds. */
-export function holdingCheck(
+/** The rule, verdict and receipts of the evaluation a check is read from, where it concluded. */
+export function concludedCheck(
   index: IndexDb,
   claim: Pick<ClaimRecord, "slot" | "conditions">,
   landed: (id: RecordId) => boolean,
   clearance: Audience | undefined,
-): HoldingCheck | null {
+): ConcludedCheck | null {
   const chosen = checkEvaluation(index, claim, landed, clearance);
   if (chosen === null) {
     return null;
   }
   const { verdict, receipts } = recordedEvaluation(chosen.evaluation);
-  return verdict.label === "holds" ? { rule: chosen.rule.entry.id, receipts } : null;
+  return verdict.label === "open" ? null : { rule: chosen.rule.entry.id, verdict: verdict.label, receipts };
+}
+
+/** Whether the check's rule as installed at `landed` has not judged it under `clearance`, where an
+ * earlier build of that rule has. */
+export function unevaluatedSinceRebuild(
+  index: IndexDb,
+  claim: Pick<ClaimRecord, "slot" | "conditions">,
+  landed: (id: RecordId) => boolean,
+  clearance: Audience | undefined,
+): boolean {
+  const [rule] = rulesNamedBy(index, claim.conditions, landed);
+  if (rule === undefined || checkEvaluation(index, claim, landed, clearance) !== null) {
+    return false;
+  }
+  const command = textOf(evaluationRecipe(rule, claim.slot, clearance).command);
+  return index.readersOf(slotReadKey(claim.slot)).some(({ reader }) => {
+    const run = landed(reader) ? index.recordById(reader)?.record : undefined;
+    return run?.kind === "run" && run.runKind === "evaluation" && textOf(run.recipe.command) === command;
+  });
 }
