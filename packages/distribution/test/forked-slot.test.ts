@@ -123,7 +123,7 @@ describe("a slot whose live claims are judged differently", () => {
     for (const [index, id] of ["forked-one", "forked-two"].entries()) {
       const status = await runHandler(claimStatus, { claim: slotOf(id) }, context());
       const why = await runHandler(claimWhy, { claim: slotOf(id), full: true }, context());
-      const named = pairs[index]!.map(shortIdOf).sort().join(", ");
+      const named = pairs[index]!.map(shortIdOf).join(", ");
 
       expect(status).toMatchObject({ label: "open", reason: "forked-slot" });
       expect(status.detail).toContain(named);
@@ -173,7 +173,7 @@ describe("a slot whose live claims are judged differently", () => {
     const status = await runHandler(claimStatus, { claim: slotOf("merged-in") }, context());
 
     expect(status).toMatchObject({ label: "open", reason: "forked-slot" });
-    expect(status.detail).toContain([before, after!].map(shortIdOf).sort().join(", "));
+    expect(status.detail).toContain([before, after!].map(shortIdOf).join(", "));
   });
 
   test("the author closes a fork at a pack-kind slot, and the slot holds the successor alone", async () => {

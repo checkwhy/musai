@@ -11,8 +11,8 @@ export interface FoundCase {
   readonly record: CaseRecord;
 }
 
-function slugForked(slug: string, live: readonly FoundCase[], until: string): OperationError {
-  const ids = live.map(({ id }) => id);
+function slugForked(opened: Workspace, slug: string, live: readonly FoundCase[], until: string): OperationError {
+  const ids = opened.index.inLandingOrder(live).map(({ id }) => id);
   return new OperationError({
     reason: "invalid-input",
     about: [slug, ...ids],
@@ -24,7 +24,7 @@ function slugForked(slug: string, live: readonly FoundCase[], until: string): Op
 function liveCaseAt(opened: Workspace, slug: string): FoundCase | null {
   const live = opened.index.casesAtSlug(slug);
   if (live.length > 1) {
-    throw slugForked(slug, live, "name one by its id");
+    throw slugForked(opened, slug, live, "name one by its id");
   }
   return live[0] ?? null;
 }
@@ -33,7 +33,7 @@ function liveCaseAt(opened: Workspace, slug: string): FoundCase | null {
 export function refuseForkedView(opened: Workspace, slug: string): void {
   const live = opened.index.casesAtSlug(slug);
   if (live.length > 1) {
-    throw slugForked(slug, live, "no case under it opens or saves its view");
+    throw slugForked(opened, slug, live, "no case under it opens or saves its view");
   }
 }
 
@@ -96,7 +96,7 @@ function citingCaseNamed(opened: Workspace, claimId: RecordId, named: string, ci
   }
   const forked = citing.filter(({ record }) => record.slug === found.record.slug);
   if (forked.length > 1) {
-    throw slugForked(found.record.slug, forked, "no brief reads the claim under any of them");
+    throw slugForked(opened, found.record.slug, forked, "no brief reads the claim under any of them");
   }
   return found;
 }

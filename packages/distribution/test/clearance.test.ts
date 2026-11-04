@@ -1639,7 +1639,7 @@ describe.skipIf(!opensshAvailable)(
         ({ kind, record }) => kind === "claim" && (record as ClaimRecord).conditions["disposition"] === "file",
       );
       const slot = (own!.record as ClaimRecord).slot;
-      const named = [sealed, own!.id].map(shortIdOf).sort().join(", ");
+      const named = [sealed, own!.id].map(shortIdOf).join(", ");
 
       const authors = await runHandler(claimStatus, { claim: slot }, { ...world.author, mode: "plan" });
       const doctor = await runHandler(doctorRun, {}, world.author);
@@ -1674,7 +1674,7 @@ describe.skipIf(!opensshAvailable)(
       for (const id of [authors.case, stations.case]) {
         expect((refused as Error).message).toContain(id);
       }
-      const named = [authors.case, stations.case].map(shortIdOf).sort().join(", ");
+      const named = [authors.case, stations.case].map(shortIdOf).join(", ");
       expect(doctor.local).toContainEqual(
         expect.objectContaining({ name: "forked-slugs", ok: false, detail: expect.stringContaining(named) }),
       );
@@ -1747,7 +1747,7 @@ describe.skipIf(!opensshAvailable)(
       expect(refused).toMatchObject({ name: "SentenceClaimedError" });
       const groups = [`${shortIdOf(sealed)} in one-menu`, `${shortIdOf(own)} in another-menu`];
       expect((refused as Error).message).toContain(
-        `its live claims name different exclusive groups (${(sealed < own ? groups : groups.reverse()).join("; ")})`,
+        `its live claims name different exclusive groups (${groups.join("; ")})`,
       );
       expect([...successor.supersedes].sort()).toEqual([sealed, own].sort());
       expect([replaced.slot, replaced.label, successor.exclusiveGroup]).toEqual([slot, "holds", null]);

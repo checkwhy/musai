@@ -1093,7 +1093,10 @@ async function labelChecked(
     : undefined;
   const forkDetail =
     fork.length > 0
-      ? `its live claims ${fork.map(({ id }) => shortIdOf(id)).join(", ")} are judged differently; ${forkRemedy(fork[0]!.type)}`
+      ? `its live claims ${opened.index
+          .inLandingOrder(fork)
+          .map(({ id }) => shortIdOf(id))
+          .join(", ")} are judged differently; ${forkRemedy(fork[0]!.type)}`
       : undefined;
   const detail = forkDetail ?? (gate.outcome === "valid" ? (withheldDetail ?? moved ?? openCheckReason) : gate.reason);
   const staleDetail =

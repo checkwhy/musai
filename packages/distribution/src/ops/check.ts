@@ -337,7 +337,9 @@ async function claimFor(opened: Workspace, subject: string, input: CheckRunInput
   if (existing?.record.kind === "claim" && input.replace !== true) {
     const after = judgedBy(conditions);
     if (fork.length > 0) {
-      const judges = fork.map(({ id, record }) => ({ short: shortIdOf(id), record: record as ClaimRecord }));
+      const judges = opened.index
+        .inLandingOrder(fork)
+        .map(({ id, record }) => ({ short: shortIdOf(id), record: record as ClaimRecord }));
       const alike = new Set(judges.map(({ record }) => judgedBy(record.conditions).key)).size === 1;
       const apart = alike
         ? `name different exclusive groups (${judges.map(({ short, record }) => `${short} in ${record.exclusiveGroup ?? "no group"}`).join("; ")})`

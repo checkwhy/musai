@@ -98,7 +98,7 @@ function gateRow(
   const live = opened.index.casesAtSlug(slug);
   return {
     case: slug,
-    ...(live.length > 1 ? { forked: live.map(({ id }) => id) } : {}),
+    ...(live.length > 1 ? { forked: opened.index.inLandingOrder(live).map(({ id }) => id) } : {}),
     ...(slugs.length > 1 ? { shared: slugs } : {}),
   };
 }

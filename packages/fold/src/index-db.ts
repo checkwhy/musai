@@ -484,6 +484,21 @@ export class IndexDb {
   }
 
   /** The commit time of the commit that landed the latest of `ids`, never a clock read. */
+  /** `held` in the order the log landed them, the order a fork's members are named in, since a hash
+   * says nothing of which came first. */
+  inLandingOrder<T extends { readonly id: RecordId }>(held: readonly T[]): T[] {
+    const ids = held.map(({ id }) => id);
+    const landed = this.db
+      .prepare(
+        "SELECT records.id AS id FROM records JOIN commits ON commits.sha = records.commit_sha " +
+          `WHERE records.id IN (${ids.map(() => "?").join(", ")}) ` +
+          "ORDER BY commits.seq ASC, records.position ASC",
+      )
+      .all(...ids) as Array<{ id: string }>;
+    const rank = new Map(landed.map(({ id }, index) => [id, index]));
+    return [...held].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
+  }
+
   latestCommitTimeOf(ids: readonly RecordId[]): string | null {
     const row = this.db
       .prepare(

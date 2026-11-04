@@ -706,7 +706,9 @@ the lint, so a limb cannot be left hanging quietly.
   evidence is admitted again, as any verb minting an edge admits it. A fork reads open, never refused,
   so a station landing a claim at a slot sealed from it leaves the author's reads of it standing;
   it learns nothing, the sealed claim being absent from its fold. A fork reads alike whichever
-  contributor landed first, so clones folding in different orders agree on it.
+  contributor landed first, so clones folding in different orders agree on it; what names its
+  members to a person, and the successor `keep` mints, lists them as the log landed them, since a
+  hash orders nothing a reader can follow and two machines minting alike records order them apart.
 - `conditions`: per dimension, a value from the shared vocabulary — a point spelled as a bare
   string, or a scope. Identity dimensions are points, since a slot computed from a span would put
   one claim in many places at once.

@@ -62,8 +62,10 @@ func engineLine(r Recipe, observation map[string]any) ([]string, []int) {
 	default:
 		tree = checkoutPlaceholder + "/" + tree
 	}
-	line := []string{"docker", "run", "--rm", "--network", "none",
-		"-v", tree + ":" + mountRoot + ":ro", "-v", freshScratch + ":" + scratchRoot + ":rw"}
+	line := []string{
+		"docker", "run", "--rm", "--network", "none",
+		"-v", tree + ":" + mountRoot + ":ro", "-v", freshScratch + ":" + scratchRoot + ":rw",
+	}
 	mounts := []int{6, 8}
 	for _, directory := range privateDirectories {
 		line = append(line, "--tmpfs", privateRoot+"/"+directory+":exec,mode=1777")

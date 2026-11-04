@@ -68,7 +68,7 @@ describe("a slug two live cases hold", () => {
       expect.objectContaining({
         name: "forked-slugs",
         ok: false,
-        detail: expect.stringContaining(`live cases ${cases.map(shortIdOf).sort().join(", ")} hold one slug`),
+        detail: expect.stringContaining(`live cases ${cases.map(shortIdOf).join(", ")} hold one slug`),
       }),
     );
     expect(JSON.stringify(doctor.local)).not.toContain("merged-twice");
@@ -174,7 +174,7 @@ describe("a slug two live cases hold", () => {
     expect(claims.length).toBeGreaterThan(0);
     expect(new Set(claims).size).toBe(claims.length);
     for (const gate of pending.gates) {
-      expect(gate.forked).toEqual([here.case, there.case].sort());
+      expect(gate.forked).toEqual([here.case, there.case]);
     }
     expect(gatePending.renderText(pending)).toContain("`lab keep <case>`");
   });
@@ -199,7 +199,7 @@ describe("a slug two live cases hold", () => {
     expect(gates.map(({ claim }) => claim)).toContain(otherMenu);
     expect(gates.some(({ claim }) => claim !== otherMenu)).toBe(true);
     for (const gate of gates) {
-      expect(gate.forked).toEqual([here.case, there as RecordId].sort());
+      expect(gate.forked).toEqual([here.case, there as RecordId]);
     }
   });
 

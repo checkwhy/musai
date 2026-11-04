@@ -107,7 +107,7 @@ const forkKeepHandler: OperationHandler<ForkKeepInput, ForkKeepOutput> = {
     }
     const kept = keptRecord(opened, input.record);
     if (kept.kind === "case") {
-      const supersedes = opened.index.casesAtSlug(kept.slug).map(({ id }) => id);
+      const supersedes = opened.index.inLandingOrder(opened.index.casesAtSlug(kept.slug)).map(({ id }) => id);
       if (supersedes.length < 2) {
         throw noFork(kept.id, kept.slug, `its slug ${kept.slug}`);
       }
@@ -128,7 +128,7 @@ const forkKeepHandler: OperationHandler<ForkKeepInput, ForkKeepOutput> = {
     }
     const { salt, ...record } = opened.read(kept.id) as ClaimRecord & { readonly salt?: string };
     await admitKeptEvidence(opened, record.evidence);
-    const supersedes = opened.index.contributorsAtSlot(kept.slot).map((row) => row.id);
+    const supersedes = opened.index.inLandingOrder(opened.index.contributorsAtSlot(kept.slot)).map(({ id }) => id);
     const successor: ClaimRecord = { ...record, schemaVersion: CURRENT_SCHEMA_VERSIONS.claim, supersedes };
     return {
       plan: { put: [{ kind: "claim", value: successor, ...saltAsked(salt !== undefined) }], attest: [], needs: [] },

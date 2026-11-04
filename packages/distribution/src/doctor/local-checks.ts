@@ -231,7 +231,7 @@ function forkedSlotChecks(opened: Workspace): LocalCheck[] {
   }
   return forked.map((slot) => {
     const fork = opened.index.forkAtSlot(slot);
-    const claims = fork.map(({ id }) => shortIdOf(id));
+    const claims = opened.index.inLandingOrder(fork).map(({ id }) => shortIdOf(id));
     return {
       name: "forked-slots",
       ok: false,
@@ -248,7 +248,7 @@ function forkedSlugChecks(opened: Workspace): LocalCheck[] {
     return [{ name: "forked-slugs", ok: true, detail: "no slug is held by more than one live case" }];
   }
   return forked.map((slug) => {
-    const cases = opened.index.casesAtSlug(slug).map(({ id }) => shortIdOf(id));
+    const cases = opened.index.inLandingOrder(opened.index.casesAtSlug(slug)).map(({ id }) => shortIdOf(id));
     return {
       name: "forked-slugs",
       ok: false,
